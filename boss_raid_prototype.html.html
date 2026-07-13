@@ -1,0 +1,2491 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>황혼의 균열 — 라이브 보스 레이드</title>
+  <style>
+    :root {
+      --ink: #f5f1e8;
+      --muted: #9c9aa8;
+      --panel: rgba(12, 13, 20, .91);
+      --panel-2: rgba(22, 23, 34, .94);
+      --line: rgba(255, 255, 255, .09);
+      --gold: #f0bc5a;
+      --gold-soft: #ffe7a9;
+      --red: #ff546d;
+      --red-dark: #8e2339;
+      --violet: #9f7aea;
+      --cyan: #68d9db;
+      --green: #6be39a;
+      --shadow: 0 20px 55px rgba(0, 0, 0, .45);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 50% -20%, rgba(122, 67, 72, .32), transparent 42rem),
+        linear-gradient(135deg, #090a10 0%, #11101a 48%, #08090e 100%);
+      font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+      letter-spacing: -.02em;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+
+    .app-shell {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      min-height: 70px;
+      padding: 12px 18px;
+      display: grid;
+      grid-template-columns: minmax(250px, 1fr) minmax(360px, 1.5fr) minmax(250px, 1fr);
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 8, 13, .83);
+      backdrop-filter: blur(18px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(240, 188, 90, .45);
+      border-radius: 12px;
+      color: var(--gold);
+      background: linear-gradient(145deg, rgba(240, 188, 90, .14), rgba(159, 122, 234, .05));
+      box-shadow: inset 0 0 20px rgba(240, 188, 90, .08);
+      font-size: 20px;
+    }
+
+    .brand-copy { min-width: 0; }
+
+    .brand-kicker {
+      margin-bottom: 2px;
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .16em;
+    }
+
+    .brand-title {
+      overflow: hidden;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(16px, 1.4vw, 22px);
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .boss-meter {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .boss-meter-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 12px;
+      font-size: 12px;
+    }
+
+    .boss-name { font-weight: 800; letter-spacing: .08em; }
+    .boss-hp-text { color: #ffb1ba; font-variant-numeric: tabular-nums; }
+
+    .meter-track {
+      height: 12px;
+      padding: 2px;
+      border: 1px solid rgba(255, 255, 255, .1);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, .5);
+      overflow: hidden;
+    }
+
+    .meter-fill {
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #7c1e37, #e84761 58%, #ff8d9d);
+      box-shadow: 0 0 16px rgba(255, 84, 109, .5);
+      transition: width .45s ease;
+    }
+
+    .status-cluster {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .phase-pill {
+      min-width: 102px;
+      padding: 7px 12px;
+      border: 1px solid rgba(104, 217, 219, .25);
+      border-radius: 999px;
+      color: var(--cyan);
+      background: rgba(104, 217, 219, .08);
+      text-align: center;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: .1em;
+    }
+
+    .timer {
+      min-width: 92px;
+      color: var(--gold-soft);
+      text-align: right;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 22px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .main-grid {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(720px, 1fr) 390px;
+    }
+
+    .arena-shell {
+      min-height: calc(100vh - 70px);
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(to bottom, transparent 56%, rgba(4, 5, 9, .68)),
+        radial-gradient(ellipse at 50% 80%, rgba(96, 77, 111, .28), transparent 52%);
+    }
+
+    .arena-shell::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, .018) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, .018) 1px, transparent 1px);
+      background-size: 38px 38px;
+      mask-image: linear-gradient(to bottom, black, transparent 82%);
+    }
+
+    .arena-head {
+      position: relative;
+      z-index: 8;
+      height: 48px;
+      padding: 13px 18px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+    }
+
+    .turn-label { color: var(--ink); font-weight: 800; }
+
+    .stage {
+      height: calc(100vh - 118px);
+      min-height: 610px;
+      position: relative;
+      isolation: isolate;
+    }
+
+    .moon {
+      width: clamp(200px, 25vw, 390px);
+      aspect-ratio: 1;
+      position: absolute;
+      left: 50%;
+      top: 2%;
+      transform: translateX(-50%);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 36% 31%, rgba(255, 238, 203, .08) 0 2%, transparent 3%),
+        radial-gradient(circle at 70% 63%, rgba(255, 238, 203, .06) 0 5%, transparent 6%),
+        radial-gradient(circle, rgba(223, 198, 167, .1), rgba(151, 101, 110, .04) 62%, transparent 63%);
+      box-shadow: 0 0 80px rgba(178, 112, 125, .12);
+      z-index: -1;
+    }
+
+    .ruin {
+      position: absolute;
+      inset: 15% 5% 29%;
+      z-index: -1;
+      opacity: .34;
+      background:
+        linear-gradient(112deg, transparent 7%, rgba(120, 120, 135, .16) 7.2% 8.3%, transparent 8.5%),
+        linear-gradient(74deg, transparent 85%, rgba(120, 120, 135, .13) 85.2% 86.4%, transparent 86.6%);
+    }
+
+    .ruin::before, .ruin::after {
+      content: "";
+      width: 7%;
+      height: 70%;
+      position: absolute;
+      bottom: 0;
+      border: 1px solid rgba(190, 190, 205, .15);
+      border-bottom: 0;
+      background: linear-gradient(90deg, rgba(45, 44, 56, .4), transparent);
+      transform: skew(-4deg);
+    }
+
+    .ruin::before { left: 8%; }
+    .ruin::after { right: 8%; transform: scaleX(-1) skew(-4deg); }
+
+    .boss-wrap {
+      width: 250px;
+      height: 270px;
+      position: absolute;
+      left: 50%;
+      top: 2%;
+      transform: translateX(-50%);
+      z-index: 4;
+      filter: drop-shadow(0 22px 20px rgba(0, 0, 0, .6));
+      transition: filter .2s ease, transform .25s ease;
+    }
+
+    .boss-wrap.damaged {
+      animation: bossHit .32s ease;
+      filter: drop-shadow(0 0 24px rgba(255, 84, 109, .9));
+    }
+
+    .boss-wrap.roaring { animation: bossRoar .7s ease-in-out infinite alternate; }
+    .boss-wrap.defeated { animation: bossDefeat 1.6s cubic-bezier(.2,.8,.2,1) forwards; }
+
+    .boss-aura {
+      width: 180px;
+      height: 220px;
+      position: absolute;
+      left: 36px;
+      top: 25px;
+      border-radius: 48% 48% 42% 42%;
+      background: radial-gradient(ellipse, rgba(255, 59, 94, .15), transparent 66%);
+      animation: auraPulse 1.8s ease-in-out infinite;
+    }
+
+    .boss-body {
+      width: 92px;
+      height: 132px;
+      position: absolute;
+      left: 79px;
+      top: 86px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 42px 42px 25px 25px;
+      background: linear-gradient(100deg, #1a1a24 0 35%, #3b2630 55%, #181720 100%);
+      box-shadow: inset 0 0 0 6px rgba(0,0,0,.12);
+    }
+
+    .boss-body::before {
+      content: "";
+      position: absolute;
+      inset: 18px 14px 30px;
+      border: 1px solid rgba(240,188,90,.22);
+      border-radius: 40% 40% 30% 30%;
+      background: linear-gradient(135deg, transparent 45%, rgba(240,188,90,.09) 46% 54%, transparent 55%);
+    }
+
+    .boss-head {
+      width: 73px;
+      height: 68px;
+      position: absolute;
+      left: 89px;
+      top: 38px;
+      border-radius: 42% 42% 50% 50%;
+      background: linear-gradient(90deg, #292430, #49313b 55%, #211e29);
+      box-shadow: inset 0 -10px 20px rgba(0,0,0,.32);
+    }
+
+    .boss-head::before, .boss-head::after {
+      content: "";
+      width: 38px;
+      height: 9px;
+      position: absolute;
+      top: -1px;
+      background: #1c1a23;
+    }
+
+    .boss-head::before {
+      left: -26px;
+      border-radius: 100% 0 0 0;
+      transform: rotate(18deg);
+    }
+
+    .boss-head::after {
+      right: -26px;
+      border-radius: 0 100% 0 0;
+      transform: rotate(-18deg);
+    }
+
+    .boss-eye {
+      width: 11px;
+      height: 4px;
+      position: absolute;
+      top: 30px;
+      border-radius: 99px;
+      background: var(--red);
+      box-shadow: 0 0 10px var(--red);
+      transition: transform .35s ease;
+    }
+
+    .boss-eye.left { left: 14px; transform: rotate(7deg); }
+    .boss-eye.right { right: 14px; transform: rotate(-7deg); }
+
+    .boss-arm {
+      width: 30px;
+      height: 105px;
+      position: absolute;
+      top: 91px;
+      border-radius: 20px;
+      background: linear-gradient(#312431, #15151d);
+      transform-origin: 50% 8%;
+      transition: transform .65s cubic-bezier(.2,.8,.2,1);
+    }
+
+    .boss-arm.left { left: 61px; transform: rotate(14deg); }
+    .boss-arm.right { right: 61px; transform: rotate(-14deg); }
+
+    .weapon {
+      width: 18px;
+      height: 190px;
+      position: absolute;
+      left: 32px;
+      top: 21px;
+      z-index: -1;
+      border-radius: 5px;
+      background: linear-gradient(90deg, #5c5360, #d0b68c 47%, #564c56);
+      transform-origin: 50% 76%;
+      transform: rotate(-33deg);
+      transition: transform .7s cubic-bezier(.2,.8,.2,1), left .7s ease, top .7s ease;
+    }
+
+    .weapon::before {
+      content: "";
+      width: 64px;
+      height: 32px;
+      position: absolute;
+      left: -23px;
+      top: -22px;
+      clip-path: polygon(50% 0, 100% 62%, 72% 100%, 50% 70%, 28% 100%, 0 62%);
+      background: linear-gradient(135deg, #b39a78, #4f424e 62%, #221f28);
+      box-shadow: 0 0 10px rgba(240,188,90,.15);
+    }
+
+    .boss-leg {
+      width: 32px;
+      height: 67px;
+      position: absolute;
+      top: 205px;
+      border-radius: 0 0 18px 18px;
+      background: linear-gradient(90deg, #191821, #35232d);
+      transition: transform .5s ease;
+    }
+
+    .boss-leg.left { left: 89px; }
+    .boss-leg.right { right: 89px; }
+
+    .boss-tail {
+      width: 100px;
+      height: 45px;
+      position: absolute;
+      right: 36px;
+      top: 166px;
+      z-index: -2;
+      border-bottom: 9px solid #28202a;
+      border-radius: 0 0 100% 0;
+      transform-origin: right center;
+      transition: transform .5s ease;
+    }
+
+    .boss-shadow {
+      width: 170px;
+      height: 25px;
+      position: absolute;
+      left: 40px;
+      bottom: -6px;
+      border-radius: 50%;
+      background: rgba(0,0,0,.58);
+      filter: blur(7px);
+    }
+
+    .boss-wrap.telegraph-left .weapon,
+    .boss-wrap.telegraph-fake .weapon {
+      left: 14px;
+      top: -18px;
+      transform: rotate(-74deg);
+      filter: drop-shadow(0 0 7px rgba(255,84,109,.35));
+    }
+
+    .boss-wrap.telegraph-left .boss-eye,
+    .boss-wrap.telegraph-fake .boss-eye { transform: translateX(-5px) rotate(5deg); }
+
+    .boss-wrap.telegraph-right .weapon {
+      left: 133px;
+      top: -18px;
+      transform: scaleX(-1) rotate(-74deg);
+      filter: drop-shadow(0 0 7px rgba(255,84,109,.35));
+    }
+
+    .boss-wrap.telegraph-right .boss-eye { transform: translateX(5px) rotate(-5deg); }
+
+    .boss-wrap.telegraph-center { transform: translateX(-50%) translateY(20px) scaleY(.92); }
+    .boss-wrap.telegraph-center .weapon {
+      left: 103px;
+      top: 60px;
+      transform: rotate(88deg);
+      filter: drop-shadow(0 0 8px rgba(255,84,109,.38));
+    }
+
+    .boss-wrap.telegraph-fake .boss-leg.right {
+      transform: rotate(-16deg) translateX(7px);
+      box-shadow: 0 0 10px rgba(240,188,90,.18);
+    }
+
+    .boss-wrap.telegraph-fake .boss-tail {
+      transform: rotate(-10deg) translateX(12px);
+      animation: tailHint .8s ease-in-out infinite alternate;
+    }
+
+    .boss-wrap.telegraph-sweep .weapon {
+      left: 116px;
+      top: 84px;
+      transform: rotate(88deg);
+    }
+
+    .boss-wrap.telegraph-sweep .boss-body {
+      animation: inhale 1.2s ease-in-out infinite alternate;
+    }
+
+    .telegraph-caption {
+      min-width: 320px;
+      max-width: 70%;
+      padding: 10px 16px;
+      position: absolute;
+      left: 50%;
+      top: 43%;
+      z-index: 12;
+      transform: translateX(-50%);
+      border: 1px solid rgba(159,122,234,.3);
+      border-radius: 999px;
+      color: #e6d9ff;
+      background: rgba(27,20,37,.82);
+      box-shadow: 0 10px 30px rgba(0,0,0,.28);
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+      opacity: 0;
+      transition: opacity .25s ease, transform .25s ease;
+      pointer-events: none;
+    }
+
+    .telegraph-caption.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(-4px);
+    }
+
+    .zones {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 14px;
+      z-index: 10;
+    }
+
+    .zone {
+      height: 285px;
+      padding: 13px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 16px;
+      background:
+        linear-gradient(to top, rgba(28,28,40,.94), rgba(24,24,35,.38)),
+        linear-gradient(90deg, transparent 49.5%, rgba(255,255,255,.03) 50%, transparent 50.5%);
+      box-shadow: inset 0 1px rgba(255,255,255,.025);
+      transition: border-color .25s ease, background .25s ease, transform .25s ease;
+    }
+
+    .zone::before {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 52%;
+      opacity: .4;
+      background:
+        linear-gradient(28deg, transparent 49%, rgba(255,255,255,.035) 50%, transparent 51%),
+        linear-gradient(-28deg, transparent 49%, rgba(255,255,255,.035) 50%, transparent 51%);
+      background-size: 42px 25px;
+    }
+
+    .zone-label {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .16em;
+    }
+
+    .zone-label strong { color: rgba(255,255,255,.72); font-size: 13px; }
+    .zone.primed { border-color: rgba(240,188,90,.16); }
+
+    .zone.hit {
+      z-index: 15;
+      border-color: rgba(255,84,109,.9);
+      background:
+        radial-gradient(circle at 50% 65%, rgba(255,45,76,.7), transparent 55%),
+        linear-gradient(to top, rgba(111,16,38,.94), rgba(35,16,27,.7));
+      animation: zoneImpact .55s ease;
+      box-shadow: inset 0 0 50px rgba(255,34,73,.35), 0 0 35px rgba(255,34,73,.25);
+    }
+
+    .avatar-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 11px;
+      position: relative;
+      z-index: 4;
+    }
+
+    .avatar {
+      min-width: 0;
+      padding: 7px 7px 6px;
+      position: relative;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 10px;
+      background: rgba(8,9,15,.76);
+      transition: transform .22s ease, filter .22s ease, opacity .22s ease, border-color .22s ease;
+    }
+
+    .avatar.user { border-color: rgba(104,217,219,.36); box-shadow: inset 0 0 15px rgba(104,217,219,.05); }
+    .avatar.dead { filter: grayscale(1); opacity: .46; transform: rotate(-3deg) translateY(5px); }
+    .avatar.attacking { z-index: 40; animation: avatarAttack .55s cubic-bezier(.2,.8,.2,1); }
+
+    .avatar-head {
+      width: 25px;
+      height: 25px;
+      float: left;
+      margin-right: 7px;
+      border: 2px solid rgba(255,255,255,.22);
+      border-radius: 45% 45% 50% 50%;
+      background: var(--avatar-color, #b9866c);
+      box-shadow: 0 0 calc(var(--aura, 0) * 7px) calc(var(--aura, 0) * 2px) rgba(159,122,234,.65);
+    }
+
+    .avatar-head::before {
+      content: "";
+      display: block;
+      width: 17px;
+      height: 8px;
+      margin: -3px auto 0;
+      border-radius: 80% 60% 20% 20%;
+      background: var(--hair, #312531);
+    }
+
+    .avatar-name {
+      overflow: hidden;
+      padding-top: 1px;
+      color: rgba(255,255,255,.91);
+      font-size: 10px;
+      font-weight: 800;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .avatar-action {
+      float: right;
+      min-width: 22px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      margin-top: -1px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 6px;
+      color: var(--gold-soft);
+      background: rgba(255,255,255,.04);
+      font-size: 11px;
+    }
+
+    .avatar-hearts {
+      clear: both;
+      padding-top: 5px;
+      color: var(--red);
+      font-size: 9px;
+      letter-spacing: 0;
+      white-space: nowrap;
+      text-shadow: 0 0 5px rgba(255,84,109,.4);
+    }
+
+    .fever-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 8px;
+    }
+
+    .fever-bar {
+      flex: 1;
+      height: 4px;
+      border-radius: 99px;
+      background: rgba(255,255,255,.08);
+      overflow: hidden;
+    }
+
+    .fever-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #f0bc5a, #ff776c);
+      box-shadow: 0 0 7px rgba(240,188,90,.45);
+      transition: width .3s ease;
+    }
+
+    .damage-popup {
+      position: fixed;
+      z-index: 999;
+      color: #fff1a8;
+      font-family: Georgia, serif;
+      font-size: 28px;
+      font-weight: 900;
+      text-shadow: 0 3px 0 #7d2635, 0 0 14px rgba(255,84,109,.8);
+      pointer-events: none;
+      animation: damageFloat 1s ease-out forwards;
+    }
+
+    .leaderboard {
+      width: 210px;
+      position: absolute;
+      left: 18px;
+      top: 55px;
+      z-index: 20;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(8,9,14,.76);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .board-head {
+      padding: 9px 11px;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+      color: var(--gold);
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: .13em;
+    }
+
+    .board-list { padding: 5px; }
+
+    .board-row {
+      min-height: 24px;
+      padding: 4px 6px;
+      display: grid;
+      grid-template-columns: 20px minmax(0,1fr) auto;
+      align-items: center;
+      gap: 5px;
+      border-radius: 6px;
+      font-size: 9px;
+    }
+
+    .board-row:first-child { color: #fff2bf; background: rgba(240,188,90,.09); }
+    .board-rank { color: var(--muted); font-family: Georgia, serif; }
+    .board-player { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .board-damage { color: #ff9eaa; font-variant-numeric: tabular-nums; }
+
+    .lobby-card, .victory-card {
+      width: min(520px, calc(100% - 36px));
+      padding: 25px;
+      position: absolute;
+      left: 50%;
+      top: 42%;
+      z-index: 30;
+      transform: translate(-50%, -50%);
+      border: 1px solid rgba(240,188,90,.28);
+      border-radius: 18px;
+      background: rgba(12,13,21,.94);
+      box-shadow: 0 30px 80px rgba(0,0,0,.62), inset 0 1px rgba(255,255,255,.04);
+      text-align: center;
+      backdrop-filter: blur(14px);
+    }
+
+    .lobby-card.hidden, .victory-card.hidden, .shop-scene.hidden { display: none; }
+
+    .lobby-eyebrow {
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .18em;
+    }
+
+    .lobby-card h1, .victory-card h2 {
+      margin: 9px 0 8px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(28px, 4vw, 45px);
+      font-weight: 500;
+      letter-spacing: -.04em;
+    }
+
+    .lobby-card p, .victory-card p {
+      max-width: 420px;
+      margin: 0 auto 20px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .join-row { display: flex; gap: 8px; }
+
+    .join-row input {
+      flex: 1;
+      min-width: 0;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      outline: none;
+      color: var(--ink);
+      background: rgba(255,255,255,.04);
+    }
+
+    .join-row input:focus { border-color: rgba(104,217,219,.5); box-shadow: 0 0 0 3px rgba(104,217,219,.08); }
+
+    .primary-btn, .skip-btn {
+      padding: 11px 18px;
+      border: 1px solid rgba(240,188,90,.35);
+      border-radius: 10px;
+      cursor: pointer;
+      color: #24190c;
+      background: linear-gradient(135deg, #f6ce77, #c68a32);
+      box-shadow: 0 8px 20px rgba(199,139,50,.22);
+      font-weight: 900;
+      transition: transform .18s ease, filter .18s ease;
+    }
+
+    .primary-btn:hover, .skip-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+    .primary-btn:active, .skip-btn:active { transform: translateY(1px); }
+
+    .rule-strip {
+      margin-top: 17px;
+      padding-top: 14px;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .rule-strip span { color: var(--ink); }
+
+    .victory-card { border-color: rgba(240,188,90,.5); }
+    .victory-card h2 { color: #ffe9a9; text-shadow: 0 0 25px rgba(240,188,90,.35); }
+
+    .shop-scene {
+      position: absolute;
+      inset: 0;
+      z-index: 35;
+      overflow: auto;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(227,149,88,.18), transparent 32rem),
+        linear-gradient(180deg, rgba(24,18,27,.98), rgba(8,9,14,.98));
+    }
+
+    .shop-inner {
+      width: min(900px, calc(100% - 36px));
+      min-height: 100%;
+      margin: 0 auto;
+      padding: 42px 0 30px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      align-items: center;
+      gap: 34px;
+    }
+
+    .shopkeeper-zone { position: relative; align-self: end; min-height: 500px; }
+
+    .speech-bubble {
+      min-height: 85px;
+      padding: 14px 16px;
+      position: relative;
+      z-index: 4;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 14px 14px 14px 3px;
+      color: #352632;
+      background: #f6e9dc;
+      box-shadow: 0 18px 45px rgba(0,0,0,.35);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .speech-bubble strong { display: block; margin-bottom: 3px; color: #a55261; font-size: 10px; letter-spacing: .12em; }
+
+    .shopkeeper {
+      width: 220px;
+      height: 330px;
+      position: absolute;
+      left: 32px;
+      bottom: 0;
+      filter: drop-shadow(0 18px 20px rgba(0,0,0,.45));
+    }
+
+    .shop-hair-back {
+      width: 138px;
+      height: 185px;
+      position: absolute;
+      left: 42px;
+      top: 30px;
+      border-radius: 48% 48% 38% 38%;
+      background: linear-gradient(90deg, #3a2532, #6e3f48 54%, #2d202b);
+    }
+
+    .shop-face {
+      width: 104px;
+      height: 120px;
+      position: absolute;
+      left: 58px;
+      top: 52px;
+      border-radius: 48% 48% 45% 45%;
+      background: linear-gradient(100deg, #f1c7ad, #ffd9bd 55%, #dca78f);
+      box-shadow: inset -8px -8px 20px rgba(127,64,70,.08);
+    }
+
+    .shop-bangs {
+      width: 112px;
+      height: 52px;
+      position: absolute;
+      left: 54px;
+      top: 40px;
+      z-index: 2;
+      border-radius: 65% 50% 30% 20%;
+      background: linear-gradient(110deg, #4d2c38, #7a4750);
+      transform: rotate(-3deg);
+    }
+
+    .shop-eye {
+      width: 17px;
+      height: 7px;
+      position: absolute;
+      top: 105px;
+      z-index: 3;
+      border-bottom: 2px solid #5b3840;
+      border-radius: 50%;
+    }
+
+    .shop-eye.left { left: 78px; }
+    .shop-eye.right { right: 78px; }
+
+    .shop-mouth {
+      width: 17px;
+      height: 7px;
+      position: absolute;
+      left: 102px;
+      top: 137px;
+      z-index: 3;
+      border-bottom: 2px solid #a85e64;
+      border-radius: 0 0 50% 50%;
+    }
+
+    .blush {
+      width: 24px;
+      height: 10px;
+      position: absolute;
+      top: 125px;
+      z-index: 3;
+      border-radius: 50%;
+      background: rgba(233,91,111,.46);
+      filter: blur(3px);
+      opacity: 0;
+      transition: opacity .35s ease;
+    }
+
+    .blush.left { left: 62px; }
+    .blush.right { right: 62px; }
+    .shopkeeper.blushing .blush { opacity: 1; }
+    .shopkeeper.blushing { animation: shySway .7s ease-in-out 2 alternate; }
+
+    .shop-body {
+      width: 150px;
+      height: 180px;
+      position: absolute;
+      left: 35px;
+      top: 152px;
+      border-radius: 45px 45px 15px 15px;
+      background:
+        linear-gradient(90deg, transparent 48%, rgba(240,188,90,.3) 49% 51%, transparent 52%),
+        linear-gradient(100deg, #342636, #74414d 50%, #2e2230);
+    }
+
+    .shop-apron {
+      width: 96px;
+      height: 143px;
+      position: absolute;
+      left: 62px;
+      top: 183px;
+      border-radius: 24px 24px 10px 10px;
+      background: linear-gradient(100deg, #d3b095, #f0d2b1 52%, #bd917c);
+      box-shadow: inset 0 0 0 1px rgba(70,40,45,.14);
+    }
+
+    .shop-content { align-self: center; }
+
+    .shop-kicker {
+      color: var(--gold);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .18em;
+    }
+
+    .shop-title {
+      margin: 7px 0 5px;
+      font-family: Georgia, serif;
+      font-size: clamp(28px, 4vw, 46px);
+      font-weight: 500;
+    }
+
+    .shop-sub {
+      margin-bottom: 21px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .shop-products {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0,1fr));
+      gap: 10px;
+    }
+
+    .product {
+      min-height: 165px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(255,255,255,.035);
+      transition: transform .2s ease, border-color .2s ease;
+    }
+
+    .product:hover { transform: translateY(-3px); border-color: rgba(240,188,90,.26); }
+
+    .product-icon {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 12px;
+      border: 1px solid rgba(240,188,90,.18);
+      border-radius: 50%;
+      background: rgba(240,188,90,.07);
+      font-size: 19px;
+    }
+
+    .product strong { font-size: 13px; }
+    .product p { flex: 1; margin: 6px 0 12px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+
+    .product button {
+      padding: 8px;
+      border: 1px solid rgba(240,188,90,.25);
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--gold-soft);
+      background: rgba(240,188,90,.07);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .shop-footer {
+      margin-top: 14px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(0,0,0,.18);
+    }
+
+    .wallet { color: var(--gold-soft); font-size: 12px; }
+    .wallet span { color: var(--muted); }
+    .skip-btn { padding: 9px 13px; font-size: 10px; }
+
+    .chat-panel {
+      min-height: calc(100vh - 70px);
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: -18px 0 45px rgba(0,0,0,.2);
+      z-index: 40;
+    }
+
+    .chat-head {
+      min-height: 54px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .live-lockup { display: flex; align-items: center; gap: 9px; }
+
+    .live-pill {
+      padding: 4px 7px;
+      border-radius: 5px;
+      color: white;
+      background: #e52d43;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: .08em;
+    }
+
+    .live-title { font-size: 12px; font-weight: 800; }
+    .viewer-count { color: var(--muted); font-size: 10px; }
+
+    .chat-log {
+      flex: 1;
+      min-height: 300px;
+      max-height: calc(100vh - 262px);
+      padding: 13px 12px;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+
+    .chat-log::-webkit-scrollbar { width: 6px; }
+    .chat-log::-webkit-scrollbar-thumb { border-radius: 99px; background: rgba(255,255,255,.12); }
+
+    .chat-line {
+      margin-bottom: 9px;
+      display: grid;
+      grid-template-columns: 26px minmax(0,1fr);
+      gap: 8px;
+      align-items: start;
+      animation: chatIn .25s ease-out;
+    }
+
+    .chat-avatar {
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: #fff;
+      background: #393947;
+      font-size: 9px;
+      font-weight: 900;
+    }
+
+    .chat-copy { min-width: 0; color: #e7e4ec; font-size: 11px; line-height: 1.45; word-break: break-word; }
+    .chat-name { margin-right: 5px; color: #aaa7b5; font-size: 10px; font-weight: 800; }
+    .chat-line.system .chat-copy { padding: 7px 9px; border-left: 2px solid var(--gold); color: #ffe4a4; background: rgba(240,188,90,.055); }
+    .chat-line.system .chat-avatar { color: #32230d; background: var(--gold); }
+    .chat-line.direction .chat-copy { padding: 7px 9px; border-left: 2px solid var(--violet); color: #d9c6ff; background: rgba(159,122,234,.055); }
+    .chat-line.direction .chat-avatar { background: var(--violet); }
+    .chat-line.user .chat-copy { color: white; }
+    .chat-line.user .chat-avatar { color: #0a2829; background: var(--cyan); }
+    .chat-line.shop .chat-copy { color: #ffd6d4; }
+    .chat-line.shop .chat-avatar { color: #552f38; background: #f3b4ad; }
+
+    .quick-commands {
+      min-height: 60px;
+      padding: 8px 10px;
+      display: flex;
+      align-content: flex-start;
+      flex-wrap: wrap;
+      gap: 5px;
+      border-top: 1px solid var(--line);
+      background: rgba(255,255,255,.018);
+    }
+
+    .command-chip {
+      padding: 6px 8px;
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 7px;
+      cursor: pointer;
+      color: #c5c1cd;
+      background: rgba(255,255,255,.035);
+      font-size: 9px;
+      transition: color .15s ease, border-color .15s ease, background .15s ease;
+    }
+
+    .command-chip:hover {
+      color: white;
+      border-color: rgba(104,217,219,.35);
+      background: rgba(104,217,219,.06);
+    }
+
+    .chat-form {
+      padding: 10px;
+      display: flex;
+      gap: 7px;
+      border-top: 1px solid var(--line);
+    }
+
+    .chat-input {
+      flex: 1;
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid rgba(255,255,255,.11);
+      border-radius: 9px;
+      outline: none;
+      color: white;
+      background: rgba(255,255,255,.045);
+      font-size: 11px;
+    }
+
+    .chat-input:focus { border-color: rgba(104,217,219,.42); box-shadow: 0 0 0 3px rgba(104,217,219,.06); }
+
+    .send-btn {
+      width: 42px;
+      border: 1px solid rgba(104,217,219,.26);
+      border-radius: 9px;
+      cursor: pointer;
+      color: var(--cyan);
+      background: rgba(104,217,219,.07);
+      font-weight: 900;
+    }
+
+    .toast {
+      max-width: min(470px, 80%);
+      padding: 10px 14px;
+      position: fixed;
+      left: 50%;
+      top: 88px;
+      z-index: 2000;
+      transform: translate(-50%, -20px);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 10px;
+      color: white;
+      background: rgba(19,20,29,.95);
+      box-shadow: var(--shadow);
+      font-size: 11px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @keyframes auraPulse { from { opacity: .55; transform: scale(.94); } to { opacity: 1; transform: scale(1.05); } }
+    @keyframes tailHint { from { transform: rotate(-8deg) translateX(8px); } to { transform: rotate(-14deg) translateX(16px); } }
+    @keyframes inhale { from { transform: scaleX(1); } to { transform: scaleX(1.12); } }
+    @keyframes bossHit { 0%,100% { transform: translateX(-50%); } 25% { transform: translateX(-56%) rotate(-3deg); } 65% { transform: translateX(-45%) rotate(3deg); } }
+    @keyframes bossRoar { from { transform: translateX(-50%) rotate(-1deg); } to { transform: translateX(-50%) rotate(1deg) scale(1.015); } }
+    @keyframes bossDefeat { 0% { transform: translateX(-50%); opacity: 1; } 60% { transform: translateX(-50%) translateY(38px) rotate(8deg); opacity: .8; } 100% { transform: translateX(-50%) translateY(80px) rotate(15deg); opacity: 0; filter: grayscale(1); } }
+    @keyframes zoneImpact { 0% { transform: scale(1); } 18% { transform: scale(.985); } 45% { transform: scale(1.012); } 100% { transform: scale(1); } }
+    @keyframes avatarAttack { 0% { transform: translateY(0) scale(1); } 45% { transform: translateY(-125px) scale(1.18); filter: brightness(1.5); } 100% { transform: translateY(0) scale(1); } }
+    @keyframes damageFloat { 0% { transform: translate(-50%, 0) scale(.7); opacity: 0; } 20% { transform: translate(-50%, -15px) scale(1.25); opacity: 1; } 100% { transform: translate(-50%, -80px) scale(.92); opacity: 0; } }
+    @keyframes chatIn { from { transform: translateY(5px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes shySway { from { transform: rotate(-1deg); } to { transform: rotate(2deg); } }
+
+    @media (max-width: 1120px) {
+      .topbar { grid-template-columns: 240px 1fr auto; }
+      .main-grid { grid-template-columns: minmax(620px, 1fr) 340px; }
+      .leaderboard { width: 180px; }
+      .avatar-grid { grid-template-columns: 1fr; }
+      .zone { height: 285px; overflow-y: auto; }
+      .shop-products { grid-template-columns: 1fr; }
+      .product { min-height: 110px; }
+    }
+
+    @media (max-width: 850px) {
+      .topbar { position: relative; grid-template-columns: 1fr auto; }
+      .boss-meter { grid-column: 1 / -1; grid-row: 2; }
+      .status-cluster { grid-column: 2; grid-row: 1; }
+      .main-grid { display: block; }
+      .arena-shell { min-height: 760px; }
+      .stage { height: 710px; min-height: 710px; }
+      .chat-panel { min-height: 650px; border-top: 1px solid var(--line); border-left: 0; }
+      .chat-log { max-height: 450px; }
+      .shop-inner { grid-template-columns: 230px 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .topbar { padding: 10px; gap: 10px; }
+      .brand-kicker, .phase-pill { display: none; }
+      .timer { font-size: 17px; min-width: 70px; }
+      .leaderboard { width: 160px; left: 10px; }
+      .zones { left: 7px; right: 7px; gap: 5px; }
+      .zone { padding: 8px 5px; }
+      .avatar { padding: 5px; }
+      .avatar-head { display: none; }
+      .telegraph-caption { min-width: 0; width: calc(100% - 24px); max-width: none; }
+      .shop-inner { display: block; padding-top: 22px; }
+      .shopkeeper-zone { min-height: 430px; }
+      .shop-content { padding-bottom: 30px; }
+      .shop-products { grid-template-columns: 1fr; }
+      .join-row { flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">✦</div>
+        <div class="brand-copy">
+          <div class="brand-kicker">LIVE RAID PROTOCOL</div>
+          <div class="brand-title">황혼의 균열</div>
+        </div>
+      </div>
+
+      <div class="boss-meter" aria-label="보스 체력">
+        <div class="boss-meter-head">
+          <span class="boss-name">균열의 파수자 · 모르가스</span>
+          <span class="boss-hp-text" id="bossHpText">1,000 / 1,000</span>
+        </div>
+        <div class="meter-track"><div class="meter-fill" id="bossHpFill"></div></div>
+      </div>
+
+      <div class="status-cluster">
+        <div class="phase-pill" id="phasePill">LOBBY</div>
+        <div class="timer" id="timer">대기 중</div>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <section class="arena-shell" aria-label="보스 레이드 전장">
+        <div class="arena-head">
+          <span>RIFT SECTOR · 09</span>
+          <span class="turn-label" id="turnLabel">출정 준비</span>
+        </div>
+
+        <div class="stage" id="stage">
+          <div class="moon"></div>
+          <div class="ruin"></div>
+
+          <div class="leaderboard" aria-label="누적 데미지 리더보드">
+            <div class="board-head"><span>누적 데미지</span><span>SESSION</span></div>
+            <div class="board-list" id="leaderboardList"></div>
+          </div>
+
+          <div class="boss-wrap" id="boss">
+            <div class="boss-aura"></div>
+            <div class="boss-shadow"></div>
+            <div class="weapon"></div>
+            <div class="boss-tail"></div>
+            <div class="boss-leg left"></div>
+            <div class="boss-leg right"></div>
+            <div class="boss-arm left"></div>
+            <div class="boss-arm right"></div>
+            <div class="boss-body"></div>
+            <div class="boss-head">
+              <i class="boss-eye left"></i>
+              <i class="boss-eye right"></i>
+            </div>
+          </div>
+
+          <div class="telegraph-caption" id="telegraphCaption">보스가 움직임을 준비한다.</div>
+
+          <div class="zones" id="zones">
+            <div class="zone" data-zone="left">
+              <div class="zone-label"><strong>좌</strong><span>WEST</span></div>
+              <div class="avatar-grid" id="avatars-left"></div>
+            </div>
+            <div class="zone" data-zone="center">
+              <div class="zone-label"><strong>중앙</strong><span>CENTER</span></div>
+              <div class="avatar-grid" id="avatars-center"></div>
+            </div>
+            <div class="zone" data-zone="right">
+              <div class="zone-label"><strong>우</strong><span>EAST</span></div>
+              <div class="avatar-grid" id="avatars-right"></div>
+            </div>
+          </div>
+
+          <div class="lobby-card" id="lobbyCard">
+            <div class="lobby-eyebrow">YOUTUBE LIVE PARTICIPATION RAID</div>
+            <h1>균열에 입장하시겠습니까?</h1>
+            <p>보스의 자세를 읽고 채팅 명령으로 공격하거나 피하세요. 여섯 명의 모험가가 당신과 함께 판단하고 싸웁니다.</p>
+            <div class="join-row">
+              <input id="nicknameInput" maxlength="12" value="장호" aria-label="플레이어 닉네임">
+              <button class="primary-btn" id="startButton">레이드 입장</button>
+            </div>
+            <div class="rule-strip">
+              <span>⚔ 공격 중 피격 ×2</span>
+              <span>◈ 방어 시 ½ 피해</span>
+              <span>✦ 피버 상한 28</span>
+            </div>
+          </div>
+
+          <div class="victory-card hidden" id="victoryCard">
+            <div class="lobby-eyebrow">RIFT CONQUERED</div>
+            <h2>모르가스 격퇴</h2>
+            <p>균열의 파동이 잦아들고 전리품이 빛납니다.<br>잠시 후 모닥불 상점으로 이동합니다.</p>
+          </div>
+
+          <section class="shop-scene hidden" id="shopScene" aria-label="모닥불 상점">
+            <div class="shop-inner">
+              <div class="shopkeeper-zone">
+                <div class="speech-bubble" id="shopBubble">
+                  <strong>모닥불 상점 · 리아</strong>
+                  다들 고생 많았어. 상처부터 천천히 살펴보자.
+                </div>
+                <div class="shopkeeper" id="shopkeeper">
+                  <div class="shop-hair-back"></div>
+                  <div class="shop-body"></div>
+                  <div class="shop-apron"></div>
+                  <div class="shop-face"></div>
+                  <div class="shop-bangs"></div>
+                  <i class="shop-eye left"></i><i class="shop-eye right"></i>
+                  <i class="blush left"></i><i class="blush right"></i>
+                  <div class="shop-mouth"></div>
+                </div>
+              </div>
+
+              <div class="shop-content">
+                <div class="shop-kicker">THE FIRESIDE · BETWEEN RAIDS</div>
+                <h2 class="shop-title">모닥불 상점</h2>
+                <div class="shop-sub">강화와 골드는 다음 전투로 이어집니다. 상점은 10분 뒤 닫힙니다.</div>
+                <div class="shop-products">
+                  <article class="product">
+                    <div class="product-icon">♥</div>
+                    <strong>체력 엘릭서</strong>
+                    <p>최대 HP +1, 즉시 HP 1 회복. 여러 번 구매할 수 있습니다.</p>
+                    <button data-command="!구매-체력엘릭서">10G · 구매</button>
+                  </article>
+                  <article class="product">
+                    <div class="product-icon">⚔</div>
+                    <strong>공격 엘릭서</strong>
+                    <p>공격력이 영구적으로 ×1.3. 오오라가 한층 짙어집니다.</p>
+                    <button data-command="!구매-공격엘릭서">10G · 구매</button>
+                  </article>
+                  <article class="product">
+                    <div class="product-icon">✦</div>
+                    <strong>작은 선물</strong>
+                    <p>선물 하나를 챙깁니다. !선물 명령으로 리아에게 건넬 수 있어요.</p>
+                    <button data-command="!구매-선물">10G · 구매</button>
+                  </article>
+                </div>
+                <div class="shop-footer">
+                  <div class="wallet"><span>내 지갑</span> · <strong id="walletGold">0G</strong>　<span id="myStats">HP 5 · ATK ×1.00</span></div>
+                  <button class="skip-btn" id="skipShop">전투 시작 (스킵)</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <aside class="chat-panel" aria-label="라이브 채팅">
+        <div class="chat-head">
+          <div class="live-lockup"><span class="live-pill">LIVE</span><span class="live-title">실시간 채팅</span></div>
+          <span class="viewer-count">● <span id="viewerCount">1,284</span>명 시청 중</span>
+        </div>
+        <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+        <div class="quick-commands" id="quickCommands"></div>
+        <form class="chat-form" id="chatForm">
+          <input class="chat-input" id="chatInput" autocomplete="off" placeholder="메시지 또는 !명령어 입력" aria-label="채팅 메시지">
+          <button class="send-btn" type="submit" aria-label="전송">↗</button>
+        </form>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    "use strict";
+
+    const CONFIG = Object.freeze({
+      bossMaxHp: 1000,
+      baseAttack: 10,
+      bossBaseDamage: 1,
+      inputSeconds: 15,
+      graceSeconds: 2,
+      reactionSeconds: 5,
+      victorySeconds: 3,
+      shopSeconds: 600,
+      feverMax: 28,
+      slashSuccess: 1,
+      thrustCritical: 0.40,
+      thrustNormal: 0.40,
+      elixirMultiplier: 1.3,
+      elixirCost: 10,
+      survivorGold: 100,
+      fallenGold: 50,
+      botThinkMinMs: 700,
+      botThinkMaxMs: 3300,
+      maxChatLines: 180,
+      shopReplyMinMs: 20000,
+      shopReplyMaxMs: 30000
+    });
+
+    const ZONE_LABELS = { left: "좌", center: "중앙", right: "우" };
+    const ACTION_META = {
+      thrust: { label: "자격", icon: "➶", command: "!자격" },
+      slash: { label: "참격", icon: "⚔", command: "!참격" },
+      defend: { label: "방어", icon: "◈", command: "!방어" },
+      move: { label: "이동", icon: "➜", command: "!이동" },
+      idle: { label: "대기", icon: "·", command: "" }
+    };
+
+    const PATTERNS = [
+      {
+        id: 1,
+        name: "좌측 내려찍기",
+        bossClass: "telegraph-left",
+        text: "보스가 왼쪽을 노려보며 무기를 치켜든다!",
+        caption: "무기가 왼쪽 하늘 높이 치켜 올라간다.",
+        hitZones: ["left"],
+        simpleAccuracy: true
+      },
+      {
+        id: 2,
+        name: "우측 내려찍기",
+        bossClass: "telegraph-right",
+        text: "보스가 오른쪽을 노려보며 무기를 치켜든다!",
+        caption: "무기가 오른쪽 하늘 높이 치켜 올라간다.",
+        hitZones: ["right"],
+        simpleAccuracy: true
+      },
+      {
+        id: 3,
+        name: "중앙 돌진 찌르기",
+        bossClass: "telegraph-center",
+        text: "보스가 자세를 낮추고 정면을 겨눈다!",
+        caption: "몸을 낮춘 채 무기를 정면으로 수평 조준한다.",
+        hitZones: ["center"],
+        simpleAccuracy: true
+      },
+      {
+        id: 4,
+        name: "회전 페이크 찍기",
+        bossClass: "telegraph-fake",
+        text: "보스가 왼쪽으로 무기를 든다… 발끝과 꼬리는 미묘하게 반대쪽을 향해 있다?",
+        caption: "왼쪽을 노린다. 그런데 오른발 끝이 살짝 틀어졌다.",
+        hitZones: ["right"],
+        simpleAccuracy: false
+      },
+      {
+        id: 5,
+        name: "광역 휩쓸기",
+        bossClass: "telegraph-sweep",
+        text: "보스가 무기를 낮게 늘어뜨리고 크게 숨을 들이쉰다!",
+        caption: "낮게 눕힌 무기 위로 붉은 기운이 길게 번진다.",
+        hitZones: ["left", "center"],
+        simpleAccuracy: false
+      }
+    ];
+
+    const BOT_DEFS = [
+      { name: "돌격대장곰", trait: "aggressive", accuracy: .88, fakeAccuracy: .34, sweepAccuracy: .60, color: "#b7795d", hair: "#3b2c2b" },
+      { name: "신중한붕어", trait: "cautious", accuracy: .90, fakeAccuracy: .49, sweepAccuracy: .66, color: "#e8a781", hair: "#553842" },
+      { name: "도망왕토끼", trait: "coward", accuracy: .78, fakeAccuracy: .38, sweepAccuracy: .56, color: "#d9b6c6", hair: "#745766" },
+      { name: "한방만노림", trait: "aggressive", accuracy: .81, fakeAccuracy: .31, sweepAccuracy: .59, color: "#9674bf", hair: "#2b2638" },
+      { name: "방패든감자", trait: "cautious", accuracy: .86, fakeAccuracy: .45, sweepAccuracy: .62, color: "#d4a96f", hair: "#58412c" },
+      { name: "길잃은여우", trait: "balanced", accuracy: .84, fakeAccuracy: .41, sweepAccuracy: .61, color: "#db8255", hair: "#4e2d29" }
+    ];
+
+    const SHOP_REPLIES = {
+      greeting: [
+        "다들 고생 많았어. 불 가까이 와서 숨부터 돌리자.",
+        "어서 와. 오늘도 무사히 얼굴을 봐서 다행이야.",
+        "갑옷은 거기 내려두고 앉아. 따뜻한 차부터 줄게.",
+        "균열 냄새가 진하네. 그래도 표정들은 제법 씩씩한걸?",
+        "잘 돌아왔어. 필요한 건 천천히 골라도 괜찮아."
+      ],
+      purchase: [
+        "좋은 선택이야. 다음 전투에서 분명 힘이 될 거야.",
+        "여기, 조심해서 받아. 아직 조금 따뜻하거든.",
+        "너한테 잘 맞을 것 같았어. 후회하지 않을 거야.",
+        "고마워. 서비스로 병마개도 단단히 잠가 줄게.",
+        "그건 내가 꽤 자신 있게 만든 물건이야."
+      ],
+      gift: [
+        "어… 이걸 정말 나한테? 고마워. 소중히 간직할게.",
+        "갑자기 이러면 누나도 조금 부끄럽잖아… 그래도 기뻐.",
+        "이런 걸 받을 줄은 몰랐네. 오늘 하루 종일 웃을 것 같아.",
+        "고마워. 다음엔 내가 더 좋은 걸 챙겨 둘게.",
+        "마음이 참 예쁘네. 전투에서도 꼭 다치지 말아 줘."
+      ],
+      comfort: [
+        "쓰러진 건 부끄러운 일이 아니야. 다시 일어난 게 더 중요하지.",
+        "많이 아팠지? 여기서는 괜찮아. 천천히 회복하자.",
+        "이번엔 패턴을 배운 셈 치자. 다음에는 분명 피할 수 있어.",
+        "괜찮아, 장비보다 네가 무사한 게 먼저야.",
+        "실수 하나로 끝나는 모험은 없어. 아직 다음 기회가 있잖아."
+      ],
+      boss: [
+        "모르가스는 어깨보다 발끝을 보는 게 좋아. 몸은 거짓말을 해도 발은 솔직하거든.",
+        "그 보스, 크게 숨을 들이쉴 때는 욕심내지 않는 편이 좋아.",
+        "균열의 파수자는 같은 자세로 다른 공격을 속이기도 해. 꼬리를 잘 봐.",
+        "보스가 성질은 사나워도 리듬은 있어. 서두르지 마.",
+        "다음에는 피버를 조금 더 모아서 단숨에 밀어붙여 보자."
+      ],
+      encouragement: [
+        "지금 호흡이면 좋아. 서로 판단을 믿어 봐.",
+        "무리만 하지 않으면 충분히 이길 수 있어.",
+        "너희가 싸우는 소리, 여기까지 아주 선명하게 들렸어.",
+        "다음 출정에도 모닥불은 계속 켜 둘게.",
+        "좋은 모험가는 강한 사람보다 다시 준비할 줄 아는 사람이야."
+      ],
+      generic: [
+        "응, 듣고 있어. 모닥불 옆에서는 무슨 이야기든 괜찮아.",
+        "그랬구나. 모험 이야기는 몇 번을 들어도 재미있네.",
+        "후후, 다들 긴장이 조금 풀린 모양이네.",
+        "차 한 잔 더 줄까? 목이 꽤 쉬었어.",
+        "여기 있을 때만큼은 편하게 얘기해도 돼."
+      ]
+    };
+
+    const state = {
+      phase: "LOBBY",
+      battleStep: "idle",
+      players: [],
+      userId: null,
+      bossHp: CONFIG.bossMaxHp,
+      round: 0,
+      raidCount: 0,
+      currentPattern: null,
+      previousPatternId: null,
+      acceptingInput: false,
+      deadline: 0,
+      clockInterval: null,
+      timeouts: [],
+      shopReplyTimeout: null,
+      chatMemory: [],
+      resumeBossHpAfterShop: false,
+      resolving: false
+    };
+
+    const els = {
+      boss: document.getElementById("boss"),
+      bossHpText: document.getElementById("bossHpText"),
+      bossHpFill: document.getElementById("bossHpFill"),
+      phasePill: document.getElementById("phasePill"),
+      timer: document.getElementById("timer"),
+      turnLabel: document.getElementById("turnLabel"),
+      zones: document.getElementById("zones"),
+      leaderboard: document.getElementById("leaderboardList"),
+      lobbyCard: document.getElementById("lobbyCard"),
+      victoryCard: document.getElementById("victoryCard"),
+      shopScene: document.getElementById("shopScene"),
+      shopBubble: document.getElementById("shopBubble"),
+      shopkeeper: document.getElementById("shopkeeper"),
+      walletGold: document.getElementById("walletGold"),
+      myStats: document.getElementById("myStats"),
+      chatLog: document.getElementById("chatLog"),
+      quickCommands: document.getElementById("quickCommands"),
+      chatForm: document.getElementById("chatForm"),
+      chatInput: document.getElementById("chatInput"),
+      nicknameInput: document.getElementById("nicknameInput"),
+      startButton: document.getElementById("startButton"),
+      skipShop: document.getElementById("skipShop"),
+      viewerCount: document.getElementById("viewerCount"),
+      telegraphCaption: document.getElementById("telegraphCaption"),
+      toast: document.getElementById("toast")
+    };
+
+    function randomBetween(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    function pick(list) {
+      return list[Math.floor(Math.random() * list.length)];
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function wait(ms) {
+      return new Promise(function(resolve) {
+        const id = setTimeout(resolve, ms);
+        state.timeouts.push(id);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function getUser() {
+      return state.players.find(function(player) { return player.id === state.userId; }) || null;
+    }
+
+    function makePlayer(name, isBot, botDef) {
+      const index = state.players.length;
+      return {
+        id: (isBot ? "bot-" : "user-") + Date.now() + "-" + index,
+        name: name,
+        isBot: isBot,
+        trait: botDef ? botDef.trait : "balanced",
+        accuracy: botDef ? botDef.accuracy : 1,
+        fakeAccuracy: botDef ? botDef.fakeAccuracy : 1,
+        sweepAccuracy: botDef ? botDef.sweepAccuracy : 1,
+        color: botDef ? botDef.color : "#67c9cf",
+        hair: botDef ? botDef.hair : "#263640",
+        zone: "center",
+        hp: 5,
+        maxHp: 5,
+        fever: 0,
+        combo: 0,
+        gold: 0,
+        attackElixirs: 0,
+        healthElixirs: 0,
+        gifts: 0,
+        alive: true,
+        superRevived: false,
+        action: { type: "idle" },
+        totalDamage: 0
+      };
+    }
+
+    function addChat(type, name, message) {
+      const line = document.createElement("div");
+      line.className = "chat-line " + type;
+      const avatarText = type === "system" ? "!" : type === "direction" ? "✦" : type === "shop" ? "리" : String(name || "?").slice(0, 1);
+      const safeName = escapeHtml(name || "");
+      const nameMarkup = name ? "<span class=\"chat-name\">" + safeName + "</span>" : "";
+      line.innerHTML =
+        "<div class=\"chat-avatar\">" + escapeHtml(avatarText) + "</div>" +
+        "<div class=\"chat-copy\">" + nameMarkup + escapeHtml(message) + "</div>";
+      els.chatLog.appendChild(line);
+
+      while (els.chatLog.children.length > CONFIG.maxChatLines) {
+        els.chatLog.removeChild(els.chatLog.firstChild);
+      }
+      els.chatLog.scrollTop = els.chatLog.scrollHeight;
+
+      if (type !== "system" && type !== "direction") {
+        state.chatMemory.push({ name: name, message: message, type: type, at: Date.now() });
+        if (state.chatMemory.length > 40) state.chatMemory.shift();
+      }
+    }
+
+    function showToast(message) {
+      els.toast.textContent = message;
+      els.toast.classList.add("show");
+      clearTimeout(showToast._timer);
+      showToast._timer = setTimeout(function() { els.toast.classList.remove("show"); }, 1800);
+    }
+
+    function formatHearts(hp, maxHp) {
+      let html = "";
+      for (let i = 0; i < maxHp; i += 1) {
+        const remain = hp - i;
+        html += remain >= 1 ? "♥" : remain >= .5 ? "◐" : "♡";
+      }
+      return html;
+    }
+
+    function renderPlayers() {
+      ["left", "center", "right"].forEach(function(zone) {
+        const container = document.getElementById("avatars-" + zone);
+        const zonePlayers = state.players.filter(function(player) { return player.zone === zone; });
+        container.innerHTML = zonePlayers.map(function(player) {
+          const action = ACTION_META[player.action.type] || ACTION_META.idle;
+          const attackAura = Math.min(player.attackElixirs, 5);
+          const actionTitle = player.action.type === "move"
+            ? "이동 → " + ZONE_LABELS[player.action.target]
+            : action.label;
+          return (
+            "<div class=\"avatar " + (player.isBot ? "bot" : "user") + (player.alive ? "" : " dead") + "\" " +
+              "data-player-id=\"" + escapeHtml(player.id) + "\" style=\"--avatar-color:" + player.color + ";--hair:" + player.hair + ";--aura:" + attackAura + "\" title=\"" + escapeHtml(player.name + " · " + actionTitle) + "\">" +
+              "<div class=\"avatar-head\"></div>" +
+              "<div class=\"avatar-action\" aria-label=\"" + escapeHtml(actionTitle) + "\">" + action.icon + "</div>" +
+              "<div class=\"avatar-name\">" + escapeHtml(player.name) + "</div>" +
+              "<div class=\"avatar-hearts\">" + formatHearts(Math.max(0, player.hp), player.maxHp) + "</div>" +
+              "<div class=\"fever-row\"><span>F " + player.fever + "</span><div class=\"fever-bar\"><div class=\"fever-fill\" style=\"width:" + ((player.fever / CONFIG.feverMax) * 100) + "%\"></div></div></div>" +
+            "</div>"
+          );
+        }).join("");
+      });
+    }
+
+    function renderLeaderboard() {
+      const sorted = state.players.slice().sort(function(a, b) {
+        return b.totalDamage - a.totalDamage || a.name.localeCompare(b.name);
+      });
+      els.leaderboard.innerHTML = sorted.map(function(player, index) {
+        return (
+          "<div class=\"board-row\">" +
+            "<span class=\"board-rank\">" + (index + 1) + "</span>" +
+            "<span class=\"board-player\">" + escapeHtml(player.name) + "</span>" +
+            "<span class=\"board-damage\">" + player.totalDamage.toLocaleString("ko-KR") + "</span>" +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    function renderBoss() {
+      els.bossHpText.textContent = Math.max(0, state.bossHp).toLocaleString("ko-KR") + " / " + CONFIG.bossMaxHp.toLocaleString("ko-KR");
+      els.bossHpFill.style.width = clamp((state.bossHp / CONFIG.bossMaxHp) * 100, 0, 100) + "%";
+    }
+
+    function renderShopStats() {
+      const user = getUser();
+      if (!user) {
+        els.walletGold.textContent = "0G";
+        els.myStats.textContent = "아직 입장하지 않음";
+        return;
+      }
+      els.walletGold.textContent = user.gold + "G";
+      els.myStats.textContent = "HP " + user.maxHp + " · ATK ×" + Math.pow(CONFIG.elixirMultiplier, user.attackElixirs).toFixed(2) + " · 선물 " + user.gifts;
+    }
+
+    function renderAll() {
+      renderPlayers();
+      renderLeaderboard();
+      renderBoss();
+      renderShopStats();
+    }
+
+    function setPhaseLabel(label, timerText) {
+      els.phasePill.textContent = label;
+      if (timerText !== undefined) els.timer.textContent = timerText;
+    }
+
+    function clearClock() {
+      if (state.clockInterval) clearInterval(state.clockInterval);
+      state.clockInterval = null;
+    }
+
+    function clearScheduled() {
+      clearClock();
+      state.timeouts.forEach(function(id) { clearTimeout(id); });
+      state.timeouts = [];
+      if (state.shopReplyTimeout) clearTimeout(state.shopReplyTimeout);
+      state.shopReplyTimeout = null;
+    }
+
+    function startCountdown(seconds, onEnd, formatter) {
+      clearClock();
+      state.deadline = Date.now() + seconds * 1000;
+
+      function tick() {
+        const remainMs = Math.max(0, state.deadline - Date.now());
+        const remain = Math.ceil(remainMs / 1000);
+        els.timer.textContent = formatter ? formatter(remain) : "00:" + String(remain).padStart(2, "0");
+        if (remainMs <= 0) {
+          clearClock();
+          onEnd();
+        }
+      }
+
+      tick();
+      state.clockInterval = setInterval(tick, 200);
+    }
+
+    function joinUser(silent) {
+      if (getUser()) return getUser();
+      const requested = (els.nicknameInput.value || "장호").trim().slice(0, 12);
+      const name = requested || "장호";
+      const player = makePlayer(name, false, null);
+      state.userId = player.id;
+      state.players.push(player);
+      if (!silent) {
+        addChat("user", name, "!입장");
+        addChat("system", "", name + " 님이 중앙 구역에 입장했습니다.");
+      }
+      renderAll();
+      return player;
+    }
+
+    function addBots() {
+      if (state.players.some(function(player) { return player.isBot; })) return;
+      BOT_DEFS.forEach(function(def) {
+        const player = makePlayer(def.name, true, def);
+        state.players.push(player);
+        addChat("bot", player.name, "!입장");
+      });
+      renderAll();
+    }
+
+    function startRaidFromLobby() {
+      if (state.phase !== "LOBBY") return;
+      joinUser(false);
+      addBots();
+      els.lobbyCard.classList.add("hidden");
+      addChat("system", "", "7인의 균열 원정대가 결성되었습니다. 보스 레이드가 시작됩니다!");
+      state.raidCount = 1;
+      state.bossHp = CONFIG.bossMaxHp;
+      startBattle(false);
+    }
+
+    function resetTurnActions() {
+      state.players.forEach(function(player) {
+        player.action = { type: "idle" };
+      });
+    }
+
+    function choosePattern() {
+      let available = PATTERNS.filter(function(pattern) { return pattern.id !== state.previousPatternId; });
+      if (!available.length) available = PATTERNS;
+      const selected = pick(available);
+      state.previousPatternId = selected.id;
+      return selected;
+    }
+
+    function setBossTelegraph(pattern) {
+      els.boss.className = "boss-wrap " + pattern.bossClass;
+      els.telegraphCaption.textContent = pattern.caption;
+      els.telegraphCaption.classList.add("show");
+    }
+
+    function startBattle(fromShop) {
+      clearScheduled();
+      state.phase = "BATTLE";
+      state.battleStep = "telegraph";
+      state.resolving = false;
+      state.acceptingInput = false;
+      els.shopScene.classList.add("hidden");
+      els.victoryCard.classList.add("hidden");
+      els.boss.className = "boss-wrap";
+      els.boss.style.display = "";
+
+      if (fromShop && !state.resumeBossHpAfterShop) state.bossHp = CONFIG.bossMaxHp;
+      if (fromShop) {
+        state.raidCount += 1;
+        state.players.forEach(function(player) {
+          player.fever = 0;
+          player.combo = 0;
+          player.action = { type: "idle" };
+        });
+        addChat("system", "", "모닥불이 멀어집니다. 제 " + state.raidCount + "차 레이드가 시작됩니다!");
+      }
+      state.resumeBossHpAfterShop = false;
+      renderQuickCommands();
+      renderAll();
+      beginTurn();
+    }
+
+    function beginTurn() {
+      if (state.phase !== "BATTLE") return;
+      state.round += 1;
+      state.battleStep = "input";
+      state.currentPattern = choosePattern();
+      state.acceptingInput = true;
+      resetTurnActions();
+      setBossTelegraph(state.currentPattern);
+      els.turnLabel.textContent = "TURN " + String(state.round).padStart(2, "0") + " · 행동 선택";
+      setPhaseLabel("ACTION", "00:" + CONFIG.inputSeconds);
+      document.querySelectorAll(".zone").forEach(function(zone) {
+        zone.classList.remove("hit");
+        zone.classList.add("primed");
+      });
+
+      addChat("direction", "", "[연출] " + state.currentPattern.text);
+      addChat("system", "", "행동 선택 " + CONFIG.inputSeconds + "초. 마지막 명령만 적용됩니다.");
+      renderAll();
+      scheduleBotActions(state.currentPattern);
+
+      startCountdown(CONFIG.inputSeconds, beginGrace);
+    }
+
+    function beginGrace() {
+      if (state.phase !== "BATTLE" || state.battleStep !== "input") return;
+      state.acceptingInput = false;
+      state.battleStep = "grace";
+      setPhaseLabel("SYNC", "00:" + CONFIG.graceSeconds);
+      els.turnLabel.textContent = "입력 동기화 중";
+      addChat("system", "", "입력 마감 · 방송 지연 보정 중…");
+      startCountdown(CONFIG.graceSeconds, resolveTurn);
+    }
+
+    async function resolveTurn() {
+      if (state.phase !== "BATTLE" || state.resolving) return;
+      state.resolving = true;
+      state.battleStep = "resolve";
+      clearClock();
+      setPhaseLabel("IMPACT", "판정");
+      els.turnLabel.textContent = state.currentPattern.name;
+      els.telegraphCaption.classList.remove("show");
+
+      state.players.forEach(function(player) {
+        if (!player.alive) return;
+        if (player.action.type === "defend") {
+          player.combo = 0;
+          player.fever = clamp(player.fever + 2, 0, CONFIG.feverMax);
+          addChat("system", "", player.name + " 방어 확정 · 피버 +2, 콤보 리셋");
+        } else if (player.action.type === "move") {
+          player.combo = 0;
+          player.fever = clamp(player.fever - 4, 0, CONFIG.feverMax);
+          addChat("system", "", player.name + " 이동 확정 · 피버 -4, 콤보 리셋");
+        }
+      });
+
+      const moving = state.players.filter(function(player) {
+        return player.alive && player.action.type === "move";
+      });
+      moving.forEach(function(player) {
+        const from = player.zone;
+        player.zone = player.action.target;
+        if (from !== player.zone) addChat("system", "", player.name + " 이동: " + ZONE_LABELS[from] + " → " + ZONE_LABELS[player.zone]);
+      });
+      renderPlayers();
+
+      await wait(350);
+      if (state.phase !== "BATTLE") return;
+      executePatternVisual(state.currentPattern);
+      addChat("direction", "", "[실행] " + state.currentPattern.name + "!");
+      await wait(400);
+      if (state.phase !== "BATTLE") return;
+
+      const hitZoneSet = new Set(state.currentPattern.hitZones);
+      state.players.forEach(function(player) {
+        if (!player.alive) return;
+        const hit = hitZoneSet.has(player.zone);
+        if (!hit) {
+          if (player.action.type === "move") addChat("system", "", player.name + " 회피 성공! 안전한 " + ZONE_LABELS[player.zone] + " 구역에 도착했습니다.");
+          return;
+        }
+
+        let damage = CONFIG.bossBaseDamage;
+        if (player.action.type === "thrust" || player.action.type === "slash") damage = 2;
+        if (player.action.type === "defend") damage = .5;
+        player.hp = Math.max(0, player.hp - damage);
+        addChat("system", "", player.name + " 피격 · -" + damage + " HP" + ((player.action.type === "thrust" || player.action.type === "slash") ? " (공격 중 증폭)" : player.action.type === "defend" ? " (방어 반감)" : ""));
+        if (player.hp <= 0) {
+          player.alive = false;
+          addChat("system", "", "☠ " + player.name + " 님이 쓰러졌습니다. !슈퍼챗으로 즉시 부활할 수 있습니다.");
+        }
+      });
+      renderAll();
+      await wait(500);
+      if (state.phase !== "BATTLE") return;
+
+      const survivors = state.players.filter(function(player) {
+        return player.alive && (player.action.type === "thrust" || player.action.type === "slash");
+      });
+
+      for (const player of survivors) {
+        if (state.phase !== "BATTLE" || state.bossHp <= 0) break;
+        await performCounterattack(player);
+      }
+
+      renderAll();
+
+      if (state.bossHp <= 0) {
+        await enterVictory();
+        return;
+      }
+
+      if (!state.players.some(function(player) { return player.alive; })) {
+        addChat("system", "", "전원 사망. 보스의 남은 HP를 유지한 채 모닥불 상점으로 후퇴합니다.");
+        state.resumeBossHpAfterShop = true;
+        await enterShop(true);
+        return;
+      }
+
+      startReaction();
+    }
+
+    function executePatternVisual(pattern) {
+      els.boss.classList.add("roaring");
+      document.querySelectorAll(".zone").forEach(function(zone) {
+        zone.classList.remove("primed");
+        if (pattern.hitZones.includes(zone.dataset.zone)) zone.classList.add("hit");
+      });
+      setTimeout(function() {
+        document.querySelectorAll(".zone").forEach(function(zone) { zone.classList.remove("hit"); });
+      }, 650);
+    }
+
+    async function performCounterattack(player) {
+      const avatar = document.querySelector("[data-player-id=\"" + CSS.escape(player.id) + "\"]");
+      if (avatar) avatar.classList.add("attacking");
+
+      let multiplier = 1;
+      let resultLabel = "";
+      let success = true;
+      const feverGainBase = Math.min(4 + player.combo * 2, 8);
+      player.combo += 1;
+
+      if (player.action.type === "thrust") {
+        const roll = Math.random();
+        if (roll < CONFIG.thrustCritical) {
+          multiplier = 2;
+          player.fever = clamp(player.fever + feverGainBase * 2, 0, CONFIG.feverMax);
+          resultLabel = "자격 급소 적중 ×2";
+          addChat("system", "", "✦ " + player.name + " 자격 크리티컬! 피버 +" + (feverGainBase * 2));
+        } else if (roll < CONFIG.thrustCritical + CONFIG.thrustNormal) {
+          player.fever = clamp(player.fever + feverGainBase, 0, CONFIG.feverMax);
+          resultLabel = "자격 적중";
+        } else {
+          success = false;
+          resultLabel = "자격 실패";
+          addChat("system", "", player.name + " 자격 실패 · 피해와 피버 증가 없음. 콤보는 유지됩니다.");
+        }
+      } else {
+        player.fever = clamp(player.fever + feverGainBase, 0, CONFIG.feverMax);
+        resultLabel = "참격";
+      }
+
+      await wait(220);
+      if (success) {
+        const damage = Math.round(
+          (CONFIG.baseAttack + player.fever) *
+          Math.pow(CONFIG.elixirMultiplier, player.attackElixirs) *
+          multiplier
+        );
+        state.bossHp = Math.max(0, state.bossHp - damage);
+        player.totalDamage += damage;
+        addChat("system", "", player.name + " " + resultLabel + " · " + damage + " 피해! (Fever " + player.fever + ")");
+        showDamagePopup(damage, multiplier > 1);
+        els.boss.classList.add("damaged");
+        setTimeout(function() { els.boss.classList.remove("damaged"); }, 330);
+      }
+      renderAll();
+      await wait(330);
+      if (avatar) avatar.classList.remove("attacking");
+    }
+
+    function showDamagePopup(damage, critical) {
+      const rect = els.boss.getBoundingClientRect();
+      const popup = document.createElement("div");
+      popup.className = "damage-popup";
+      popup.textContent = (critical ? "CRIT " : "") + damage;
+      popup.style.left = (rect.left + rect.width / 2 + randomBetween(-32, 32)) + "px";
+      popup.style.top = (rect.top + rect.height * .44) + "px";
+      document.body.appendChild(popup);
+      setTimeout(function() { popup.remove(); }, 1050);
+    }
+
+    function startReaction() {
+      state.resolving = false;
+      state.battleStep = "reaction";
+      state.acceptingInput = false;
+      els.boss.className = "boss-wrap roaring";
+      els.turnLabel.textContent = "보스 경직 · 다음 공격 준비";
+      setPhaseLabel("STAGGER", "00:" + CONFIG.reactionSeconds);
+      addChat("direction", "", "[연출] 모르가스가 괴성을 지르며 비틀거린다!");
+
+      startCountdown(CONFIG.reactionSeconds, function() {
+        els.boss.className = "boss-wrap";
+        beginTurn();
+      });
+    }
+
+    async function enterVictory() {
+      clearScheduled();
+      state.phase = "VICTORY";
+      state.battleStep = "idle";
+      state.acceptingInput = false;
+      state.resolving = false;
+      setPhaseLabel("VICTORY", "격퇴");
+      els.turnLabel.textContent = "균열 정복";
+      els.boss.className = "boss-wrap defeated";
+      els.victoryCard.classList.remove("hidden");
+      addChat("direction", "", "[연출] 균열의 파수자가 무릎을 꿇고 검은 재로 흩어진다!");
+      addChat("system", "", "보스 격퇴! 생존자 100G · 사망자 50G가 지급됩니다.");
+      await wait(CONFIG.victorySeconds * 1000);
+      if (state.phase === "VICTORY") enterShop(false);
+    }
+
+    function applyShopRewards() {
+      state.players.forEach(function(player) {
+        if (player.alive) {
+          player.gold += CONFIG.survivorGold;
+          player.hp = player.maxHp;
+        } else {
+          player.gold = CONFIG.fallenGold;
+          player.attackElixirs = 0;
+          player.healthElixirs = 0;
+          player.gifts = 0;
+          player.maxHp = 5;
+          player.hp = 5;
+          player.fever = 0;
+          player.combo = 0;
+          player.alive = true;
+          player.superRevived = false;
+        }
+        player.action = { type: "idle" };
+      });
+    }
+
+    async function enterShop(partyWipe) {
+      clearScheduled();
+      state.phase = "SHOP";
+      state.battleStep = "idle";
+      state.acceptingInput = true;
+      state.resolving = false;
+      applyShopRewards();
+      els.victoryCard.classList.add("hidden");
+      els.shopScene.classList.remove("hidden");
+      setPhaseLabel("SHOP", "10:00");
+      els.turnLabel.textContent = "모닥불 상점";
+      addChat("system", "", partyWipe ? "후퇴 보상 정산 완료. 전원 50G로 다시 준비합니다." : "보상 정산 완료. 모닥불 상점이 열렸습니다.");
+      renderQuickCommands();
+      renderAll();
+      sayShopkeeper(pick(SHOP_REPLIES.greeting), false);
+      scheduleBotShopping();
+      scheduleAmbientShopReply();
+
+      startCountdown(CONFIG.shopSeconds, function() {
+        startBattle(true);
+      }, function(remain) {
+        const minutes = Math.floor(remain / 60);
+        const seconds = remain % 60;
+        return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+      });
+    }
+
+    function buyItem(player, item) {
+      if (state.phase !== "SHOP") {
+        if (!player.isBot) showToast("상점에서만 구매할 수 있습니다.");
+        return false;
+      }
+      if (player.gold < CONFIG.elixirCost) {
+        if (!player.isBot) {
+          addChat("system", "", "골드가 부족합니다. 모든 상품은 10G입니다.");
+          showToast("골드가 부족합니다.");
+        }
+        return false;
+      }
+
+      player.gold -= CONFIG.elixirCost;
+      if (item === "health") {
+        player.healthElixirs += 1;
+        player.maxHp += 1;
+        player.hp = Math.min(player.maxHp, player.hp + 1);
+        addChat("system", "", player.name + " 체력 엘릭서 구매 · 최대 HP " + player.maxHp);
+      } else if (item === "attack") {
+        player.attackElixirs += 1;
+        addChat("system", "", player.name + " 공격 엘릭서 구매 · 공격 배율 ×" + Math.pow(CONFIG.elixirMultiplier, player.attackElixirs).toFixed(2));
+      } else if (item === "gift") {
+        player.gifts += 1;
+        addChat("system", "", player.name + " 작은 선물 구매 · 보유 " + player.gifts + "개");
+      }
+      renderAll();
+      if (!player.isBot) {
+        getShopkeeperReply("구매", { category: "purchase", player: player }).then(function(reply) {
+          if (state.phase === "SHOP") sayShopkeeper(reply, false);
+        });
+      }
+      return true;
+    }
+
+    function giveGift(player) {
+      if (state.phase !== "SHOP") return false;
+      if (player.gifts <= 0) {
+        if (!player.isBot) addChat("system", "", "보유한 선물이 없습니다. 먼저 !구매-선물을 입력하세요.");
+        return false;
+      }
+      player.gifts -= 1;
+      renderAll();
+      addChat("system", "", player.name + " 님이 리아에게 작은 선물을 건넸습니다.");
+      getShopkeeperReply("선물", { category: "gift", player: player }).then(function(reply) {
+        if (state.phase === "SHOP") sayShopkeeper(reply, true);
+      });
+      return true;
+    }
+
+    async function getShopkeeperReply(chatMessage, context) {
+      const category = context && context.category;
+      let pool = SHOP_REPLIES.generic;
+      if (category && SHOP_REPLIES[category]) {
+        pool = SHOP_REPLIES[category];
+      } else if (/죽|쓰러|사망|아파|실수/.test(chatMessage)) {
+        pool = SHOP_REPLIES.comfort;
+      } else if (/보스|모르가스|패턴|페이크|공격/.test(chatMessage)) {
+        pool = SHOP_REPLIES.boss;
+      } else if (/힘내|다음|전투|이기|화이팅/.test(chatMessage)) {
+        pool = SHOP_REPLIES.encouragement;
+      } else if (/안녕|반가|누나|리아/.test(chatMessage)) {
+        pool = SHOP_REPLIES.greeting;
+      }
+      await new Promise(function(resolve) { setTimeout(resolve, randomBetween(180, 520)); });
+      return pick(pool);
+    }
+
+    function sayShopkeeper(message, blush) {
+      els.shopBubble.innerHTML = "<strong>모닥불 상점 · 리아</strong>" + escapeHtml(message);
+      addChat("shop", "상점 누나 리아", message);
+      if (blush) {
+        els.shopkeeper.classList.add("blushing");
+        setTimeout(function() { els.shopkeeper.classList.remove("blushing"); }, 3600);
+      }
+    }
+
+    function scheduleAmbientShopReply() {
+      if (state.shopReplyTimeout) clearTimeout(state.shopReplyTimeout);
+      const delay = randomBetween(CONFIG.shopReplyMinMs, CONFIG.shopReplyMaxMs);
+      state.shopReplyTimeout = setTimeout(function() {
+        if (state.phase !== "SHOP") return;
+        const candidates = state.chatMemory.filter(function(item) {
+          return item.type === "user" || item.type === "bot";
+        });
+        const recent = candidates.length ? pick(candidates.slice(-12)) : { message: "다음 전투도 힘내자" };
+        getShopkeeperReply(recent.message, { category: null }).then(function(reply) {
+          if (state.phase === "SHOP") {
+            sayShopkeeper(reply, false);
+            scheduleAmbientShopReply();
+          }
+        });
+      }, delay);
+    }
+
+    function scheduleBotShopping() {
+      const bots = state.players.filter(function(player) { return player.isBot; });
+      bots.forEach(function(bot, index) {
+        const id = setTimeout(function() {
+          if (state.phase !== "SHOP") return;
+          let purchases = Math.min(randomBetween(1, 3), Math.floor(bot.gold / CONFIG.elixirCost));
+          while (purchases > 0) {
+            let item = "attack";
+            if (bot.maxHp <= 5 && (bot.trait === "cautious" || bot.trait === "coward")) item = "health";
+            else if (Math.random() < .12) item = "gift";
+            addChat("bot", bot.name, item === "health" ? "!구매-체력엘릭서" : item === "gift" ? "!구매-선물" : "!구매-공격엘릭서");
+            buyItem(bot, item);
+            purchases -= 1;
+          }
+          if (bot.gifts > 0 && Math.random() < .55) {
+            addChat("bot", bot.name, "!선물");
+            giveGift(bot);
+          }
+        }, 900 + index * 650);
+        state.timeouts.push(id);
+      });
+    }
+
+    function scheduleBotActions(pattern) {
+      const bots = state.players.filter(function(player) { return player.isBot && player.alive; });
+      bots.forEach(function(bot, index) {
+        const delay = randomBetween(CONFIG.botThinkMinMs, CONFIG.botThinkMaxMs) + index * 80;
+        const id = setTimeout(function() {
+          if (state.phase !== "BATTLE" || state.battleStep !== "input" || !bot.alive) return;
+          const decision = decideBotAction(bot, pattern);
+          if (Math.random() < .16) addChat("bot", bot.name, botFlavorLine(bot, pattern, decision));
+          addChat("bot", bot.name, commandForAction(decision));
+          selectAction(bot, decision, true);
+        }, delay);
+        state.timeouts.push(id);
+      });
+    }
+
+    function perceivedDangerZones(bot, pattern) {
+      let accuracy = bot.accuracy;
+      if (pattern.id === 4) accuracy = bot.fakeAccuracy;
+      if (pattern.id === 5) accuracy = bot.sweepAccuracy;
+      const correct = Math.random() < accuracy;
+      if (correct) return pattern.hitZones.slice();
+      if (pattern.id === 4) return ["left"];
+      if (pattern.id === 5) return pick([["center"], ["right"], ["left"]]);
+      const wrongZones = ["left", "center", "right"].filter(function(zone) { return !pattern.hitZones.includes(zone); });
+      return [pick(wrongZones)];
+    }
+
+    function decideBotAction(bot, pattern) {
+      const perceived = perceivedDangerZones(bot, pattern);
+      const thinksInDanger = perceived.includes(bot.zone);
+      const safeZones = ["left", "center", "right"].filter(function(zone) { return !perceived.includes(zone); });
+
+      if (thinksInDanger) {
+        if (bot.trait === "aggressive" && Math.random() < .38) return { type: "thrust" };
+        if (bot.trait === "coward" || Math.random() < .58) {
+          let target = safeZones.length ? pick(safeZones) : pick(["left", "center", "right"]);
+          if (pattern.id === 5 && Math.random() > bot.sweepAccuracy) target = pick(["left", "center"]);
+          return { type: "move", target: target };
+        }
+        return { type: "defend" };
+      }
+
+      if (bot.trait === "coward" && Math.random() < .16) {
+        return { type: "move", target: safeZones.length ? pick(safeZones) : bot.zone };
+      }
+      if (bot.trait === "cautious") return Math.random() < .78 ? { type: "slash" } : { type: "defend" };
+      if (bot.trait === "aggressive") return Math.random() < .72 ? { type: "thrust" } : { type: "slash" };
+      return Math.random() < .48 ? { type: "thrust" } : { type: "slash" };
+    }
+
+    function botFlavorLine(bot, pattern, action) {
+      const options = [];
+      if (pattern.id === 4) options.push("저거 페이크 아님?", "발끝이 이상한데…", "왼쪽 맞지? 맞겠지?");
+      if (pattern.id === 5) options.push("낮게 든다, 휩쓸기 온다!", "오른쪽이 비어 보여!", "숨 들이쉬는 소리 뭐야");
+      if (action.type === "thrust") options.push("이번엔 급소다!", "딜각 나왔다");
+      if (action.type === "defend") options.push("일단 막고 본다", "욕심 금지");
+      if (action.type === "move") options.push("여긴 아닌 것 같아!", "살고 보자");
+      options.push("패턴 읽었다", "다들 조심해");
+      return pick(options);
+    }
+
+    function commandForAction(action) {
+      if (action.type === "move") return "!이동-" + ZONE_LABELS[action.target];
+      return ACTION_META[action.type].command;
+    }
+
+    function selectAction(player, action, fromBot) {
+      if (!player.alive) {
+        if (!fromBot) addChat("system", "", "사망 상태에서는 !슈퍼챗만 사용할 수 있습니다.");
+        return false;
+      }
+      if (state.phase !== "BATTLE" || state.battleStep !== "input" || !state.acceptingInput) {
+        if (!fromBot) showToast("지금은 행동 선택 시간이 아닙니다.");
+        return false;
+      }
+      player.action = action;
+      renderPlayers();
+      return true;
+    }
+
+    function normalizeCommand(raw) {
+      return raw.trim().toLowerCase().replace(/\s+/g, "").replace(/_/g, "-");
+    }
+
+    function parseCommand(raw) {
+      const normalized = normalizeCommand(raw);
+      if (normalized === "!입장") return { type: "join" };
+      if (normalized === "!자격") return { type: "action", action: { type: "thrust" } };
+      if (normalized === "!참격") return { type: "action", action: { type: "slash" } };
+      if (normalized === "!방어") return { type: "action", action: { type: "defend" } };
+      if (/^!이동-?좌$/.test(normalized)) return { type: "action", action: { type: "move", target: "left" } };
+      if (/^!이동-?(중|중앙)$/.test(normalized)) return { type: "action", action: { type: "move", target: "center" } };
+      if (/^!이동-?우$/.test(normalized)) return { type: "action", action: { type: "move", target: "right" } };
+      if (normalized === "!슈퍼챗") return { type: "superchat" };
+      if (/^!구매-?체력엘릭서$/.test(normalized)) return { type: "buy", item: "health" };
+      if (/^!구매-?공격엘릭서$/.test(normalized)) return { type: "buy", item: "attack" };
+      if (/^!구매-?선물$/.test(normalized)) return { type: "buy", item: "gift" };
+      if (normalized === "!선물") return { type: "gift" };
+      return null;
+    }
+
+    function handleUserMessage(raw, echoed) {
+      const message = raw.trim();
+      if (!message) return;
+      let user = getUser();
+      const shownName = user ? user.name : (els.nicknameInput.value.trim() || "장호");
+      if (!echoed) addChat("user", shownName, message);
+
+      const command = parseCommand(message);
+      if (!command) {
+        if (state.phase === "SHOP") {
+          getShopkeeperReply(message, { player: user }).then(function(reply) {
+            if (state.phase === "SHOP") sayShopkeeper(reply, false);
+          });
+        }
+        return;
+      }
+
+      if (command.type === "join") {
+        if (user) {
+          addChat("system", "", "이미 원정대에 참가 중입니다.");
+        } else {
+          user = joinUser(true);
+          addChat("system", "", user.name + " 님이 중앙 구역에 입장했습니다.");
+        }
+        return;
+      }
+
+      if (!user) {
+        addChat("system", "", "먼저 !입장 명령으로 원정대에 참가하세요.");
+        return;
+      }
+
+      if (command.type === "action") {
+        selectAction(user, command.action, false);
+      } else if (command.type === "superchat") {
+        if (user.alive) {
+          addChat("system", "", "현재 생존 상태입니다. 슈퍼챗은 사망 후 사용할 수 있습니다.");
+        } else if (state.phase !== "BATTLE") {
+          addChat("system", "", "슈퍼챗 부활은 전투 중에만 사용할 수 있습니다.");
+        } else {
+          user.alive = true;
+          user.hp = Math.min(5, user.maxHp);
+          user.superRevived = true;
+          user.action = { type: "idle" };
+          addChat("direction", "", "[슈퍼챗] 금빛 별이 쏟아지며 " + user.name + " 님이 강화와 골드를 보존한 채 부활합니다!");
+          renderAll();
+        }
+      } else if (command.type === "buy") {
+        buyItem(user, command.item);
+      } else if (command.type === "gift") {
+        giveGift(user);
+      }
+    }
+
+    function renderQuickCommands() {
+      const commands = state.phase === "SHOP"
+        ? ["!구매-체력엘릭서", "!구매-공격엘릭서", "!구매-선물", "!선물"]
+        : ["!자격", "!참격", "!방어", "!이동-좌", "!이동-중", "!이동-우", "!슈퍼챗"];
+      els.quickCommands.innerHTML = commands.map(function(command) {
+        return "<button class=\"command-chip\" type=\"button\" data-command=\"" + command + "\">" + command + "</button>";
+      }).join("");
+    }
+
+    els.startButton.addEventListener("click", startRaidFromLobby);
+    els.nicknameInput.addEventListener("keydown", function(event) {
+      if (event.key === "Enter") startRaidFromLobby();
+    });
+
+    els.chatForm.addEventListener("submit", function(event) {
+      event.preventDefault();
+      const value = els.chatInput.value;
+      els.chatInput.value = "";
+      if (!value.trim()) return;
+      const user = getUser();
+      const name = user ? user.name : (els.nicknameInput.value.trim() || "장호");
+      addChat("user", name, value.trim());
+      handleUserMessage(value, true);
+    });
+
+    document.addEventListener("click", function(event) {
+      const button = event.target.closest("[data-command]");
+      if (!button) return;
+      const command = button.dataset.command;
+      const user = getUser();
+      const name = user ? user.name : (els.nicknameInput.value.trim() || "장호");
+      addChat("user", name, command);
+      handleUserMessage(command, true);
+      els.chatInput.focus();
+    });
+
+    els.skipShop.addEventListener("click", function() {
+      if (state.phase !== "SHOP") return;
+      addChat("system", "", "테스트 스킵: 다음 전투를 즉시 시작합니다.");
+      startBattle(true);
+    });
+
+    window.addEventListener("beforeunload", clearScheduled);
+
+    renderQuickCommands();
+    renderAll();
+    setPhaseLabel("LOBBY", "대기 중");
+    addChat("direction", "", "[연출] 황혼의 균열 너머로 거대한 그림자가 모습을 드러낸다.");
+    addChat("system", "", "닉네임을 정하고 레이드 입장을 누르세요. 채팅에 !입장을 입력해도 참가할 수 있습니다.");
+    addChat("bot", "도망왕토끼", "오늘은 진짜 안 맞는다");
+    addChat("bot", "돌격대장곰", "자격 한 방이면 끝이지");
+  </script>
+</body>
+</html>
