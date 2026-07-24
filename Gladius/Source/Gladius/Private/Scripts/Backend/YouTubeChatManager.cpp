@@ -2,6 +2,11 @@
 
 
 #include "Scripts/Backend/YouTubeChatManager.h"
+#include "HttpModule.h" 
+#include "Interfaces/IHttpResponse.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+//이걸 왜 헤더가 아니라 여기다가 추가한거지? -> .h를 참조하는 모든 cpp에 헤더가 박히면 느려짐
 
 // Sets default values
 AYouTubeChatManager::AYouTubeChatManager()
@@ -24,6 +29,24 @@ void AYouTubeChatManager::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 }
 
+void AYouTubeChatManager::StartFetchingChat()
+{
+	if (ApiKey.IsEmpty() || VideoId.IsEmpty()) 
+	{
+		UE_LOG(LogTemp, Error, TEXT("ApiKey 또는 VideoId가 설정되지 않았습니다."));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("유튜브 채팅 수신을 시작합니다."));
+	RequestLiveChatId();
+}
+
+void AYouTubeChatManager::StopFetchingChat() {
+	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
+	UE_LOG(LogTemp, Log, TEXT("유튜브 채팅 수신 중지"));
+}
+
+
 void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content)
 {
 	FDateTime Now = FDateTime::UtcNow();
@@ -31,7 +54,7 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 	//공백 제거 등 명령어 전처리
 	FString CleanContent = PreprocessCommand(Content);
 
-	FUserInfo* User = UserDatabase.Find(UserId); //왜 포인터로 받게 되는거? 
+	FUserInfo* User = UserDatabase.Find(UserId); //왜 포인터로 받게 되는거? -> 데이터 없음 (null) 표현과 데이터 복사방지
 
 	if (!User) //신규 유저 등록
 	{
@@ -97,6 +120,66 @@ bool AYouTubeChatManager::IsSpamming(const FString& UserId, const FString& Conte
 	}
 
 	return false;
+}
+
+void AYouTubeChatManager::RequestLiveChatId()
+{
+	FString Url = FString::Printf(
+		TEXT("https://www.googleapis.com/youtube/v3/videos?id=%s&part=liveStreamingDetails&key=%s"),
+		*VideoId,
+		*ApiKey
+	);
+
+	FHttpModule* Http = &FHttpModule::Get(); //Http를 관장하는 singleton의 주소를 Http에 받아옴 (포인터 형식으로)
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest(); //IHttpRequest형식의 포인터 변수인데, 함수가 끝나도 참조가 남아있다면 메모리에서 사라지지 않음! 대신 FHttpRequestPtr로 쓸 수 있음
+
+	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnLiveChatIdResponse); //요청했던 자기 자신의 포인터, 구글이 보내준 JSON 응답 본문 및 HTTP 상태 코드(200 OK 등)가 담긴 객체, 연결 성공 여부를 매개변수로 넘김
+
+	Request->SetURL(Url);
+	Request->SetVerb("GET");
+	Request->ProcessRequest();
+}
+
+void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+	if (!bWasSuccessful || !Response.IsValid()) return;
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+
+	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid()) 
+	{
+		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
+		if (Items.Num() > 0)
+		{
+			TSharedPtr<FJsonObject> Details = Items[0]->AsObject()->GetObjectField(TEXT("liveStreamingDetails"));
+
+			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId")))
+			{
+				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId"));
+				UE_LOG(LogTemp, Log, TEXT("LiveChatID 획득 성공 %s"), *LiveChatId);
+
+				RequestMessages();
+				return;
+			}
+		}
+	}
+	UE_LOG(LogTemp, Error, TEXT("LiveChatID 획득 실패 (현재 라이브 스트리밍 중인지 확인하세요)"));
+}
+
+void AYouTubeChatManager::RequestMessages()
+{
+	FString Url = FString::Printf(
+		TEXT("https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=%s&part=snippet,authorDetails&key=%s"),
+		*LiveChatId,
+		*ApiKey
+	);
+}
+
+void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+{
+
 }
 
 //도배 유저의 차단 시간 가중 함수 

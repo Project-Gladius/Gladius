@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Interfaces/IHttpRequest.h"
 #include "YouTubeChatManager.generated.h"
 
 USTRUCT(BlueprintType)
@@ -57,6 +58,20 @@ protected:
 public:
 	virtual void Tick(float DeltaTime) override;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
+	FString ApiKey;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
+	FString VideoId;
+
+	//채팅 수신 시작 함수
+	UFUNCTION(BlueprintCallable, Category = "YouTube API")
+	void StartFetchingChat(); 
+
+	//채팅 수신 중지 함수
+	UFUNCTION(BlueprintCallable, Category = "YouTube API")
+	void StopFetchingChat();
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
 	TMap<FString, FUserInfo> UserDatabase;
 
@@ -73,6 +88,18 @@ public:
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
 
 private:
+	//API 상태 저장용 변수
+	FString LiveChatId;
+	FString NextPageToken;
+	FTimerHandle ChatFetchTimerHandle;
+
+	//Http 요청 응답 및 콜백 함수
+	void RequestLiveChatId();
+	void OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+
+	void RequestMessages();
+	void OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+
 	FString PreprocessCommand(const FString& Input);
 	bool IsSpamming(const FString& UserId, const FString& Content, const FDateTime& CurrentTime);
 	void HandleSpamPenalty(FUserInfo& User, const FDateTime& Now);
