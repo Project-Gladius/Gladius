@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -64,11 +64,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
 	FString VideoId;
 
-	//Ã¤ÆÃ ¼ö½Å ½ÃÀÛ ÇÔ¼ö
+	//ì±„íŒ… ìˆ˜ì‹  ì‹œì‘ í•¨ìˆ˜
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void StartFetchingChat(); 
 
-	//Ã¤ÆÃ ¼ö½Å ÁßÁö ÇÔ¼ö
+	//ì±„íŒ… ìˆ˜ì‹  ì¤‘ì§€ í•¨ìˆ˜
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void StopFetchingChat();
 
@@ -79,7 +79,7 @@ public:
 	TArray<FCommentLog> CommentLogs;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-	float SpamTimeLimitSeconds = 0.5f; //¸îÃÊ¾È¿¡ ¶Ç ´ñ±ÛÀ» ÀÔ·ÂÇÏ¸é ½ºÆÔÀÎÁö
+	float SpamTimeLimitSeconds = 0.5f; //ëª‡ì´ˆì•ˆì— ë˜ ëŒ“ê¸€ì„ ì…ë ¥í•˜ë©´ ìŠ¤íŒ¸ì¸ì§€
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
 	int32 MaxAllowedComments = 3;
@@ -88,12 +88,12 @@ public:
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
 
 private:
-	//API »óÅÂ ÀúÀå¿ë º¯¼ö
+	//API ìƒíƒœ ì €ì¥ìš© ë³€ìˆ˜
 	FString LiveChatId;
 	FString NextPageToken;
 	FTimerHandle ChatFetchTimerHandle;
 
-	//Http ¿äÃ» ÀÀ´ä ¹× Äİ¹é ÇÔ¼ö
+	//Http ìš”ì²­ ì‘ë‹µ ë° ì½œë°± í•¨ìˆ˜
 	void RequestLiveChatId();
 	void OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
 

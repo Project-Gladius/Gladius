@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Scripts/Backend/YouTubeChatManager.h"
@@ -6,7 +6,7 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
-//ÀÌ°É ¿Ö Çì´õ°¡ ¾Æ´Ï¶ó ¿©±â´Ù°¡ Ãß°¡ÇÑ°ÅÁö? -> .h¸¦ ÂüÁ¶ÇÏ´Â ¸ğµç cpp¿¡ Çì´õ°¡ ¹ÚÈ÷¸é ´À·ÁÁü
+//ì´ê±¸ ì™œ í—¤ë”ê°€ ì•„ë‹ˆë¼ ì—¬ê¸°ë‹¤ê°€ ì¶”ê°€í•œê±°ì§€? -> .hë¥¼ ì°¸ì¡°í•˜ëŠ” ëª¨ë“  cppì— í—¤ë”ê°€ ë°•íˆë©´ ëŠë ¤ì§
 
 // Sets default values
 AYouTubeChatManager::AYouTubeChatManager()
@@ -33,17 +33,17 @@ void AYouTubeChatManager::StartFetchingChat()
 {
 	if (ApiKey.IsEmpty() || VideoId.IsEmpty()) 
 	{
-		UE_LOG(LogTemp, Error, TEXT("ApiKey ¶Ç´Â VideoId°¡ ¼³Á¤µÇÁö ¾Ê¾Ò½À´Ï´Ù."));
+		UE_LOG(LogTemp, Error, TEXT("ApiKey ë˜ëŠ” VideoIdê°€ ì„¤ì •ë˜ì§€ ì•Šì•˜ìŠµë‹ˆë‹¤."));
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("À¯Æ©ºê Ã¤ÆÃ ¼ö½ÅÀ» ½ÃÀÛÇÕ´Ï´Ù."));
+	UE_LOG(LogTemp, Log, TEXT("ìœ íŠœë¸Œ ì±„íŒ… ìˆ˜ì‹ ì„ ì‹œì‘í•©ë‹ˆë‹¤."));
 	RequestLiveChatId();
 }
 
 void AYouTubeChatManager::StopFetchingChat() {
 	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
-	UE_LOG(LogTemp, Log, TEXT("À¯Æ©ºê Ã¤ÆÃ ¼ö½Å ÁßÁö"));
+	UE_LOG(LogTemp, Log, TEXT("ìœ íŠœë¸Œ ì±„íŒ… ìˆ˜ì‹  ì¤‘ì§€"));
 }
 
 
@@ -51,12 +51,12 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 {
 	FDateTime Now = FDateTime::UtcNow();
 
-	//°ø¹é Á¦°Å µî ¸í·É¾î ÀüÃ³¸®
+	//ê³µë°± ì œê±° ë“± ëª…ë ¹ì–´ ì „ì²˜ë¦¬
 	FString CleanContent = PreprocessCommand(Content);
 
-	FUserInfo* User = UserDatabase.Find(UserId); //¿Ö Æ÷ÀÎÅÍ·Î ¹Ş°Ô µÇ´Â°Å? -> µ¥ÀÌÅÍ ¾øÀ½ (null) Ç¥Çö°ú µ¥ÀÌÅÍ º¹»ç¹æÁö
+	FUserInfo* User = UserDatabase.Find(UserId); //ì™œ í¬ì¸í„°ë¡œ ë°›ê²Œ ë˜ëŠ”ê±°? -> ë°ì´í„° ì—†ìŒ (null) í‘œí˜„ê³¼ ë°ì´í„° ë³µì‚¬ë°©ì§€
 
-	if (!User) //½Å±Ô À¯Àú µî·Ï
+	if (!User) //ì‹ ê·œ ìœ ì € ë“±ë¡
 	{
 		FUserInfo NewUser;
 		NewUser.UserId = UserId;
@@ -67,21 +67,21 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 		User = UserDatabase.Find(UserId);
 	}
 
-	if (User->UnbanTime > Now) //ºí·¢¸®½ºÆ® ÁøÇàÁß
+	if (User->UnbanTime > Now) //ë¸”ë™ë¦¬ìŠ¤íŠ¸ ì§„í–‰ì¤‘
 	{
-		FTimespan Remaining = User->UnbanTime - Now; //ºí·¢¸®½ºÆ® ÇØÁ¦±îÁö ³²Àº ½Ã°£
-		UE_LOG(LogTemp, Warning, TEXT("ºí·¢¸®½ºÆ® À¯ÀúÀÔ´Ï´Ù. ³²Àº ½Ã°£ %.1fÃÊ"), Remaining.GetTotalSeconds());
+		FTimespan Remaining = User->UnbanTime - Now; //ë¸”ë™ë¦¬ìŠ¤íŠ¸ í•´ì œê¹Œì§€ ë‚¨ì€ ì‹œê°„
+		UE_LOG(LogTemp, Warning, TEXT("ë¸”ë™ë¦¬ìŠ¤íŠ¸ ìœ ì €ì…ë‹ˆë‹¤. ë‚¨ì€ ì‹œê°„ %.1fì´ˆ"), Remaining.GetTotalSeconds());
 
-		SendToUserRemainingTime(UserId, Remaining); //À¯Àú¿¡°Ô ³²Àº ½Ã°£ ´ñ±Û·Î ¼Û½ÅÇÏ´Â ·ÎÁ÷
+		SendToUserRemainingTime(UserId, Remaining); //ìœ ì €ì—ê²Œ ë‚¨ì€ ì‹œê°„ ëŒ“ê¸€ë¡œ ì†¡ì‹ í•˜ëŠ” ë¡œì§
 		return;
 	}
 
 	FCommentLog Log{ CommentId, UserId, Now, CleanContent };
 	CommentLogs.Add(Log);
 
-	if (IsSpamming(UserId, CleanContent, Now)) //µµ¹è °¨Áö
+	if (IsSpamming(UserId, CleanContent, Now)) //ë„ë°° ê°ì§€
 	{
-		UE_LOG(LogTemp, Warning, TEXT("µµ¹è °¨ÁöµÊ: ¹«½Ã Ã³¸®"));
+		UE_LOG(LogTemp, Warning, TEXT("ë„ë°° ê°ì§€ë¨: ë¬´ì‹œ ì²˜ë¦¬"));
 		HandleSpamPenalty(*User, Now);
 		return;
 	}
@@ -91,7 +91,7 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 
 FString AYouTubeChatManager::PreprocessCommand(const FString& Input) 
 {
-	return Input.TrimStartAndEnd(); //½ÃÀÛ°ú ³¡ °ø¹é Á¦°ÅÃ³¸®
+	return Input.TrimStartAndEnd(); //ì‹œì‘ê³¼ ë ê³µë°± ì œê±°ì²˜ë¦¬
 }
 
 bool AYouTubeChatManager::IsSpamming(const FString& UserId, const FString& Content, const FDateTime& CurrentTime)
@@ -107,12 +107,12 @@ bool AYouTubeChatManager::IsSpamming(const FString& UserId, const FString& Conte
 		}
 
 		if (Log.UserId == UserId) {
-			if (Log.Content == Content) //°°Àº À¯Àú°¡ °°Àº ¹®ÀÚ¸¦ SpamTimeLimitSeconds ¾È¿¡ º¸³½ °æ¿ì Áï½Ã µµ¹è·Î °£ÁÖ
+			if (Log.Content == Content) //ê°™ì€ ìœ ì €ê°€ ê°™ì€ ë¬¸ìë¥¼ SpamTimeLimitSeconds ì•ˆì— ë³´ë‚¸ ê²½ìš° ì¦‰ì‹œ ë„ë°°ë¡œ ê°„ì£¼
 			{
 				return true;
 			}
 			
-			if (++RecentCount >= MaxAllowedComments) //SpamTimeLimitSeconds ÀÌ³»¿¡ ÇÑ À¯Àú°¡ MaxAllowedComments ÀÌ»óÀÇ Ã¤ÆÃÀ» Ä£ °æ¿ì µµ¹è·Î °£ÁÖ
+			if (++RecentCount >= MaxAllowedComments) //SpamTimeLimitSeconds ì´ë‚´ì— í•œ ìœ ì €ê°€ MaxAllowedComments ì´ìƒì˜ ì±„íŒ…ì„ ì¹œ ê²½ìš° ë„ë°°ë¡œ ê°„ì£¼
 			{
 				return true;
 			}
@@ -130,11 +130,11 @@ void AYouTubeChatManager::RequestLiveChatId()
 		*ApiKey
 	);
 
-	FHttpModule* Http = &FHttpModule::Get(); //Http¸¦ °üÀåÇÏ´Â singletonÀÇ ÁÖ¼Ò¸¦ Http¿¡ ¹Ş¾Æ¿È (Æ÷ÀÎÅÍ Çü½ÄÀ¸·Î)
+	FHttpModule* Http = &FHttpModule::Get(); //Httpë¥¼ ê´€ì¥í•˜ëŠ” singletonì˜ ì£¼ì†Œë¥¼ Httpì— ë°›ì•„ì˜´ (í¬ì¸í„° í˜•ì‹ìœ¼ë¡œ)
 
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest(); //IHttpRequestÇü½ÄÀÇ Æ÷ÀÎÅÍ º¯¼öÀÎµ¥, ÇÔ¼ö°¡ ³¡³ªµµ ÂüÁ¶°¡ ³²¾ÆÀÖ´Ù¸é ¸Ş¸ğ¸®¿¡¼­ »ç¶óÁöÁö ¾ÊÀ½! ´ë½Å FHttpRequestPtr·Î ¾µ ¼ö ÀÖÀ½
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest(); //IHttpRequestí˜•ì‹ì˜ í¬ì¸í„° ë³€ìˆ˜ì¸ë°, í•¨ìˆ˜ê°€ ëë‚˜ë„ ì°¸ì¡°ê°€ ë‚¨ì•„ìˆë‹¤ë©´ ë©”ëª¨ë¦¬ì—ì„œ ì‚¬ë¼ì§€ì§€ ì•ŠìŒ! ëŒ€ì‹  FHttpRequestPtrë¡œ ì“¸ ìˆ˜ ìˆìŒ
 
-	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnLiveChatIdResponse); //¿äÃ»Çß´ø ÀÚ±â ÀÚ½ÅÀÇ Æ÷ÀÎÅÍ, ±¸±ÛÀÌ º¸³»ÁØ JSON ÀÀ´ä º»¹® ¹× HTTP »óÅÂ ÄÚµå(200 OK µî)°¡ ´ã±ä °´Ã¼, ¿¬°á ¼º°ø ¿©ºÎ¸¦ ¸Å°³º¯¼ö·Î ³Ñ±è
+	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnLiveChatIdResponse); //ìš”ì²­í–ˆë˜ ìê¸° ìì‹ ì˜ í¬ì¸í„°, êµ¬ê¸€ì´ ë³´ë‚´ì¤€ JSON ì‘ë‹µ ë³¸ë¬¸ ë° HTTP ìƒíƒœ ì½”ë“œ(200 OK ë“±)ê°€ ë‹´ê¸´ ê°ì²´, ì—°ê²° ì„±ê³µ ì—¬ë¶€ë¥¼ ë§¤ê°œë³€ìˆ˜ë¡œ ë„˜ê¹€
 
 	Request->SetURL(Url);
 	Request->SetVerb("GET");
@@ -158,14 +158,14 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId")))
 			{
 				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId"));
-				UE_LOG(LogTemp, Log, TEXT("LiveChatID È¹µæ ¼º°ø %s"), *LiveChatId);
+				UE_LOG(LogTemp, Log, TEXT("LiveChatID íšë“ ì„±ê³µ %s"), *LiveChatId);
 
 				RequestMessages();
 				return;
 			}
 		}
 	}
-	UE_LOG(LogTemp, Error, TEXT("LiveChatID È¹µæ ½ÇÆĞ (ÇöÀç ¶óÀÌºê ½ºÆ®¸®¹Ö ÁßÀÎÁö È®ÀÎÇÏ¼¼¿ä)"));
+	UE_LOG(LogTemp, Error, TEXT("LiveChatID íšë“ ì‹¤íŒ¨ (í˜„ì¬ ë¼ì´ë¸Œ ìŠ¤íŠ¸ë¦¬ë° ì¤‘ì¸ì§€ í™•ì¸í•˜ì„¸ìš”)"));
 }
 
 void AYouTubeChatManager::RequestMessages()
@@ -182,25 +182,25 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 
 }
 
-//µµ¹è À¯ÀúÀÇ Â÷´Ü ½Ã°£ °¡Áß ÇÔ¼ö 
+//ë„ë°° ìœ ì €ì˜ ì°¨ë‹¨ ì‹œê°„ ê°€ì¤‘ í•¨ìˆ˜ 
 void AYouTubeChatManager::HandleSpamPenalty(FUserInfo& User, const FDateTime& Now)
 {
 	User.BlacklistCount++;
 
-	int32 BanMinutes = User.BlacklistCount * 1; //ºí·¢´çÇÑ È½¼ö*ºĞ ¸¸Å­ ÆĞ³ÎÆ¼ÀÖÀ½
+	int32 BanMinutes = User.BlacklistCount * 1; //ë¸”ë™ë‹¹í•œ íšŸìˆ˜*ë¶„ ë§Œí¼ íŒ¨ë„í‹°ìˆìŒ
 	User.UnbanTime = Now + FTimespan::FromMinutes(BanMinutes);
-	UE_LOG(LogTemp, Error, TEXT("%s À¯Àú°¡ %dºĞ°£ ºí·¢¸®½ºÆ®·Î µî·ÏµÇ¾ú½À´Ï´Ù."), *User.UserId, BanMinutes);
+	UE_LOG(LogTemp, Error, TEXT("%s ìœ ì €ê°€ %dë¶„ê°„ ë¸”ë™ë¦¬ìŠ¤íŠ¸ë¡œ ë“±ë¡ë˜ì—ˆìŠµë‹ˆë‹¤."), *User.UserId, BanMinutes);
 }
 
 void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FString& Command)
 {
-	//TODO: ³ªÁß¿¡ ·ÎÁ÷ ³ÖÀ»°Í
-	UE_LOG(LogTemp, Log, TEXT("[¸í·É¾î ½ÇÇà] À¯Àú: %s | ¸í·É: %s"), *UserId, *Command);
+	//TODO: ë‚˜ì¤‘ì— ë¡œì§ ë„£ì„ê²ƒ
+	UE_LOG(LogTemp, Log, TEXT("[ëª…ë ¹ì–´ ì‹¤í–‰] ìœ ì €: %s | ëª…ë ¹: %s"), *UserId, *Command);
 }
 
 void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimespan Remaining)
 {
-	//TODO: Ã¤ÆÃÀ¸·Î ¾ó¸¶µ¿¾È ºí·¢ÀÎÁö ½÷ÁÙ °Í 
-	UE_LOG(LogTemp, Warning, TEXT("[%s] À¯Àú¿¡°Ô ³²Àº Â÷´Ü ½Ã°£ ¾Ë¸² ¼Û½Å: %.0fÃÊ"), *UserId, Remaining.GetTotalSeconds());
+	//TODO: ì±„íŒ…ìœ¼ë¡œ ì–¼ë§ˆë™ì•ˆ ë¸”ë™ì¸ì§€ ì´ì¤„ ê²ƒ 
+	UE_LOG(LogTemp, Warning, TEXT("[%s] ìœ ì €ì—ê²Œ ë‚¨ì€ ì°¨ë‹¨ ì‹œê°„ ì•Œë¦¼ ì†¡ì‹ : %.0fì´ˆ"), *UserId, Remaining.GetTotalSeconds());
 }
 

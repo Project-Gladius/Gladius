@@ -1,0 +1,5 @@
+root = true
+
+# 한글 주석/문자열이 CP949로 저장되면 UE 빌드가 실패하므로 UTF-8 BOM으로 강제
+[*.{h,cpp,cs}]
+charset = utf-8-bom
