@@ -150,20 +150,15 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid()) 
 	{
-		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items")); //´ë°ıÈ£ Ç®°í °¢°¢ ¿ä¼Ò ¹è¿­¿¡ ³Ö±â (items ¹è¿­À» ¿Å±ä°Í)
+		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items")); 
 		if (Items.Num() > 0)
 		{
-			TSharedPtr<FJsonObject> Details = Items[0]->AsObject()->GetObjectField(TEXT("liveStreamingDetails"));  //Ã¹¹øÂ° ¹è¿­¿ø¼ÒÀÇ liveStreamingDetails¸¦ °´Ã¼·Î °¡Á®¿Í¼­ Details¿¡ ¹ŞÀ½
+			TSharedPtr<FJsonObject> Details = Items[0]->AsObject()->GetObjectField(TEXT("liveStreamingDetails"));  
 
-			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId"))) //Details¿¡¼­ activeLiveChatId¸¦ Ã£À½
+			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId"))) 
 			{
-<<<<<<< Updated upstream
 				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId"));
-				UE_LOG(LogTemp, Log, TEXT("LiveChatID íšë“ ì„±ê³µ %s"), *LiveChatId);
-=======
-				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId")); //Details¿¡¼­ activeLiveChatId¿¡ ÇØ´çÇÏ´Â value¸¦ LiveChatId·Î ¹ŞÀ½
-				UE_LOG(LogTemp, Log, TEXT("LiveChatID È¹µæ ¼º°ø %s"), *LiveChatId);
->>>>>>> Stashed changes
+				UE_LOG(LogTemp, Log, TEXT("LiveChatID íšë“ ì„±ê³µ %s"), *LiveChatId); //LivechatID ê°€ì ¸ì˜¤ê¸°
 
 				RequestMessages();
 				return;
@@ -221,13 +216,13 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			TSharedPtr<FJsonObject> MessageObj = Item->AsObject();
 			if (!MessageObj.IsValid()) continue;
 
-			FString CommentId = MessageObj->GetStringField(TEXT("id")); //Ã¤ÆÃ°íÀ¯ id »Ì¾Æ³¿
+			FString CommentId = MessageObj->GetStringField(TEXT("id")); //ì±„íŒ… ê³ ìœ  idê°€ì ¸ì˜¤ê¸°
 
 			TSharedPtr<FJsonObject> SnippetObj = MessageObj->GetObjectField(TEXT("snippet"));
-			FString Content = SnippetObj->GetStringField(TEXT("displayMessage")); //Ã¤ÆÃ ³»¿ë »Ì¾Æ³¿
+			FString Content = SnippetObj->GetStringField(TEXT("displayMessage")); //ì±„íŒ… ê°€ì ¸ì˜¤ê¸°
 
 			TSharedPtr<FJsonObject> AuthorObj = MessageObj->GetObjectField(TEXT("authorDetails"));
-			FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //Ã¤ÆÃÄ£ »ç¶÷ »Ì¾Æ³¿
+			FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //ì±„íŒ…ì„ ì¹œ idë¥¼ ê°€ì ¸ì˜¤ê¸°
 
 			OnReceiveYouTubeComment(CommentId, UserId, Content);
 		}
