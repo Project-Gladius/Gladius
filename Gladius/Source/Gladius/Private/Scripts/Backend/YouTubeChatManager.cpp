@@ -21,6 +21,7 @@ void AYouTubeChatManager::BeginPlay()
 {
 	Super::BeginPlay();
 	
+	StartFetchingChat();
 }
 
 // Called every frame
@@ -76,15 +77,15 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 		return;
 	}
 
-	FCommentLog Log{ CommentId, UserId, Now, CleanContent };
-	CommentLogs.Add(Log);
-
 	if (IsSpamming(UserId, CleanContent, Now)) //도배 감지
 	{
 		UE_LOG(LogTemp, Warning, TEXT("도배 감지됨: 무시 처리"));
 		HandleSpamPenalty(*User, Now);
 		return;
 	}
+
+	FCommentLog Log{ CommentId, UserId, Now, CleanContent };
+	CommentLogs.Add(Log);
 
 	ExecuteGameCommand(UserId, CleanContent);
 }
@@ -193,7 +194,18 @@ void AYouTubeChatManager::RequestMessages()
 
 void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
-	if (!bWasSuccessful || !Response.IsValid()) return;
+	if (!bWasSuccessful || !Response.IsValid()) 
+	{
+		int32 ResponseCode = Response.IsValid() ? Response->GetResponseCode() : 0;
+		UE_LOG(LogTemp, Error, TEXT("채팅 수신 실패! HTTP Response Code: %d"), ResponseCode);
+
+		if (ResponseCode == 403)
+		{
+			UE_LOG(LogTemp, Error, TEXT("API 일일 할당량을 모두 소모했거나 권한이 없습니다!"));
+		}
+
+		return;
+	}
 
 	TSharedPtr<FJsonObject> JsonObject;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
@@ -205,9 +217,10 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 		}
 
 		float NextPollDelay = 5.0f;
-		if (JsonObject->HasField(TEXT("pollingIntervalMills"))) 
+		if (JsonObject->HasField(TEXT("pollingIntervalMillis"))) 
 		{
-			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMills"));
+			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMillis"));
+			NextPollDelay /= 1000.0;
 		}
 
 		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
@@ -226,6 +239,8 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 
 			OnReceiveYouTubeComment(CommentId, UserId, Content);
 		}
+
+		//UE_LOG(LogTemp, Log, TEXT(">>> [%.1f초] 뒤에 다음 채팅을 요청합니다. (NextPageToken: %s)"), NextPollDelay, *NextPageToken); //디버깅용
 
 		GetWorldTimerManager().SetTimer(
 			ChatFetchTimerHandle,
