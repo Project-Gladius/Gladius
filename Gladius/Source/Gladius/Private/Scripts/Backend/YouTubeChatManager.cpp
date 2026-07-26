@@ -150,15 +150,20 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid()) 
 	{
-		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
+		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items")); //¥Î∞˝»£ «Æ∞Ì ∞¢∞¢ ø‰º“ πËø≠ø° ≥÷±‚ (items πËø≠¿ª ø≈±‰∞Õ)
 		if (Items.Num() > 0)
 		{
-			TSharedPtr<FJsonObject> Details = Items[0]->AsObject()->GetObjectField(TEXT("liveStreamingDetails"));
+			TSharedPtr<FJsonObject> Details = Items[0]->AsObject()->GetObjectField(TEXT("liveStreamingDetails"));  //√ππ¯¬∞ πËø≠ø¯º“¿« liveStreamingDetails∏¶ ∞¥√º∑Œ ∞°¡ÆøÕº≠ Detailsø° πﬁ¿Ω
 
-			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId")))
+			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId"))) //Detailsø°º≠ activeLiveChatId∏¶ √£¿Ω
 			{
+<<<<<<< Updated upstream
 				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId"));
 				UE_LOG(LogTemp, Log, TEXT("LiveChatID ÌöçÎìù ÏÑ±Í≥µ %s"), *LiveChatId);
+=======
+				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId")); //Detailsø°º≠ activeLiveChatIdø° «ÿ¥Á«œ¥¬ value∏¶ LiveChatId∑Œ πﬁ¿Ω
+				UE_LOG(LogTemp, Log, TEXT("LiveChatID »πµÊ º∫∞¯ %s"), *LiveChatId);
+>>>>>>> Stashed changes
 
 				RequestMessages();
 				return;
@@ -170,16 +175,71 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 void AYouTubeChatManager::RequestMessages()
 {
+	if (LiveChatId.IsEmpty() || ApiKey.IsEmpty()) return;
 	FString Url = FString::Printf(
 		TEXT("https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=%s&part=snippet,authorDetails&key=%s"),
 		*LiveChatId,
 		*ApiKey
 	);
+
+	if (!NextPageToken.IsEmpty()) {
+		Url += FString::Printf(TEXT("&pageToken=%s"), *NextPageToken);
+	}
+
+	FHttpModule* Http = &FHttpModule::Get();
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
+
+	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnChatMessagesResponse);
+
+	Request->SetURL(Url);
+	Request->SetVerb("GET");
+	Request->ProcessRequest();
 }
 
 void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
+	if (!bWasSuccessful || !Response.IsValid()) return;
 
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+
+	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid()) {
+		if (JsonObject->HasField(TEXT("nextPageToken")))
+		{
+			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
+		}
+
+		float NextPollDelay = 5.0f;
+		if (JsonObject->HasField(TEXT("pollingIntervalMills"))) 
+		{
+			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMills"));
+		}
+
+		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
+
+		for (const TSharedPtr<FJsonValue>& Item : Items) { 
+			TSharedPtr<FJsonObject> MessageObj = Item->AsObject();
+			if (!MessageObj.IsValid()) continue;
+
+			FString CommentId = MessageObj->GetStringField(TEXT("id")); //√§∆√∞Ì¿Ø id ªÃæ∆≥ø
+
+			TSharedPtr<FJsonObject> SnippetObj = MessageObj->GetObjectField(TEXT("snippet"));
+			FString Content = SnippetObj->GetStringField(TEXT("displayMessage")); //√§∆√ ≥ªøÎ ªÃæ∆≥ø
+
+			TSharedPtr<FJsonObject> AuthorObj = MessageObj->GetObjectField(TEXT("authorDetails"));
+			FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //√§∆√ƒ£ ªÁ∂˜ ªÃæ∆≥ø
+
+			OnReceiveYouTubeComment(CommentId, UserId, Content);
+		}
+
+		GetWorldTimerManager().SetTimer(
+			ChatFetchTimerHandle,
+			this,
+			&AYouTubeChatManager::RequestMessages,
+			NextPollDelay,
+			false
+		);
+	}
 }
 
 //ÎèÑÎ∞∞ Ïú†Ï†ÄÏùò Ï∞®Îã® ÏãúÍ∞Ñ Í∞ÄÏ§ë Ìï®Ïàò 
