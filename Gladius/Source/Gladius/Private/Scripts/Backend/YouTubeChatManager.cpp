@@ -6,6 +6,9 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/PlatformFileManager.h"
 //이걸 왜 헤더가 아니라 여기다가 추가한거지? -> .h를 참조하는 모든 cpp에 헤더가 박히면 느려짐
 
 // Sets default values
@@ -54,6 +57,9 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 
 	//공백 제거 등 명령어 전처리
 	FString CleanContent = PreprocessCommand(Content);
+
+	//받은 채팅을 그날그날 txt 파일로 저장 (도배/블랙 여부와 무관하게 원본 로그로 남김)
+	SaveCommentLogToFile(UserId, CleanContent, Now);
 
 	FUserInfo* User = UserDatabase.Find(UserId); //왜 포인터로 받게 되는거? -> 데이터 없음 (null) 표현과 데이터 복사방지
 
@@ -216,12 +222,15 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
 		}
 
-		float NextPollDelay = 5.0f;
-		if (JsonObject->HasField(TEXT("pollingIntervalMillis"))) 
+		float NextPollDelay = MinPollIntervalSeconds;
+		if (JsonObject->HasField(TEXT("pollingIntervalMillis")))
 		{
 			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMillis"));
 			NextPollDelay /= 1000.0;
 		}
+
+		//유튜브가 알려준 주기가 최소 주기보다 짧으면 최소 주기(5초)로 늘려서 요청
+		NextPollDelay = FMath::Max(NextPollDelay, MinPollIntervalSeconds);
 
 		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
 
@@ -270,7 +279,43 @@ void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FStrin
 
 void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimespan Remaining)
 {
-	//TODO: 채팅으로 얼마동안 블랙인지 쏴줄 것 
+	//TODO: 채팅으로 얼마동안 블랙인지 쏴줄 것
 	UE_LOG(LogTemp, Warning, TEXT("[%s] 유저에게 남은 차단 시간 알림 송신: %.0f초"), *UserId, Remaining.GetTotalSeconds());
+}
+
+//받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장
+void AYouTubeChatManager::SaveCommentLogToFile(const FString& UserId, const FString& Content, const FDateTime& Now)
+{
+	//로그 폴더 경로: <프로젝트>/Saved/ChatLogs
+	const FString LogDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("ChatLogs"));
+
+	//폴더가 없으면 생성 (두 번째 인자 true: 상위 폴더까지 재귀적으로 생성)
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PlatformFile.DirectoryExists(*LogDir))
+	{
+		PlatformFile.CreateDirectoryTree(*LogDir);
+	}
+
+	//파일 이름: 그날 날짜(로컬 시간 기준) 예) 2026-08-02.txt
+	const FDateTime LocalNow = FDateTime::Now();
+	const FString FileName = LocalNow.ToString(TEXT("%Y-%m-%d")) + TEXT(".txt");
+	const FString FilePath = FPaths::Combine(LogDir, FileName);
+
+	//한 줄 형식: [HH:MM:SS] UserId: Content
+	const FString LogLine = FString::Printf(
+		TEXT("[%s] %s: %s") LINE_TERMINATOR,
+		*LocalNow.ToString(TEXT("%H:%M:%S")),
+		*UserId,
+		*Content
+	);
+
+	//기존 파일에 이어 붙이기 (없으면 새로 생성), UTF-8로 저장
+	FFileHelper::SaveStringToFile(
+		LogLine,
+		*FilePath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
+		&IFileManager::Get(),
+		FILEWRITE_Append
+	);
 }
 

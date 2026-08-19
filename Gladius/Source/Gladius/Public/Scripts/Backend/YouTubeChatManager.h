@@ -84,6 +84,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
 	int32 MaxAllowedComments = 3;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+	float MinPollIntervalSeconds = 5.0f; //채팅을 긁어오는 최소 주기(초)
+
 	UFUNCTION(BlueprintCallable, Category = "YouTube")
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
 
@@ -105,4 +108,7 @@ private:
 	void HandleSpamPenalty(FUserInfo& User, const FDateTime& Now);
 	void ExecuteGameCommand(const FString& UserId, const FString& Command);
 	void SendToUserRemainingTime(const FString& UserId, FTimespan Remaining);
+
+	//채팅을 그날그날 txt 파일로 저장하는 함수
+	void SaveCommentLogToFile(const FString& UserId, const FString& Content, const FDateTime& Now);
 };
