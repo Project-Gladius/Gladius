@@ -2,7 +2,9 @@
 
 
 #include "Scripts/Backend/YouTubeChatManager.h"
-#include "HttpModule.h" 
+#include "Scripts/Backend/ChatCommandParser.h"
+#include "Scripts/Backend/CommandDispatcher.h"
+#include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
@@ -23,7 +25,14 @@ AYouTubeChatManager::AYouTubeChatManager()
 void AYouTubeChatManager::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
+	CommandDispatcher = NewObject<UCommandDispatcher>(this);
+	CommandDispatcher->Initialize();
+
+	//전투상태 여부 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
+	CommandDispatcher->IsInCombatStateDelegate.BindUObject(this, &AYouTubeChatManager::IsInCombatState);
+	CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
+
 	StartFetchingChat();
 }
 
@@ -273,14 +282,36 @@ void AYouTubeChatManager::HandleSpamPenalty(FUserInfo& User, const FDateTime& No
 
 void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FString& Command)
 {
-	//TODO: 나중에 로직 넣을것
-	UE_LOG(LogTemp, Log, TEXT("[명령어 실행] 유저: %s | 명령: %s"), *UserId, *Command);
+	FParsedCommand ParsedCommand;
+
+	//"!"로 시작하는 명령어 형식이 아니거나 알 수 없는 명령어는 전부 무시
+	if (!FChatCommandParser::TryParse(UserId, Command, ParsedCommand))
+	{
+		return;
+	}
+
+	if (CommandDispatcher)
+	{
+		CommandDispatcher->Execute(ParsedCommand);
+	}
 }
 
 void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimespan Remaining)
 {
 	//TODO: 채팅으로 얼마동안 블랙인지 쏴줄 것
 	UE_LOG(LogTemp, Warning, TEXT("[%s] 유저에게 남은 차단 시간 알림 송신: %.0f초"), *UserId, Remaining.GetTotalSeconds());
+}
+
+bool AYouTubeChatManager::IsInCombatState() const
+{
+	//TODO: GameManager(또는 유사한 게임 상태 관리자)가 생기면 그쪽의 실제 전투/신전 상태를 받아오도록 교체
+	return bIsInCombatState;
+}
+
+void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)
+{
+	//TODO: DB에서 UserId에 해당하는 플레이어 데이터를 조회하고, 없으면 새로 생성한 뒤 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
+	UE_LOG(LogTemp, Log, TEXT("[로그인] 유저 %s 의 전투 참가 로그인 처리 필요"), *UserId);
 }
 
 //받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장

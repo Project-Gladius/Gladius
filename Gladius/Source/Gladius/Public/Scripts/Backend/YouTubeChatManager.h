@@ -6,6 +6,8 @@
 #include "GladiusTypes.h"
 #include "YouTubeChatManager.generated.h"
 
+class UCommandDispatcher;
+
 USTRUCT(BlueprintType)
 struct FCommentLog
 {
@@ -71,6 +73,17 @@ public:
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
 
 private:
+	//TODO: 실제로는 GameManager(또는 유사한 게임 상태 관리자)에서 현재 전투/신전 상태를 받아와야 함. 지금은 임시로 값을 직접 들고 있음
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game State")
+	bool bIsInCombatState = false;
+
+	//CommandDispatcher의 IsInCombatStateDelegate에 바인딩되는 함수
+	bool IsInCombatState() const;
+
+	//CommandDispatcher의 OnUserLoginRequired 구독 함수
+	//TODO: DB에서 플레이어 데이터를 조회하고 없으면 새로 생성한 뒤, 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
+	void HandleUserLoginRequired(const FString& UserId);
+
 	//API 상태 저장용 변수
 	FString LiveChatId;
 	FString NextPageToken;
@@ -88,6 +101,10 @@ private:
 	void HandleSpamPenalty(FUserInfo& User, const FDateTime& Now);
 	void ExecuteGameCommand(const FString& UserId, const FString& Command);
 	void SendToUserRemainingTime(const FString& UserId, FTimespan Remaining);
+
+	//명령어(ECommandType) -> 처리 함수를 연결해주는 디스패처
+	UPROPERTY()
+	TObjectPtr<UCommandDispatcher> CommandDispatcher;
 
 	//채팅을 그날그날 txt 파일로 저장하는 함수
 	void SaveCommentLogToFile(const FString& UserId, const FString& Content, const FDateTime& Now);
