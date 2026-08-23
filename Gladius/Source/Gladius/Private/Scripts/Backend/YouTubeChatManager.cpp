@@ -5,6 +5,7 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
+#include "GameFramework/Actor.h" 
 #include "Kismet/GameplayStatics.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"

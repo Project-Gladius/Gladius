@@ -75,7 +75,7 @@ public:
 
 private:
 	//현재 전투/신전 상태를 들고 있는 GameManager 참조. 에디터에서 직접 지정하지 않으면 BeginPlay에서 월드를 검색해 채움
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Game State")
+	UPROPERTY(EditInstanceOnly, Category = "Game State")
 	TObjectPtr<AGameManager> GameManagerRef;
 
 	//CommandDispatcher의 GetGameStateDelegate에 바인딩되는 함수. GameManagerRef가 없으면 기본값(신전상태) 반환
