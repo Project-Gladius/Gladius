@@ -24,8 +24,6 @@ void UCommandDispatcher::RegisterCommandHandlers()
 
 void UCommandDispatcher::Execute(const FParsedCommand& Command)
 {
-	//TODO: 게임 매니저에서 현재 상태(전투/신전)를 받아와 그 상태에 맞는 명령인지 검사하는 로직 추가 예정
-
 	if (IsCombatCommand(Command.CommandType))
 	{
 		//로그아웃 자체는 로그인을 트리거하는 명령이 아니므로 제외 (공격/방어/회피 3종만 자동 로그인 트리거)
@@ -35,6 +33,11 @@ void UCommandDispatcher::Execute(const FParsedCommand& Command)
 		}
 
 		UpdateLogoutStatus(Command.UserId, true);
+	}
+
+	if (!IsCommandValidForCurrentState(Command.CommandType))
+	{
+		return; //현재 게임 상태(전투/신전)와 맞지 않는 명령어는 무시 (ex. 전투중 !강화, 신전에서 !공격)
 	}
 
 	if (const FCommandHandler* Handler = CommandHandlers.Find(Command.CommandType))
@@ -60,11 +63,20 @@ bool UCommandDispatcher::IsCombatCommand(ECommandType CommandType) const
 	}
 }
 
+bool UCommandDispatcher::IsCommandValidForCurrentState(ECommandType CommandType) const
+{
+	//GetGameStateDelegate가 아직 바인딩되지 않았다면(GameManager 연결 전) 기본값으로 신전상태 취급
+	const EGameState CurrentState = GetGameStateDelegate.IsBound() ? GetGameStateDelegate.Execute() : EGameState::Temple;
+
+	return IsCombatCommand(CommandType)
+		? (CurrentState == EGameState::Combat)
+		: (CurrentState == EGameState::Temple);
+}
+
 void UCommandDispatcher::TryAutoLogin(const FString& UserId)
 {
-	//TODO: 지금은 game이 전투상태인지 구분하는 로직이 없어서 IsInCombatStateDelegate가 그 역할을 임시로 대신함
-	//바인딩되어있지 않거나(아직 아무도 연결 안함) false를 반환하면(전투상태 아님) 로그인 트리거 안함
-	if (!IsInCombatStateDelegate.IsBound() || !IsInCombatStateDelegate.Execute())
+	//GetGameStateDelegate가 바인딩되어있지 않거나(아직 GameManager 연결 전) 전투상태가 아니면 로그인 트리거 안함
+	if (!GetGameStateDelegate.IsBound() || GetGameStateDelegate.Execute() != EGameState::Combat)
 	{
 		return;
 	}

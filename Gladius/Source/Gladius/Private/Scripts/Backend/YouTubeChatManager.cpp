@@ -4,6 +4,8 @@
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
+#include "Scripts/Backend/GameManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
@@ -26,11 +28,16 @@ void AYouTubeChatManager::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (!GameManagerRef)
+	{
+		GameManagerRef = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(GetWorld(), AGameManager::StaticClass()));
+	}
+
 	CommandDispatcher = NewObject<UCommandDispatcher>(this);
 	CommandDispatcher->Initialize();
 
-	//전투상태 여부 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
-	CommandDispatcher->IsInCombatStateDelegate.BindUObject(this, &AYouTubeChatManager::IsInCombatState);
+	//전투/신전 상태 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
+	CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
 	CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
 
 	StartFetchingChat();
@@ -302,10 +309,10 @@ void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimesp
 	UE_LOG(LogTemp, Warning, TEXT("[%s] 유저에게 남은 차단 시간 알림 송신: %.0f초"), *UserId, Remaining.GetTotalSeconds());
 }
 
-bool AYouTubeChatManager::IsInCombatState() const
+EGameState AYouTubeChatManager::GetCurrentGameState() const
 {
-	//TODO: GameManager(또는 유사한 게임 상태 관리자)가 생기면 그쪽의 실제 전투/신전 상태를 받아오도록 교체
-	return bIsInCombatState;
+	//GameManagerRef를 찾지 못한 경우(월드에 배치 안 됨 등) 기본값으로 신전상태 취급
+	return GameManagerRef ? GameManagerRef->GetGameState() : EGameState::Temple;
 }
 
 void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)

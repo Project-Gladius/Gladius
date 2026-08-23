@@ -7,6 +7,7 @@
 #include "YouTubeChatManager.generated.h"
 
 class UCommandDispatcher;
+class AGameManager;
 
 USTRUCT(BlueprintType)
 struct FCommentLog
@@ -73,12 +74,12 @@ public:
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
 
 private:
-	//TODO: 실제로는 GameManager(또는 유사한 게임 상태 관리자)에서 현재 전투/신전 상태를 받아와야 함. 지금은 임시로 값을 직접 들고 있음
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game State")
-	bool bIsInCombatState = false;
+	//현재 전투/신전 상태를 들고 있는 GameManager 참조. 에디터에서 직접 지정하지 않으면 BeginPlay에서 월드를 검색해 채움
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Game State")
+	TObjectPtr<AGameManager> GameManagerRef;
 
-	//CommandDispatcher의 IsInCombatStateDelegate에 바인딩되는 함수
-	bool IsInCombatState() const;
+	//CommandDispatcher의 GetGameStateDelegate에 바인딩되는 함수. GameManagerRef가 없으면 기본값(신전상태) 반환
+	EGameState GetCurrentGameState() const;
 
 	//CommandDispatcher의 OnUserLoginRequired 구독 함수
 	//TODO: DB에서 플레이어 데이터를 조회하고 없으면 새로 생성한 뒤, 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정

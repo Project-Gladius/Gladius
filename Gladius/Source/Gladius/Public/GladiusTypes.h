@@ -25,8 +25,16 @@ struct FUserInfo
 	int32 BlacklistCount = 0;
 };
 
+// 현재 게임이 전투상태인지 신전상태인지 나타내는 값 (AGameManager가 들고 있는 값)
+// 이 값에 따라 로그인 가능 여부와 어떤 ECommandType이 유효한지가 결정됨
+UENUM(BlueprintType)
+enum class EGameState : uint8
+{
+	Temple, // 신전상태 - 강화(!강화), 대화(!대화) 명령어만 유효
+	Combat, // 전투상태 - 공격/방어/회피/로그아웃 명령어만 유효, 로그인도 이 상태에서만 트리거됨
+};
+
 // 채팅 명령어(!명령어 내용)로 실행 가능한 게임 명령의 종류
-// TODO: 전투상태/신전상태 구분은 게임 매니저가 추가되면 적용 예정. 지금은 상태 구분 없이 전체 명령을 나열만 함
 UENUM(BlueprintType)
 enum class ECommandType : uint8
 {
