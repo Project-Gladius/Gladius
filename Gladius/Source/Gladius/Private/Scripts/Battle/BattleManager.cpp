@@ -5,13 +5,18 @@
 #include "GameFramework/PlayerController.h"
 #include "Components/TextRenderComponent.h"
 #include "DrawDebugHelpers.h"
+#include "JsonObjectConverter.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 //보스와 레인 첫 줄이 떨어진 거리 (ArenaRadius 배율). 손댈 일이 없어 상수로 둔다
 static constexpr float BossDistanceRatio = 0.8f;
 static constexpr float LaneDistanceRatio = 0.7f;
 
-//키보드로 조종하는 더미 유저
+//키보드로 조종하는 더미 유저. AddTestPlayer가 0번에 붙이는 이름과 같아야
+//Q로 만들든 키로 만들든 이름표가 흔들리지 않는다
 static const FString DebugUserId = TEXT("@testuser00");
+static const FString DebugDisplayName = TEXT("테스터00");
 
 ABattleManager::ABattleManager()
 {
@@ -33,16 +38,24 @@ void ABattleManager::BeginPlay()
 {
 	Super::BeginPlay();
 
+	LoadRecords();
+
 	BindActionKeys();
 	DrawArenaGuides();
 	StartBattle();
+}
+
+void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	//방송이 정상 종료되는 경우의 마지막 저장
+	SaveRecords();
+	Super::EndPlay(EndPlayReason);
 }
 
 void ABattleManager::StartBattle()
 {
 	EnemyHP = EnemyMaxHP;
 	TurnIndex = 0;
-	LastEnemyLane = -1;
 	SpawnBoss();
 	UpdateVisuals();
 	StartTurn();
@@ -128,6 +141,68 @@ bool ABattleManager::ParseCommand(const FString& Text, EBattleAction& OutAction)
 	return false;
 }
 
+// ---------------- 저장 ----------------
+
+FString ABattleManager::SaveFilePath()
+{
+	return FPaths::ProjectSavedDir() / TEXT("PlayerData.json");
+}
+
+void ABattleManager::SaveRecords()
+{
+	FPlayerRecordFile File;
+	Records.GenerateValueArray(File.Records);
+
+	FString Json;
+	if (!FJsonObjectConverter::UStructToJsonObjectString(File, Json))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록 직렬화 실패"));
+		return;
+	}
+
+	//인코딩을 지정하지 않으면 한글 핸들이 섞였을 때 UTF-16으로 저장돼
+	//외부 도구에서 열기 번거로워진다. 읽을 때는 자동 판별되므로 저장만 고정하면 된다
+	if (!FFileHelper::SaveStringToFile(Json, *SaveFilePath(),
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	{
+		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록 저장 실패: %s"), *SaveFilePath());
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Battle] 유저 기록 %d명 저장"), File.Records.Num());
+}
+
+void ABattleManager::LoadRecords()
+{
+	FString Json;
+	if (!FFileHelper::LoadFileToString(Json, *SaveFilePath()))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 저장된 유저 기록 없음 — 새로 시작합니다"));
+		return;
+	}
+
+	FPlayerRecordFile File;
+	if (!FJsonObjectConverter::JsonObjectStringToUStruct(Json, &File))
+	{
+		//파일이 깨졌다면 덮어쓰지 않고 남겨둔다. 사람이 열어볼 수 있어야 한다
+		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록을 읽지 못했습니다: %s"), *SaveFilePath());
+		return;
+	}
+
+	Records.Empty();
+	for (const FPlayerRecord& Record : File.Records)
+	{
+		Records.Add(Record.UserId, Record);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Battle] 유저 기록 %d명 불러옴"), Records.Num());
+}
+
+int32 ABattleManager::MaxHPFor(const FPlayerRecord& Record) const
+{
+	return PlayerMaxHP + Record.MaxHPBonus * HPPerBonus;
+}
+
 int32 ABattleManager::AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots)
 {
 	for (int32 i = 0; i < MaxSlots; ++i)
@@ -195,15 +270,22 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 			return false;
 		}
 
+		//저장된 기록이 있으면 능력치를 이어받고, 없으면 새로 만든다
+		FPlayerRecord& Record = Records.FindOrAdd(UserId);
+		Record.UserId = UserId;
+		Record.DisplayName = DisplayName;
+
 		FBattlePlayer NewPlayer;
 		NewPlayer.DisplayName = DisplayName;
-		NewPlayer.HP = PlayerMaxHP;
+		NewPlayer.MaxHP = MaxHPFor(Record);
+		NewPlayer.AttackBonus = Record.AttackBonus;
+		NewPlayer.HP = NewPlayer.MaxHP;
 		NewPlayer.SlotIndex = Slot;
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
 			SlotLocation(NewPlayer.Lane, Slot), FRotator::ZeroRotator);
 		NewPlayer.Unit->SetActorScale3D(FVector(UnitScale));
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
-		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, PlayerMaxHP);
+		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
 #if WITH_EDITOR
 		NewPlayer.Unit->SetActorLabel(UserId);
 #endif
@@ -211,12 +293,16 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		Players.Add(UserId, NewPlayer);
 		Player = Players.Find(UserId);
 
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d) — 현재 %d/%d명"),
-			*UserId, Slot, Players.Num(), MaxPlayers);
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, 공격+%d 체력+%d) — 현재 %d/%d명"),
+			*UserId, Slot, Record.AttackBonus, Record.MaxHPBonus, Players.Num(), MaxPlayers);
 	}
 
 	//핸들은 바뀔 수 있으니 매번 갱신
 	Player->DisplayName = DisplayName;
+	if (FPlayerRecord* Record = Records.Find(UserId))
+	{
+		Record->DisplayName = DisplayName;
+	}
 
 	//사망 중이면 입력을 받지 않는다
 	if (Player->ReviveCountdown > 0)
@@ -236,6 +322,10 @@ void ABattleManager::StartTurn()
 	++TurnIndex;
 	Phase = EBattlePhase::Input;
 
+	//보스 행동을 먼저 정해 입력 시간 내내 예고한다.
+	//판정 시점에 정하면 회피가 순수 확률 찍기가 되어 선택지의 의미가 없어진다
+	TelegraphedLane = ChooseEnemyLane();
+
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		Pair.Value.PendingAction = EBattleAction::Idle;
@@ -253,8 +343,8 @@ void ABattleManager::StartTurn()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 입력 시작 — %.1f초 / %d명 / Boss %d"),
-		TurnIndex, InputSeconds, Players.Num(), EnemyHP);
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 입력 시작 — %.1f초 / %d명 / Boss %d / 예고 Lane %d"),
+		TurnIndex, InputSeconds, Players.Num(), EnemyHP, (int32)TelegraphedLane);
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, InputSeconds, false);
 }
@@ -273,8 +363,8 @@ void ABattleManager::ResolveTurn()
 {
 	Phase = EBattlePhase::Resolve;
 
-	const EBattleLane EnemyLane = ChooseEnemyLane();
-	LastEnemyLane = (int32)EnemyLane;
+	//턴 시작 때 예고한 그대로 친다
+	const EBattleLane EnemyLane = TelegraphedLane;
 
 	int32 TotalDealt = 0;
 	int32 Died = 0;
@@ -291,7 +381,7 @@ void ABattleManager::ResolveTurn()
 			// 강화 능력치 50% 손실과 슈퍼챗 즉시부활도 능력치 구현 후에 붙인다
 			if (--P.ReviveCountdown == 0)
 			{
-				P.HP = PlayerMaxHP;
+				P.HP = P.MaxHP;
 				++Revived;
 			}
 			continue;
@@ -302,8 +392,9 @@ void ABattleManager::ResolveTurn()
 		const int32 Taken = DamageToPlayer(P.PendingAction, EnemyLane == P.Lane, EnemyDamage, DefenseMultiplier);
 		P.HP = FMath::Max(0, P.HP - Taken);
 
-		if (P.PendingAction == EBattleAction::Attack1) TotalDealt += Attack1Damage;
-		else if (P.PendingAction == EBattleAction::Attack2) TotalDealt += Attack2Damage;
+		const int32 Bonus = P.AttackBonus * DamagePerBonus;
+		if (P.PendingAction == EBattleAction::Attack1) TotalDealt += Attack1Damage + Bonus;
+		else if (P.PendingAction == EBattleAction::Attack2) TotalDealt += Attack2Damage + Bonus;
 
 		if (P.HP <= 0)
 		{
@@ -322,6 +413,10 @@ void ABattleManager::ResolveTurn()
 
 	LastTurnSummary = FString::Printf(TEXT("Boss attacked %s   Damage dealt %d   Down %d   Revived %d"),
 		*StaticEnum<EBattleLane>()->GetNameStringByValue((int64)EnemyLane), TotalDealt, Died, Revived);
+
+	//기록이 바뀌는 건 참가와 강화뿐이고 둘 다 턴 안에서 끝난다.
+	//주기 저장 대신 턴 경계에서만 쓰면 조절할 값도 없고 저장 시점도 분명해진다
+	SaveRecords();
 
 	if (EnemyHP <= 0)
 	{
@@ -377,7 +472,7 @@ void ABattleManager::UpdateVisuals()
 
 		//이동 보간 없이 순간이동
 		P.Unit->SetActorLocation(SlotLocation(P.Lane, P.SlotIndex));
-		P.Unit->SetLabel(P.DisplayName, P.HP, PlayerMaxHP);
+		P.Unit->SetLabel(P.DisplayName, P.HP, P.MaxHP);
 	}
 }
 
@@ -391,6 +486,9 @@ void ABattleManager::Tick(float DeltaTime)
 
 	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
 
+	const FString Telegraph = FString::Printf(TEXT("BOSS WILL ATTACK: %s"),
+		*StaticEnum<EBattleLane>()->GetNameStringByValue((int64)TelegraphedLane));
+
 	FString Body;
 	switch (Phase)
 	{
@@ -398,17 +496,17 @@ void ABattleManager::Tick(float DeltaTime)
 	{
 		const FBattlePlayer* Me = Players.Find(DebugUserId);
 		const FString MyLine = Me
-			? FString::Printf(TEXT("%s: %s  HP %d"), *DebugUserId,
-				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction), Me->HP)
+			? FString::Printf(TEXT("%s: %s  HP %d/%d"), *DebugUserId,
+				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction), Me->HP, Me->MaxHP)
 			: FString::Printf(TEXT("%s: not joined"), *DebugUserId);
 
 		Body = FString::Printf(
-			TEXT("CHOOSE YOUR ACTION   %.1fs\n%s\n1=Idle 2=Attack1 3=Attack2  4=AvoidL 5=AvoidM 6=AvoidR 7=Defense\nQ=add test player"),
-			Remaining, *MyLine);
+			TEXT("%s\nCHOOSE YOUR ACTION   %.1fs\n%s\n1=Idle 2=Attack1 3=Attack2  4=AvoidL 5=AvoidM 6=AvoidR 7=Defense\nQ=add test player  E=grant bonus"),
+			*Telegraph, Remaining, *MyLine);
 		break;
 	}
 	case EBattlePhase::Collect:
-		Body = FString::Printf(TEXT("COLLECTING...   %.1fs"), Remaining);
+		Body = FString::Printf(TEXT("%s\nCOLLECTING...   %.1fs"), *Telegraph, Remaining);
 		break;
 
 	default:
@@ -428,6 +526,26 @@ void ABattleManager::AddTestPlayer()
 	//실제 핸들이 붙으면 이 줄은 사라진다
 	const FString Name = FString::Printf(TEXT("테스터%02d"), Players.Num());
 	SubmitAction(Id, Name, (EBattleAction)FMath::RandRange(1, 6));
+}
+
+void ABattleManager::GrantBonusToAll()
+{
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FPlayerRecord& Record = Records.FindOrAdd(Pair.Key);
+		Record.UserId = Pair.Key;
+		++Record.AttackBonus;
+		++Record.MaxHPBonus;
+
+		//진행 중인 전투에도 바로 반영한다
+		const int32 NewMax = MaxHPFor(Record);
+		Pair.Value.HP += NewMax - Pair.Value.MaxHP;
+		Pair.Value.MaxHP = NewMax;
+		Pair.Value.AttackBonus = Record.AttackBonus;
+	}
+
+	UpdateVisuals();
+	UE_LOG(LogTemp, Log, TEXT("[Battle] 참여자 %d명 능력치 +1"), Players.Num());
 }
 
 void ABattleManager::BindActionKeys()
@@ -452,7 +570,7 @@ void ABattleManager::BindActionKeys()
 		FInputKeyBinding Binding(FInputChord(ActionKeys[i]), IE_Pressed);
 		Binding.bConsumeInput = false;
 		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda(
-			[this, i]() { SubmitAction(DebugUserId, DebugUserId, (EBattleAction)i); });
+			[this, i]() { SubmitAction(DebugUserId, DebugDisplayName, (EBattleAction)i); });
 		InputComponent->KeyBindings.Emplace(MoveTemp(Binding));
 	}
 
@@ -460,6 +578,11 @@ void ABattleManager::BindActionKeys()
 	AddBinding.bConsumeInput = false;
 	AddBinding.KeyDelegate.GetDelegateForManualSet().BindLambda([this]() { AddTestPlayer(); });
 	InputComponent->KeyBindings.Emplace(MoveTemp(AddBinding));
+
+	FInputKeyBinding BonusBinding(FInputChord(EKeys::E), IE_Pressed);
+	BonusBinding.bConsumeInput = false;
+	BonusBinding.KeyDelegate.GetDelegateForManualSet().BindLambda([this]() { GrantBonusToAll(); });
+	InputComponent->KeyBindings.Emplace(MoveTemp(BonusBinding));
 }
 
 // ---------------- 순수 함수 ----------------
@@ -507,6 +630,14 @@ void ABattleManager::RunSelfTest()
 	check(ParseCommand(TEXT("방어"), A) && A == EBattleAction::Defense);
 	check(!ParseCommand(TEXT("안녕하세요"), A));
 	check(!ParseCommand(TEXT(""), A));
+
+	//강화 단계가 실제 수치로 반영되는지
+	{
+		FPlayerRecord R;
+		check(MaxHPFor(R) == PlayerMaxHP);
+		R.MaxHPBonus = 3;
+		check(MaxHPFor(R) == PlayerMaxHP + 3 * HPPerBonus);
+	}
 
 	//같은 자리 번호는 레인이 달라도 서로 다른 좌표여야 한다
 	check(!SlotLocation(EBattleLane::Left, 0).Equals(SlotLocation(EBattleLane::Right, 0)));

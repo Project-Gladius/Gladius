@@ -10,7 +10,8 @@ public class Gladius : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "HTTP", "Json" });
+		// JsonUtilities: 플레이어 기록을 구조체 그대로 JSON으로 직렬화하는 데 필요
+		PrivateDependencyModuleNames.AddRange(new string[] { "HTTP", "Json", "JsonUtilities" });
 
 		// 유닛 머리 위 이름표(UMG)에 필요
 		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
