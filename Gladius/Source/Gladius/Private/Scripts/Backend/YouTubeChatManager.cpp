@@ -239,15 +239,17 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
 		}
 
-		float NextPollDelay = MinPollIntervalSeconds;
+		const float DesiredPollInterval = GetPollIntervalForCurrentState(); //신전(40초)/전투(5초) 상태에 따른 목표 주기
+
+		float NextPollDelay = DesiredPollInterval;
 		if (JsonObject->HasField(TEXT("pollingIntervalMillis")))
 		{
 			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMillis"));
 			NextPollDelay /= 1000.0;
 		}
 
-		//유튜브가 알려준 주기가 최소 주기보다 짧으면 최소 주기(5초)로 늘려서 요청
-		NextPollDelay = FMath::Max(NextPollDelay, MinPollIntervalSeconds);
+		//유튜브가 알려준 주기가 상태별 목표 주기보다 짧으면 목표 주기로 늘려서 요청
+		NextPollDelay = FMath::Max(NextPollDelay, DesiredPollInterval);
 
 		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
 
@@ -314,6 +316,11 @@ EGameState AYouTubeChatManager::GetCurrentGameState() const
 {
 	//GameManagerRef를 찾지 못한 경우(월드에 배치 안 됨 등) 기본값으로 신전상태 취급
 	return GameManagerRef ? GameManagerRef->GetGameState() : EGameState::Temple;
+}
+
+float AYouTubeChatManager::GetPollIntervalForCurrentState() const
+{
+	return GetCurrentGameState() == EGameState::Combat ? CombatPollIntervalSeconds : TemplePollIntervalSeconds;
 }
 
 void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)

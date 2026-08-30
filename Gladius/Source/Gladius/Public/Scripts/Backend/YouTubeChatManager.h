@@ -68,7 +68,10 @@ public:
 	int32 MaxAllowedComments = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-	float MinPollIntervalSeconds = 5.0f; //채팅을 긁어오는 최소 주기(초)
+	float TemplePollIntervalSeconds = 40.0f; //신전상태일 때 채팅을 긁어오는 주기(초)
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
+	float CombatPollIntervalSeconds = 5.0f; //전투상태일 때 채팅을 긁어오는 주기(초)
 
 	UFUNCTION(BlueprintCallable, Category = "YouTube")
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
@@ -80,6 +83,9 @@ private:
 
 	//CommandDispatcher의 GetGameStateDelegate에 바인딩되는 함수. GameManagerRef가 없으면 기본값(신전상태) 반환
 	EGameState GetCurrentGameState() const;
+
+	//현재 게임 상태(신전/전투)에 맞는 채팅 폴링 주기를 반환
+	float GetPollIntervalForCurrentState() const;
 
 	//CommandDispatcher의 OnUserLoginRequired 구독 함수
 	//TODO: DB에서 플레이어 데이터를 조회하고 없으면 새로 생성한 뒤, 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
