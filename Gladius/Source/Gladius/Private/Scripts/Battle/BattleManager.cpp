@@ -200,7 +200,15 @@ void ABattleManager::LoadRecords()
 
 int32 ABattleManager::MaxHPFor(const FPlayerRecord& Record) const
 {
-	return PlayerMaxHP + Record.MaxHPBonus * HPPerBonus;
+	return PlayerBaseHP + Record.MaxHPBonus * HPPerBonus;
+}
+
+void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const
+{
+	Player.MaxHP = MaxHPFor(Record);
+	Player.DamageBonus = Record.DamageBonus * DamagePerBonus;
+	Player.CritChance = BaseCritChance + Record.CritChanceBonus * CritChancePerBonus;
+	Player.CritDamage = BaseCritDamage + Record.CritDamageBonus * CritDamagePerBonus;
 }
 
 int32 ABattleManager::AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots)
@@ -277,8 +285,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 		FBattlePlayer NewPlayer;
 		NewPlayer.DisplayName = DisplayName;
-		NewPlayer.MaxHP = MaxHPFor(Record);
-		NewPlayer.AttackBonus = Record.AttackBonus;
+		ApplyRecordToPlayer(Record, NewPlayer);
 		NewPlayer.HP = NewPlayer.MaxHP;
 		NewPlayer.SlotIndex = Slot;
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
@@ -293,8 +300,9 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		Players.Add(UserId, NewPlayer);
 		Player = Players.Find(UserId);
 
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, 공격+%d 체력+%d) — 현재 %d/%d명"),
-			*UserId, Slot, Record.AttackBonus, Record.MaxHPBonus, Players.Num(), MaxPlayers);
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, HP %d, 피해+%d, 치명 %.0f%%/%.0f%%) — 현재 %d/%d명"),
+			*UserId, Slot, NewPlayer.MaxHP, NewPlayer.DamageBonus,
+			NewPlayer.CritChance * 100.f, NewPlayer.CritDamage * 100.f, Players.Num(), MaxPlayers);
 	}
 
 	//핸들은 바뀔 수 있으니 매번 갱신
@@ -324,7 +332,7 @@ void ABattleManager::StartTurn()
 
 	//보스 행동을 먼저 정해 입력 시간 내내 예고한다.
 	//판정 시점에 정하면 회피가 순수 확률 찍기가 되어 선택지의 의미가 없어진다
-	TelegraphedLane = ChooseEnemyLane();
+	TelegraphedAction = ChooseBossAction();
 
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
@@ -343,8 +351,10 @@ void ABattleManager::StartTurn()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 입력 시작 — %.1f초 / %d명 / Boss %d / 예고 Lane %d"),
-		TurnIndex, InputSeconds, Players.Num(), EnemyHP, (int32)TelegraphedLane);
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 입력 시작 — %.1f초 / %d명 / Boss %d / 예고 %s 피해 %d (물리내성 %d 마법내성 %d)"),
+		TurnIndex, InputSeconds, Players.Num(), EnemyHP,
+		*HitAreaLabel(TelegraphedAction.HitArea), TelegraphedAction.Damage,
+		(int32)TelegraphedAction.PhysicalResist, (int32)TelegraphedAction.MagicalResist);
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, InputSeconds, false);
 }
@@ -364,24 +374,38 @@ void ABattleManager::ResolveTurn()
 	Phase = EBattlePhase::Resolve;
 
 	//턴 시작 때 예고한 그대로 친다
-	const EBattleLane EnemyLane = TelegraphedLane;
+	const FBossAction& Boss = TelegraphedAction;
 
 	int32 TotalDealt = 0;
+	int32 Crits = 0;
 	int32 Died = 0;
 	int32 Revived = 0;
 
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
+		FPlayerRecord* Record = Records.Find(Pair.Key);
 
 		if (P.ReviveCountdown > 0)
 		{
 			// ponytail: 기획상 부활 전에 '아직 시청 중인지'를 확인해야 하지만
 			// 그건 YouTube API라 여기서는 항상 시청 중이라고 본다.
-			// 강화 능력치 50% 손실과 슈퍼챗 즉시부활도 능력치 구현 후에 붙인다
+			// 슈퍼챗 즉시부활도 아직 없다
 			if (--P.ReviveCountdown == 0)
 			{
+				//부활하면서 강화 능력치의 GameOverLoss 비율을 잃는다
+				if (Record)
+				{
+					const float Keep = 1.f - GameOverLoss;
+					Record->MaxHPBonus = FMath::FloorToInt(Record->MaxHPBonus * Keep);
+					Record->DamageBonus = FMath::FloorToInt(Record->DamageBonus * Keep);
+					Record->CritChanceBonus = FMath::FloorToInt(Record->CritChanceBonus * Keep);
+					Record->CritDamageBonus = FMath::FloorToInt(Record->CritDamageBonus * Keep);
+					ApplyRecordToPlayer(*Record, P);
+				}
+
 				P.HP = P.MaxHP;
+				P.Fever = 0;
 				++Revived;
 			}
 			continue;
@@ -389,12 +413,39 @@ void ABattleManager::ResolveTurn()
 
 		P.Lane = ApplyMove(P.PendingAction, P.Lane);
 
-		const int32 Taken = DamageToPlayer(P.PendingAction, EnemyLane == P.Lane, EnemyDamage, DefenseMultiplier);
+		const bool bHit = HitAreaContains(Boss.HitArea, P.Lane);
+		const int32 Taken = DamageToPlayer(P.PendingAction, bHit, Boss.Damage, DefenceDivisor);
 		P.HP = FMath::Max(0, P.HP - Taken);
 
-		const int32 Bonus = P.AttackBonus * DamagePerBonus;
-		if (P.PendingAction == EBattleAction::Attack1) TotalDealt += Attack1Damage + Bonus;
-		else if (P.PendingAction == EBattleAction::Attack2) TotalDealt += Attack2Damage + Bonus;
+		const bool bAttack1 = P.PendingAction == EBattleAction::Attack1;
+		const bool bAttack2 = P.PendingAction == EBattleAction::Attack2;
+
+		if (bAttack1 || bAttack2)
+		{
+			const int32 BaseDamage = bAttack1 ? Attack1BaseDamage : Attack2BaseDamage;
+			const EDamageType Type = bAttack1 ? Attack1Type : Attack2Type;
+			const float Resist = ResistanceMultiplier(
+				Type == EDamageType::Physical ? Boss.PhysicalResist : Boss.MagicalResist);
+
+			//치명타는 플레이어마다 따로 굴린다
+			const bool bCrit = FMath::FRand() < P.CritChance;
+			const int32 Dealt = DamageToBoss(BaseDamage, P.DamageBonus, P.Fever, Resist, bCrit, P.CritDamage);
+
+			TotalDealt += Dealt;
+			Crits += bCrit ? 1 : 0;
+			if (Record)
+			{
+				Record->TotalDamageDealt += Dealt;
+			}
+
+			P.Fever += FeverIncrement;
+		}
+		else if (P.PendingAction == EBattleAction::AvoidL
+			|| P.PendingAction == EBattleAction::AvoidM
+			|| P.PendingAction == EBattleAction::AvoidR)
+		{
+			P.Fever = FMath::Max(0, P.Fever - FeverDecrement);
+		}
 
 		if (P.HP <= 0)
 		{
@@ -408,11 +459,11 @@ void ABattleManager::ResolveTurn()
 
 	UpdateVisuals();
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 적 공격 Lane %d / 입힌 피해 %d / 사망 %d / 부활 %d → Boss %d"),
-		TurnIndex, (int32)EnemyLane, TotalDealt, Died, Revived, EnemyHP);
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → Boss %d"),
+		TurnIndex, *HitAreaLabel(Boss.HitArea), Boss.Damage, TotalDealt, Crits, Died, Revived, EnemyHP);
 
-	LastTurnSummary = FString::Printf(TEXT("Boss attacked %s   Damage dealt %d   Down %d   Revived %d"),
-		*StaticEnum<EBattleLane>()->GetNameStringByValue((int64)EnemyLane), TotalDealt, Died, Revived);
+	LastTurnSummary = FString::Printf(TEXT("Boss hit %s   Damage dealt %d (%d crit)   Down %d   Revived %d"),
+		*HitAreaLabel(Boss.HitArea), TotalDealt, Crits, Died, Revived);
 
 	//기록이 바뀌는 건 참가와 강화뿐이고 둘 다 턴 안에서 끝난다.
 	//주기 저장 대신 턴 경계에서만 쓰면 조절할 값도 없고 저장 시점도 분명해진다
@@ -429,10 +480,17 @@ void ABattleManager::ResolveTurn()
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, ResolveSeconds, false);
 }
 
-// ponytail: 균등 랜덤. 패턴/AI는 규칙 확정 후 이 함수만 교체
-EBattleLane ABattleManager::ChooseEnemyLane() const
+// ponytail: 균등 랜덤 스텁. 패턴이 정해지면 이 함수만 데이터 조회로 교체하면 된다.
+// 구조체와 피격 범위 9종은 이미 지원하므로 값만 채워 넣으면 동작한다
+FBossAction ABattleManager::ChooseBossAction() const
 {
-	return (EBattleLane)FMath::RandRange(0, 2);
+	FBossAction Action;
+	Action.Damage = BossBaseDamage;
+	Action.PhysicalResist = (EResistance)FMath::RandRange(0, 2);
+	Action.MagicalResist = (EResistance)FMath::RandRange(0, 2);
+	Action.HitArea = ResolveHitArea(EHitArea::Random);
+	Action.NoticeText = FString::Printf(TEXT("BOSS WILL HIT: %s"), *HitAreaLabel(Action.HitArea));
+	return Action;
 }
 
 // ---------------- 표시 ----------------
@@ -486,8 +544,10 @@ void ABattleManager::Tick(float DeltaTime)
 
 	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
 
-	const FString Telegraph = FString::Printf(TEXT("BOSS WILL ATTACK: %s"),
-		*StaticEnum<EBattleLane>()->GetNameStringByValue((int64)TelegraphedLane));
+	const FString Telegraph = FString::Printf(TEXT("%s   damage %d   resist P%.1f M%.1f"),
+		*TelegraphedAction.NoticeText, TelegraphedAction.Damage,
+		ResistanceMultiplier(TelegraphedAction.PhysicalResist),
+		ResistanceMultiplier(TelegraphedAction.MagicalResist));
 
 	FString Body;
 	switch (Phase)
@@ -496,8 +556,9 @@ void ABattleManager::Tick(float DeltaTime)
 	{
 		const FBattlePlayer* Me = Players.Find(DebugUserId);
 		const FString MyLine = Me
-			? FString::Printf(TEXT("%s: %s  HP %d/%d"), *DebugUserId,
-				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction), Me->HP, Me->MaxHP)
+			? FString::Printf(TEXT("%s: %s   HP %d/%d   Fever %d"), *DebugUserId,
+				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction),
+				Me->HP, Me->MaxHP, Me->Fever)
 			: FString::Printf(TEXT("%s: not joined"), *DebugUserId);
 
 		Body = FString::Printf(
@@ -534,14 +595,15 @@ void ABattleManager::GrantBonusToAll()
 	{
 		FPlayerRecord& Record = Records.FindOrAdd(Pair.Key);
 		Record.UserId = Pair.Key;
-		++Record.AttackBonus;
 		++Record.MaxHPBonus;
+		++Record.DamageBonus;
+		++Record.CritChanceBonus;
+		++Record.CritDamageBonus;
 
-		//진행 중인 전투에도 바로 반영한다
-		const int32 NewMax = MaxHPFor(Record);
-		Pair.Value.HP += NewMax - Pair.Value.MaxHP;
-		Pair.Value.MaxHP = NewMax;
-		Pair.Value.AttackBonus = Record.AttackBonus;
+		//진행 중인 전투에도 바로 반영한다. 늘어난 최대 체력만큼 현재 체력도 올린다
+		const int32 OldMax = Pair.Value.MaxHP;
+		ApplyRecordToPlayer(Record, Pair.Value);
+		Pair.Value.HP += Pair.Value.MaxHP - OldMax;
 	}
 
 	UpdateVisuals();
@@ -598,13 +660,83 @@ EBattleLane ABattleManager::ApplyMove(EBattleAction Action, EBattleLane Current)
 	}
 }
 
-int32 ABattleManager::DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, float DefMul)
+float ABattleManager::ResistanceMultiplier(EResistance Resistance)
+{
+	switch (Resistance)
+	{
+	case EResistance::Enduring:   return 0.5f;
+	case EResistance::Vulnerable: return 1.5f;
+	default:                      return 1.0f;
+	}
+}
+
+EHitArea ABattleManager::ResolveHitArea(EHitArea Area)
+{
+	if (Area != EHitArea::Random)
+	{
+		return Area;
+	}
+
+	//예고를 보고 대응할 수 있어야 하므로, 무작위는 예고 전에 구체 범위로 확정한다.
+	//None과 Random을 뺀 나머지 중에서 고른다
+	static const EHitArea Concrete[] = {
+		EHitArea::Left, EHitArea::Mid, EHitArea::Right,
+		EHitArea::LeftMid, EHitArea::MidRight, EHitArea::LeftRight, EHitArea::All };
+
+	return Concrete[FMath::RandRange(0, UE_ARRAY_COUNT(Concrete) - 1)];
+}
+
+bool ABattleManager::HitAreaContains(EHitArea Area, EBattleLane Lane)
+{
+	switch (Area)
+	{
+	case EHitArea::All:       return true;
+	case EHitArea::Left:      return Lane == EBattleLane::Left;
+	case EHitArea::Mid:       return Lane == EBattleLane::Mid;
+	case EHitArea::Right:     return Lane == EBattleLane::Right;
+	case EHitArea::LeftMid:   return Lane != EBattleLane::Right;
+	case EHitArea::MidRight:  return Lane != EBattleLane::Left;
+	case EHitArea::LeftRight: return Lane != EBattleLane::Mid;
+	//None은 아무도 안 맞고, Random은 ResolveHitArea를 거치므로 여기 오지 않는다
+	default:                  return false;
+	}
+}
+
+FString ABattleManager::HitAreaLabel(EHitArea Area)
+{
+	switch (Area)
+	{
+	case EHitArea::None:      return TEXT("Nothing");
+	case EHitArea::Left:      return TEXT("Left");
+	case EHitArea::Mid:       return TEXT("Mid");
+	case EHitArea::Right:     return TEXT("Right");
+	case EHitArea::LeftMid:   return TEXT("Left+Mid");
+	case EHitArea::MidRight:  return TEXT("Mid+Right");
+	case EHitArea::LeftRight: return TEXT("Left+Right");
+	case EHitArea::All:       return TEXT("Everywhere");
+	default:                  return TEXT("Random");
+	}
+}
+
+int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever,
+	float Resist, bool bCrit, float CritDamage)
+{
+	const float Raw = (BaseDamage + DamageBonus + Fever) * Resist * (1.f + (bCrit ? CritDamage : 0.f));
+	return FMath::Max(0, FMath::RoundToInt(Raw));
+}
+
+int32 ABattleManager::DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, int32 Divisor)
 {
 	if (!bHit)
 	{
 		return 0;
 	}
-	return Action == EBattleAction::Defense ? FMath::RoundToInt(Base * DefMul) : Base;
+	if (Action != EBattleAction::Defense)
+	{
+		return Base;
+	}
+	//기획서상 방어는 나눗셈 후 올림
+	return FMath::DivideAndRoundUp(Base, FMath::Max(1, Divisor));
 }
 
 void ABattleManager::RunSelfTest()
@@ -614,10 +746,46 @@ void ABattleManager::RunSelfTest()
 	check(ApplyMove(EBattleAction::Attack1, EBattleLane::Right) == EBattleLane::Right);
 	check(ApplyMove(EBattleAction::Idle, EBattleLane::Mid) == EBattleLane::Mid);
 
-	check(DamageToPlayer(EBattleAction::Idle, false, 20, 0.5f) == 0);
-	check(DamageToPlayer(EBattleAction::Idle, true, 20, 0.5f) == 20);
-	check(DamageToPlayer(EBattleAction::Defense, true, 20, 0.5f) == 10);
-	check(DamageToPlayer(EBattleAction::Defense, false, 20, 0.5f) == 0);
+	check(DamageToPlayer(EBattleAction::Idle, false, 20, 2) == 0);
+	check(DamageToPlayer(EBattleAction::Idle, true, 20, 2) == 20);
+	check(DamageToPlayer(EBattleAction::Defense, true, 20, 2) == 10);
+	check(DamageToPlayer(EBattleAction::Defense, false, 20, 2) == 0);
+	//홀수는 올림이어야 한다 (5 / 2 = 3)
+	check(DamageToPlayer(EBattleAction::Defense, true, 5, 2) == 3);
+	check(DamageToPlayer(EBattleAction::Defense, true, 1, 2) == 1);
+
+	check(ResistanceMultiplier(EResistance::Enduring) == 0.5f);
+	check(ResistanceMultiplier(EResistance::Normal) == 1.0f);
+	check(ResistanceMultiplier(EResistance::Vulnerable) == 1.5f);
+
+	//피격 범위 9종
+	check(!HitAreaContains(EHitArea::None, EBattleLane::Mid));
+	check(HitAreaContains(EHitArea::All, EBattleLane::Left));
+	check(HitAreaContains(EHitArea::Left, EBattleLane::Left));
+	check(!HitAreaContains(EHitArea::Left, EBattleLane::Mid));
+	check(HitAreaContains(EHitArea::LeftMid, EBattleLane::Left));
+	check(HitAreaContains(EHitArea::LeftMid, EBattleLane::Mid));
+	check(!HitAreaContains(EHitArea::LeftMid, EBattleLane::Right));
+	check(HitAreaContains(EHitArea::MidRight, EBattleLane::Right));
+	check(!HitAreaContains(EHitArea::MidRight, EBattleLane::Left));
+	check(HitAreaContains(EHitArea::LeftRight, EBattleLane::Left));
+	check(HitAreaContains(EHitArea::LeftRight, EBattleLane::Right));
+	check(!HitAreaContains(EHitArea::LeftRight, EBattleLane::Mid));
+
+	//Random은 예고 전에 반드시 구체 범위로 바뀐다
+	for (int32 i = 0; i < 30; ++i)
+	{
+		const EHitArea Resolved = ResolveHitArea(EHitArea::Random);
+		check(Resolved != EHitArea::Random && Resolved != EHitArea::None);
+	}
+	check(ResolveHitArea(EHitArea::Left) == EHitArea::Left);
+
+	//(기본 + 강화 + 피버) * 내성 * (1 + 치명타 피해)
+	check(DamageToBoss(1, 0, 0, 1.0f, false, 0.4f) == 1);
+	check(DamageToBoss(1, 2, 3, 1.0f, false, 0.4f) == 6);
+	check(DamageToBoss(2, 0, 0, 0.5f, false, 0.4f) == 1);
+	check(DamageToBoss(2, 0, 0, 1.5f, false, 0.4f) == 3);
+	check(DamageToBoss(10, 0, 0, 1.0f, true, 0.4f) == 14);
 
 	check(AllocateSlotIndex({}, 30) == 0);
 	check(AllocateSlotIndex({ 0, 1, 3 }, 30) == 2);
@@ -634,9 +802,18 @@ void ABattleManager::RunSelfTest()
 	//강화 단계가 실제 수치로 반영되는지
 	{
 		FPlayerRecord R;
-		check(MaxHPFor(R) == PlayerMaxHP);
+		check(MaxHPFor(R) == PlayerBaseHP);
 		R.MaxHPBonus = 3;
-		check(MaxHPFor(R) == PlayerMaxHP + 3 * HPPerBonus);
+		check(MaxHPFor(R) == PlayerBaseHP + 3 * HPPerBonus);
+
+		//강화 수치가 전투용 스냅샷으로 옮겨지는지
+		R.DamageBonus = 2;
+		R.CritChanceBonus = 1;
+		FBattlePlayer P;
+		ApplyRecordToPlayer(R, P);
+		check(P.MaxHP == PlayerBaseHP + 3 * HPPerBonus);
+		check(P.DamageBonus == 2 * DamagePerBonus);
+		check(FMath::IsNearlyEqual(P.CritChance, BaseCritChance + CritChancePerBonus));
 	}
 
 	//같은 자리 번호는 레인이 달라도 서로 다른 좌표여야 한다

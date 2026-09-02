@@ -41,6 +41,60 @@ enum class EBattlePhase : uint8
 	Resolve
 };
 
+//공격의 속성. 보스는 속성별로 다른 내성을 가진다
+UENUM(BlueprintType)
+enum class EDamageType : uint8
+{
+	Physical,
+	Magical
+};
+
+//보스가 특정 행동 중에 갖는 내성. 실제 배율은 ResistanceMultiplier 참조
+UENUM(BlueprintType)
+enum class EResistance : uint8
+{
+	Enduring,	// 0.5
+	Normal,		// 1.0
+	Vulnerable	// 1.5
+};
+
+//보스 행동이 때리는 구역.
+//Random은 '행동을 정할 때 무작위로 고른다'는 뜻이라, 예고 시점에
+//ResolveHitArea로 구체 범위가 확정된다. 예고 이후에는 나타나지 않는다
+UENUM(BlueprintType)
+enum class EHitArea : uint8
+{
+	None,
+	Left,
+	Mid,
+	Right,
+	LeftMid,
+	MidRight,
+	LeftRight,
+	All,
+	Random
+};
+
+//보스의 한 가지 행동. 패턴은 이 행동들의 조합이 된다.
+//지금은 ChooseBossAction이 무작위로 만들어내지만, 패턴이 정해지면
+//데이터로 채워 넣기만 하면 된다
+USTRUCT(BlueprintType)
+struct FBossAction
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 Damage = 1;
+
+	//이 행동을 하는 동안의 보스 내성
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) EResistance PhysicalResist = EResistance::Normal;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) EResistance MagicalResist = EResistance::Normal;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) EHitArea HitArea = EHitArea::Mid;
+
+	//예고에 띄울 문구
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString NoticeText;
+};
+
 //전투가 끝나도 남는 유저 기록. 이 구조체가 그대로 JSON 파일이 된다.
 //능력치를 추가하려면 여기에 UPROPERTY를 넣기만 하면 저장 파일에 자동으로 따라온다
 USTRUCT()
@@ -51,11 +105,14 @@ struct FPlayerRecord
 	UPROPERTY() FString UserId;
 	UPROPERTY() FString DisplayName;
 
-	//공격력 강화 단계
-	UPROPERTY() int32 AttackBonus = 0;
-
-	//최대 체력 강화 단계
+	//신전에서 사는 '강화' 능력치들. 게임 오버 시 일정 비율을 잃는다
 	UPROPERTY() int32 MaxHPBonus = 0;
+	UPROPERTY() int32 DamageBonus = 0;
+	UPROPERTY() int32 CritChanceBonus = 0;
+	UPROPERTY() int32 CritDamageBonus = 0;
+
+	//방송 전체 누적. 게임 단위로 초기화하지 않는다
+	UPROPERTY() int64 TotalDamageDealt = 0;
 };
 
 //저장 파일의 최상위 형태. { "records": [ ... ] }
@@ -73,11 +130,16 @@ struct FBattlePlayer
 	GENERATED_BODY()
 
 	UPROPERTY() FString DisplayName;
+
 	UPROPERTY() int32 HP = 0;
+	UPROPERTY() int32 Fever = 0;
 
 	//참가할 때 기록에서 계산해 넣는 값들. 매 판정마다 다시 조회하지 않으려고 들고 있는다
 	UPROPERTY() int32 MaxHP = 0;
-	UPROPERTY() int32 AttackBonus = 0;
+	UPROPERTY() int32 DamageBonus = 0;
+	UPROPERTY() float CritChance = 0.f;
+	UPROPERTY() float CritDamage = 0.f;
+
 	UPROPERTY() EBattleLane Lane = EBattleLane::Mid;
 
 	//참가할 때 한 번 받는 고정 자리 번호. 레인을 옮겨도 같은 번호를 쓴다
@@ -86,7 +148,7 @@ struct FBattlePlayer
 	UPROPERTY() EBattleAction PendingAction = EBattleAction::Idle;
 	UPROPERTY() TObjectPtr<ABattleUnit> Unit;
 
-	//0보다 크면 사망 상태. 매 턴 줄어들고 0이 되면 부활한다
+	//0보다 크면 게임 오버 상태. 매 턴 줄어들고 0이 되면 부활한다
 	UPROPERTY() int32 ReviveCountdown = 0;
 };
 
@@ -112,7 +174,7 @@ public:
 
 	//이 액터의 위치가 투기장 중심. 보스는 항상 +X 끝에 선다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
-	float ArenaRadius = 1000.f;
+	float ArenaRadius = 1600.f;
 
 	//가운데 레인 기준 좌/우 레인이 벌어지는 각도
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
@@ -130,15 +192,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
 	float BossScale = 2.f;
 
-	// ---- 규칙 ----
+	// ---- 진행 ----
 
 	//동시 참여 정원. 레인마다 이만큼의 자리가 준비된다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	int32 MaxPlayers = 30;
 
-	//사망 후 부활까지 기다리는 턴 수
+	//게임 오버 후 부활까지 기다리는 턴 수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	int32 ReviveTurns = 3;
+
+	//부활할 때 잃는 강화 능력치 비율
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float GameOverLoss = 0.5f;
 
 	//시청자에게 보이는 입력 시간. 방송 지연이 있으므로 짧으면 반응이 안 온다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -153,32 +219,61 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float ResolveSeconds = 4.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 PlayerMaxHP = 100;
+	// ---- 전투 수치 ----
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	//강화 없는 플레이어의 기본 체력
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 PlayerBaseHP = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	float BaseCritChance = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	float BaseCritDamage = 0.4f;
+
+	//강화 한 단계당 오르는 양
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 HPPerBonus = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 DamagePerBonus = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	float CritChancePerBonus = 0.05f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	float CritDamagePerBonus = 0.1f;
+
+	//공격 시 피버가 오르고, 회피 시 내려간다. 하한은 0
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 FeverIncrement = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 FeverDecrement = 2;
+
+	//방어 시 받는 피해를 이 값으로 나눈다 (올림)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 DefenceDivisor = 2;
+
+	// ponytail: 원래 직업군별로 갖는 값이다. 직업군이 붙으면 그쪽으로 옮긴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 Attack1BaseDamage = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	EDamageType Attack1Type = EDamageType::Physical;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 Attack2BaseDamage = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	EDamageType Attack2Type = EDamageType::Magical;
+
+	//보스 행동 스텁이 쓰는 피해량
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 BossBaseDamage = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
 	int32 EnemyMaxHP = 2000;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 Attack1Damage = 10;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 Attack2Damage = 20;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 EnemyDamage = 20;
-
-	//방어했을 때 받는 데미지 배율
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float DefenseMultiplier = 0.5f;
-
-	//최대 체력 강화 한 단계당 늘어나는 HP
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 HPPerBonus = 10;
-
-	//공격력 강화 한 단계당 늘어나는 피해
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 DamagePerBonus = 2;
 
 	//채팅이 붙기 전까지 더미 유저들이 매 턴 무작위 행동을 고르게 한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
@@ -194,6 +289,10 @@ public:
 
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	EBattlePhase Phase = EBattlePhase::Resolve;
+
+	//이번 턴에 보스가 할 행동. 턴이 시작될 때 정해져 입력 시간 내내 예고된다
+	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
+	FBossAction TelegraphedAction;
 
 	//Input과 Collect 단계에서만 입력을 받는다
 	UFUNCTION(BlueprintPure, Category = "Battle|State")
@@ -240,11 +339,23 @@ public:
 	//회피 행동이면 그 영역으로 이동, 아니면 제자리
 	static EBattleLane ApplyMove(EBattleAction Action, EBattleLane Current);
 
-	//피격 시 실제로 깎이는 HP
-	static int32 DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, float DefMul);
-
 	//비어 있는 가장 앞 자리 번호. 만석이면 INDEX_NONE
 	static int32 AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots);
+
+	static float ResistanceMultiplier(EResistance Resistance);
+
+	//Random을 구체 범위로 확정한다. 나머지는 그대로 돌려준다
+	static EHitArea ResolveHitArea(EHitArea Area);
+
+	static bool HitAreaContains(EHitArea Area, EBattleLane Lane);
+	static FString HitAreaLabel(EHitArea Area);
+
+	//기획서 공식: (기본 + 강화 + 피버) * 내성 * (1 + 치명타 시 치명타 피해)
+	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever,
+		float Resist, bool bCrit, float CritDamage);
+
+	//방어 시에는 나눗셈 후 올림
+	static int32 DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, int32 Divisor);
 
 	//강화 단계를 실제 수치로 바꾼다
 	int32 MaxHPFor(const FPlayerRecord& Record) const;
@@ -273,8 +384,11 @@ private:
 	// 실제 규칙이 정해지면 이 함수를 지우고 그 자리에 넣으면 된다
 	void GrantBonusToAll();
 
-	//적 행동 스텁 — 규칙이 정해지면 이 함수만 통째로 교체
-	EBattleLane ChooseEnemyLane() const;
+	//기록의 강화 수치를 전투용 스냅샷에 반영한다
+	void ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const;
+
+	//보스 행동 스텁 — 패턴이 정해지면 이 함수만 통째로 교체
+	FBossAction ChooseBossAction() const;
 
 	//지금 전투 중인 참여자
 	UPROPERTY() TMap<FString, FBattlePlayer> Players;
@@ -286,9 +400,6 @@ private:
 
 	//한 번에 한 단계만 도므로 타이머 하나를 돌려 쓴다
 	FTimerHandle PhaseTimerHandle;
-
-	//이번 턴에 보스가 칠 레인. 턴이 시작될 때 정해져 입력 시간 내내 예고된다
-	EBattleLane TelegraphedLane = EBattleLane::Mid;
 
 	//Resolve 단계에 띄울 직전 턴 요약. 디버그 표시용이라 문자열로 들고 있는다
 	FString LastTurnSummary;
