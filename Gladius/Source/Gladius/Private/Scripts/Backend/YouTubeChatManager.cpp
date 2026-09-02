@@ -239,17 +239,8 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
 		}
 
-		const float DesiredPollInterval = GetPollIntervalForCurrentState(); //신전(40초)/전투(5초) 상태에 따른 목표 주기
-
-		float NextPollDelay = DesiredPollInterval;
-		if (JsonObject->HasField(TEXT("pollingIntervalMillis")))
-		{
-			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMillis"));
-			NextPollDelay /= 1000.0;
-		}
-
-		//유튜브가 알려준 주기가 상태별 목표 주기보다 짧으면 목표 주기로 늘려서 요청
-		NextPollDelay = FMath::Max(NextPollDelay, DesiredPollInterval);
+		//유튜브가 알려주는 pollingIntervalMillis는 무시하고, 신전(40초)/전투(5초) 상태별 고정 주기만 사용
+		const float NextPollDelay = GetPollIntervalForCurrentState();
 
 		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
 

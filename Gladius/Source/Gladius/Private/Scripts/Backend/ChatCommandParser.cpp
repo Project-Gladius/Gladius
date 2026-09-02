@@ -59,6 +59,7 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	if (Keyword == TEXT("방어"))
 	{
+		if (!Remainder.IsEmpty()) return false; //인자를 받지 않는 명령어라 뒤에 뭔가 더 붙으면 실패
 		OutCommand.CommandType = ECommandType::Defend;
 		return true;
 	}
@@ -73,6 +74,7 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	if (Keyword == TEXT("로그아웃"))
 	{
+		if (!Remainder.IsEmpty()) return false; //인자를 받지 않는 명령어라 뒤에 뭔가 더 붙으면 실패
 		OutCommand.CommandType = ECommandType::Logout;
 		return true;
 	}
