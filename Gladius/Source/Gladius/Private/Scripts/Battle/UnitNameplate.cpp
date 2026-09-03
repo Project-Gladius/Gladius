@@ -4,7 +4,15 @@
 
 TSharedRef<SWidget> UUnitNameplate::RebuildWidget()
 {
-	if (!Label && WidgetTree)
+	//위젯 블루프린트로 만든 경우 RootWidget에 이미 디자인한 내용이 들어 있다.
+	//그때 여기서 새로 만들면 디자인을 통째로 덮어쓰게 되므로, 비어 있을 때만 만든다
+	if (WidgetTree && WidgetTree->RootWidget && !Label)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[Battle] 이름표 위젯에 'Label'이라는 이름의 Text Block이 없습니다 — 글자가 표시되지 않습니다"));
+	}
+
+	if (!Label && WidgetTree && !WidgetTree->RootWidget)
 	{
 		Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Label"));
 		Label->SetJustification(ETextJustify::Center);

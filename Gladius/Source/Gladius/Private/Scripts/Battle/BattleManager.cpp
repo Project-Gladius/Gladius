@@ -1,5 +1,7 @@
 ﻿#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
+#include "Scripts/Battle/BattleSpot.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Components/InputComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -8,10 +10,6 @@
 #include "JsonObjectConverter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-
-//보스와 레인 첫 줄이 떨어진 거리 (ArenaRadius 배율). 손댈 일이 없어 상수로 둔다
-static constexpr float BossDistanceRatio = 0.8f;
-static constexpr float LaneDistanceRatio = 0.7f;
 
 //키보드로 조종하는 더미 유저. AddTestPlayer가 0번에 붙이는 이름과 같아야
 //Q로 만들든 키로 만들든 이름표가 흔들리지 않는다
@@ -39,6 +37,7 @@ void ABattleManager::BeginPlay()
 	Super::BeginPlay();
 
 	LoadRecords();
+	GatherSpots();
 
 	BindActionKeys();
 	DrawArenaGuides();
@@ -69,7 +68,8 @@ void ABattleManager::StopBattle()
 
 bool ABattleManager::IsAcceptingInput() const
 {
-	return Phase == EBattlePhase::Input || Phase == EBattlePhase::Collect;
+	//예고 시간의 선택도 유효하다. 판정 중에만 받지 않는다
+	return Phase != EBattlePhase::Resolve;
 }
 
 // ---------------- 좌표 ----------------
@@ -79,8 +79,103 @@ FVector ABattleManager::BossLocation() const
 	return GetActorLocation() + FVector(ArenaRadius * BossDistanceRatio, 0.f, 0.f);
 }
 
+void ABattleManager::GatherSpots()
+{
+	for (TArray<FVector>& Lane : Spots)
+	{
+		Lane.Reset();
+	}
+
+	//레벨에 놓인 것을 전부 자동으로 찾는다. 배열에 등록할 필요가 없다
+	for (TActorIterator<ABattleSpot> It(GetWorld()); It; ++It)
+	{
+		Spots[(int32)It->Lane].Add(It->GetActorLocation());
+	}
+
+	//보스에서 가까운 순으로 채운다. 번호를 손으로 매기지 않아도 되게
+	const FVector Boss = BossLocation();
+	for (TArray<FVector>& Lane : Spots)
+	{
+		Lane.Sort([&Boss](const FVector& A, const FVector& B)
+		{
+			return FVector::DistSquared(A, Boss) < FVector::DistSquared(B, Boss);
+		});
+	}
+
+	const int32 Total = Spots[0].Num() + Spots[1].Num() + Spots[2].Num();
+	if (Total == 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot이 없어 격자 계산으로 배치합니다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개 (좌 %d / 중 %d / 우 %d)"),
+		Total, Spots[0].Num(), Spots[1].Num(), Spots[2].Num());
+
+	for (int32 i = 0; i < 3; ++i)
+	{
+		if (Spots[i].Num() > 0 && Spots[i].Num() < MaxPlayers)
+		{
+			// ponytail: 스팟보다 인원이 많으면 자리가 겹친다.
+			// 기획서에도 '회의/테스트 후 수정'으로 남아 있는 항목이라 지금은 경고만 남긴다
+			UE_LOG(LogTemp, Warning, TEXT("[Battle] %s 구역 스팟이 %d개뿐입니다 (정원 %d) — 몰리면 겹칩니다"),
+				*StaticEnum<EBattleLane>()->GetNameStringByValue(i), Spots[i].Num(), MaxPlayers);
+		}
+	}
+}
+
+void ABattleManager::GenerateSpotsFromGrid()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	//이미 놓인 게 있으면 손댄 배치를 덮어쓰지 않는다
+	for (TActorIterator<ABattleSpot> It(World); It; ++It)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Battle] 이미 BattleSpot이 있습니다. 다시 만들려면 먼저 지우세요"));
+		return;
+	}
+
+	int32 Created = 0;
+	for (int32 LaneIndex = 0; LaneIndex < 3; ++LaneIndex)
+	{
+		const FString LaneName = StaticEnum<EBattleLane>()->GetNameStringByValue(LaneIndex);
+
+		for (int32 Slot = 0; Slot < MaxPlayers; ++Slot)
+		{
+			ABattleSpot* Spot = World->SpawnActor<ABattleSpot>(
+				SlotLocation((EBattleLane)LaneIndex, Slot), FRotator::ZeroRotator);
+			if (!Spot)
+			{
+				continue;
+			}
+
+			Spot->Lane = (EBattleLane)LaneIndex;
+			++Created;
+
+#if WITH_EDITOR
+			//아웃라이너에서 구역별로 접어 볼 수 있게 정리해 둔다
+			Spot->SetActorLabel(FString::Printf(TEXT("Spot_%s_%02d"), *LaneName, Slot));
+			Spot->SetFolderPath(FName(*FString::Printf(TEXT("BattleSpots/%s"), *LaneName)));
+#endif
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개를 격자 위치에 만들었습니다"), Created);
+}
+
 FVector ABattleManager::SlotLocation(EBattleLane Lane, int32 SlotIndex) const
 {
+	//레벨에 스팟을 놓았으면 그쪽이 우선. 없으면 아래 격자 계산으로 넘어간다
+	const TArray<FVector>& LaneSpots = Spots[(int32)Lane];
+	if (LaneSpots.Num() > 0)
+	{
+		return LaneSpots[SlotIndex % LaneSpots.Num()];
+	}
+
 	//레인 중심각. 보스에서 중심을 바라본 방향(-X)이 가운데 레인이다
 	const float LaneCenter = (Lane == EBattleLane::Left) ? LaneAngle
 		: (Lane == EBattleLane::Right) ? -LaneAngle : 0.f;
@@ -90,13 +185,52 @@ FVector ABattleManager::SlotLocation(EBattleLane Lane, int32 SlotIndex) const
 	const int32 Col = SlotIndex % Cols;
 	const int32 Row = SlotIndex / Cols;
 
-	const float ColStep = LaneAngle * 0.8f / Cols;
+	const float ColStep = LaneAngle * ColumnSpreadRatio / Cols;
 	const float ColOffset = (Col - (Cols - 1) * 0.5f) * ColStep;
-	const float Distance = ArenaRadius * (LaneDistanceRatio + Row * 0.12f);
+	const float Distance = ArenaRadius * (LaneDistanceRatio + Row * RowSpacingRatio);
 
 	const FVector Dir = FRotator(0.f, 180.f + LaneCenter + ColOffset, 0.f).RotateVector(FVector::ForwardVector);
 	return BossLocation() + Dir * Distance;
 }
+
+#if WITH_EDITOR
+void ABattleManager::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	UWorld* World = GetWorld();
+	if (!World || World->WorldType != EWorldType::Editor)
+	{
+		return;
+	}
+
+	FlushPersistentDebugLines(World);
+	if (!bPreviewSlots)
+	{
+		return;
+	}
+
+	DrawArenaGuides();
+
+	//BattleSpot을 놓았으면 그 액터들이 곧 자리다. 격자 점을 같이 그리면
+	//옮겨둔 스팟과 옛 격자가 겹쳐 보여 헷갈린다
+	for (TActorIterator<ABattleSpot> It(World); It; ++It)
+	{
+		return;
+	}
+
+	//자리 하나당 점 하나. 레인별로 색을 달리해 구분한다
+	const FColor LaneColors[] = { FColor::Green, FColor::Yellow, FColor::Blue };
+	for (int32 LaneIndex = 0; LaneIndex < 3; ++LaneIndex)
+	{
+		for (int32 Slot = 0; Slot < MaxPlayers; ++Slot)
+		{
+			DrawDebugSphere(World, SlotLocation((EBattleLane)LaneIndex, Slot),
+				25.f, 8, LaneColors[LaneIndex], true, -1.f, 0, 2.f);
+		}
+	}
+}
+#endif
 
 void ABattleManager::DrawArenaGuides() const
 {
@@ -240,7 +374,7 @@ bool ABattleManager::SubmitChat(const FString& UserId, const FString& DisplayNam
 		const double DelaySeconds = (FDateTime::UtcNow() - SentAt).GetTotalSeconds();
 		UE_LOG(LogTemp, Verbose, TEXT("[Battle] 채팅 지연 %.1f초 (%s)"), DelaySeconds, *UserId);
 
-		if (DelaySeconds > InputSeconds + CollectSeconds)
+		if (DelaySeconds > PlayerSelectCountdown + CollectSeconds)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("[Battle] 지연 %.1f초 — 입력+수집 시간을 넘었습니다. CollectSeconds를 늘리세요"), DelaySeconds);
 		}
@@ -291,6 +425,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
 			SlotLocation(NewPlayer.Lane, Slot), FRotator::ZeroRotator);
 		NewPlayer.Unit->SetActorScale3D(FVector(UnitScale));
+		NewPlayer.Unit->SetNameplateClass(NameplateWidgetClass);
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
 #if WITH_EDITOR
@@ -320,6 +455,8 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 	//마지막에 들어온 입력이 이김
 	Player->PendingAction = Action;
+	Player->bActedThisTurn = true;
+	Player->IdleTurns = 0;
 	return true;
 }
 
@@ -328,15 +465,16 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 void ABattleManager::StartTurn()
 {
 	++TurnIndex;
-	Phase = EBattlePhase::Input;
+	Phase = EBattlePhase::Telegraph;
 
-	//보스 행동을 먼저 정해 입력 시간 내내 예고한다.
+	//보스 행동을 먼저 정해 예고한다.
 	//판정 시점에 정하면 회피가 순수 확률 찍기가 되어 선택지의 의미가 없어진다
 	TelegraphedAction = ChooseBossAction();
 
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		Pair.Value.PendingAction = EBattleAction::Idle;
+		Pair.Value.bActedThisTurn = false;
 	}
 
 	//채팅이 붙기 전까지, 키보드로 조종하는 한 명 말고는 무작위로 움직이게 둔다
@@ -347,16 +485,26 @@ void ABattleManager::StartTurn()
 			if (Pair.Key != DebugUserId && Pair.Value.ReviveCountdown == 0)
 			{
 				Pair.Value.PendingAction = (EBattleAction)FMath::RandRange(1, 6);
+				Pair.Value.bActedThisTurn = true;
 			}
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 입력 시작 — %.1f초 / %d명 / Boss %d / 예고 %s 피해 %d (물리내성 %d 마법내성 %d)"),
-		TurnIndex, InputSeconds, Players.Num(), EnemyHP,
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / Boss %d / %s 피해 %d (물리내성 %d 마법내성 %d)"),
+		TurnIndex, Turns, TelegraphSeconds, Players.Num(), EnemyHP,
 		*HitAreaLabel(TelegraphedAction.HitArea), TelegraphedAction.Damage,
 		(int32)TelegraphedAction.PhysicalResist, (int32)TelegraphedAction.MagicalResist);
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, InputSeconds, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, TelegraphSeconds, false);
+}
+
+void ABattleManager::BeginInput()
+{
+	Phase = EBattlePhase::Input;
+
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 선택 — %.1f초"), TurnIndex, PlayerSelectCountdown);
+
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, PlayerSelectCountdown, false);
 }
 
 void ABattleManager::BeginCollect()
@@ -385,6 +533,12 @@ void ABattleManager::ResolveTurn()
 	{
 		FBattlePlayer& P = Pair.Value;
 		FPlayerRecord* Record = Records.Find(Pair.Key);
+
+		//게임 오버 중에는 입력할 수 없으므로 무입력으로 세지 않는다
+		if (P.ReviveCountdown == 0)
+		{
+			P.IdleTurns = P.bActedThisTurn ? 0 : P.IdleTurns + 1;
+		}
 
 		if (P.ReviveCountdown > 0)
 		{
@@ -457,6 +611,20 @@ void ABattleManager::ResolveTurn()
 
 	EnemyHP = FMath::Max(0, EnemyHP - TotalDealt);
 
+	//무입력이 이어진 유저를 전장에서 뺀다. 순회 중에는 지울 수 없어 모아뒀다가 처리한다
+	TArray<FString> Leaving;
+	for (const TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		if (Pair.Value.IdleTurns >= IdleTurnsBeforeKick)
+		{
+			Leaving.Add(Pair.Key);
+		}
+	}
+	for (const FString& UserId : Leaving)
+	{
+		RemovePlayer(UserId);
+	}
+
 	UpdateVisuals();
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → Boss %d"),
@@ -471,13 +639,43 @@ void ABattleManager::ResolveTurn()
 
 	if (EnemyHP <= 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — 보스 격파"));
+		LastTurnSummary = FString::Printf(TEXT("VICTORY   boss defeated on turn %d"), TurnIndex);
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — 보스 격파 (Turn %d)"), TurnIndex);
+		StopBattle();
+		return;
+	}
+
+	//목표는 생존이므로, 정해진 턴을 버티면 무승부로 끝난다
+	if (TurnIndex >= Turns)
+	{
+		LastTurnSummary = FString::Printf(TEXT("DRAW   survived %d turns   boss left %d HP"), Turns, EnemyHP);
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — %d턴 생존, 무승부 (Boss %d 남음)"), Turns, EnemyHP);
 		StopBattle();
 		return;
 	}
 
 	//결과를 보여주는 시간을 준 뒤 다음 턴으로
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, ResolveSeconds, false);
+}
+
+void ABattleManager::RemovePlayer(const FString& UserId)
+{
+	FBattlePlayer* Player = Players.Find(UserId);
+	if (!Player)
+	{
+		return;
+	}
+
+	//능력치는 Records에 그대로 남는다. 다시 명령어를 치면 이어서 참가한다
+	if (Player->Unit)
+	{
+		Player->Unit->Destroy();
+	}
+
+	Players.Remove(UserId);
+
+	UE_LOG(LogTemp, Log, TEXT("[Battle] 이탈: %s (무입력 %d턴) — 현재 %d/%d명"),
+		*UserId, IdleTurnsBeforeKick, Players.Num(), MaxPlayers);
 }
 
 // ponytail: 균등 랜덤 스텁. 패턴이 정해지면 이 함수만 데이터 조회로 교체하면 된다.
@@ -505,6 +703,7 @@ void ABattleManager::SpawnBoss()
 	//보스는 중심 쪽(-X)을 본다
 	BossUnit = GetWorld()->SpawnActor<ABattleUnit>(BossLocation(), FRotator(0.f, 180.f, 0.f));
 	BossUnit->SetActorScale3D(FVector(UnitScale * BossScale));
+	BossUnit->SetNameplateClass(NameplateWidgetClass);
 #if WITH_EDITOR
 	BossUnit->SetActorLabel(TEXT("Boss"));
 #endif
@@ -539,8 +738,8 @@ void ABattleManager::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	//기본 폰트에 한글 글리프가 없어 이 표시판은 영문만 쓴다
-	const FString Header = FString::Printf(TEXT("Turn %d   Players %d/%d   Boss %d/%d"),
-		TurnIndex, Players.Num(), MaxPlayers, EnemyHP, EnemyMaxHP);
+	const FString Header = FString::Printf(TEXT("Turn %d/%d   Players %d/%d   Boss %d/%d"),
+		TurnIndex, Turns, Players.Num(), MaxPlayers, EnemyHP, EnemyMaxHP);
 
 	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
 
@@ -552,6 +751,10 @@ void ABattleManager::Tick(float DeltaTime)
 	FString Body;
 	switch (Phase)
 	{
+	case EBattlePhase::Telegraph:
+		Body = FString::Printf(TEXT("%s\nGET READY...   %.1fs"), *Telegraph, Remaining);
+		break;
+
 	case EBattlePhase::Input:
 	{
 		const FBattlePlayer* Me = Players.Find(DebugUserId);

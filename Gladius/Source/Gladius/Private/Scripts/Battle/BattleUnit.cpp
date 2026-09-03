@@ -38,6 +38,18 @@ void ABattleUnit::BeginPlay()
 	ApplyLabel();
 }
 
+void ABattleUnit::SetNameplateClass(TSubclassOf<UUserWidget> WidgetClass)
+{
+	if (!WidgetClass)
+	{
+		return;
+	}
+
+	//위젯이 새로 만들어지므로 들고 있던 문구를 다시 적용한다
+	Nameplate->SetWidgetClass(WidgetClass);
+	ApplyLabel();
+}
+
 void ABattleUnit::SetLabel(const FString& Name, int32 Current, int32 Max)
 {
 	PendingLabel = FString::Printf(TEXT("%s\n%d / %d"), *Name, Current, Max);

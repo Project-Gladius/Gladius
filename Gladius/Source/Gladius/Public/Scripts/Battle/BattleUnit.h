@@ -20,6 +20,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetLabel(const FString& Name, int32 Current, int32 Max);
 
+	//이름표 위젯을 갈아끼운다. UnitNameplate를 부모로 하는 위젯 블루프린트여야
+	//글자가 표시된다. 비워두면 C++ 기본 이름표를 그대로 쓴다
+	UFUNCTION(BlueprintCallable, Category = "Battle")
+	void SetNameplateClass(TSubclassOf<class UUserWidget> WidgetClass);
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
 	TObjectPtr<USkeletalMeshComponent> Mesh;
 

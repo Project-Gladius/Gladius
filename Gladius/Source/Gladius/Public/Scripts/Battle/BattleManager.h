@@ -29,15 +29,17 @@ enum class EBattleAction : uint8
 	Defense
 };
 
-//턴의 진행 단계
+//턴의 진행 단계. 기획서의 4단계와 그대로 대응한다
 UENUM(BlueprintType)
 enum class EBattlePhase : uint8
 {
-	//시청자가 화면을 보고 채팅을 치는 시간
+	//보스 행동 예고. 이 시간의 입력도 이번 턴 행동으로 유효하다
+	Telegraph,
+	//플레이어 행동 선택 카운트다운
 	Input,
-	//카운트다운은 끝났지만 늦게 도착하는 채팅을 계속 받는 시간
+	//카운트다운은 끝났지만 늦게 도착하는 채팅을 계속 받는 대기 시간
 	Collect,
-	//판정 결과를 보여주는 시간. 입력을 받지 않는다
+	//유저 행동 및 보스 모션. 입력을 받지 않는다
 	Resolve
 };
 
@@ -146,6 +148,13 @@ struct FBattlePlayer
 	UPROPERTY() int32 SlotIndex = 0;
 
 	UPROPERTY() EBattleAction PendingAction = EBattleAction::Idle;
+
+	//이번 턴에 전투 명령어가 들어왔는지. 무입력 이탈 판정에 쓴다
+	UPROPERTY() bool bActedThisTurn = false;
+
+	//연속으로 입력이 없었던 턴 수
+	UPROPERTY() int32 IdleTurns = 0;
+
 	UPROPERTY() TObjectPtr<ABattleUnit> Unit;
 
 	//0보다 크면 게임 오버 상태. 매 턴 줄어들고 0이 되면 부활한다
@@ -163,6 +172,11 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+#if WITH_EDITOR
+	//프로퍼티를 바꾸거나 액터를 옮길 때마다 불린다. 자리 미리보기를 다시 그린다
+	virtual void OnConstruction(const FTransform& Transform) override;
+#endif
 
 public:
 	virtual void Tick(float DeltaTime) override;
@@ -183,6 +197,25 @@ public:
 	//레인 안 격자의 가로 칸 수. 세로 줄 수는 MaxPlayers에서 자동으로 나온다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
 	int32 SlotColumns = 6;
+
+	//아래 넷은 전부 ArenaRadius에 곱해지는 비율. 격자 모양을 결정한다.
+	//bPreviewSlots를 켜두면 값을 바꾸는 즉시 뷰포트의 점들이 움직인다
+
+	//보스가 중심에서 떨어진 거리
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
+	float BossDistanceRatio = 0.8f;
+
+	//보스에서 첫 줄까지의 거리
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
+	float LaneDistanceRatio = 0.7f;
+
+	//줄과 줄 사이 간격
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
+	float RowSpacingRatio = 0.12f;
+
+	//LaneAngle 중 격자가 실제로 쓰는 비율. 1이면 레인 폭을 꽉 채운다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
+	float ColumnSpreadRatio = 0.8f;
 
 	//DUMMY_MODEL이 높이 16.8cm로 임포트돼 있어 사람 크기로 올리는 보정값
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
@@ -206,9 +239,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float GameOverLoss = 0.5f;
 
-	//시청자에게 보이는 입력 시간. 방송 지연이 있으므로 짧으면 반응이 안 온다
+	//한 게임을 이루는 턴 수. 이만큼 버티면 무승부로 끝난다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float InputSeconds = 30.f;
+	int32 Turns = 10;
+
+	//전투 명령어를 이만큼의 턴 동안 연속으로 안 치면 전장에서 빠진다.
+	//능력치는 기록에 남고 자리와 인원수만 반환된다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	int32 IdleTurnsBeforeKick = 2;
+
+	//보스 행동 예고 시간. 보스 모션 길이에 맞춰야 하므로 임시값이다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float TelegraphSeconds = 5.f;
+
+	//플레이어 행동 선택 카운트다운. 방송 지연이 있으므로 짧으면 반응이 안 온다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float PlayerSelectCountdown = 90.f;
 
 	//카운트다운이 끝난 뒤 늦게 도착하는 채팅을 더 받는 시간.
 	//방송 지연 + API 폴링 간격보다 길어야 한다. 로그의 실측 지연을 보고 맞출 것
@@ -273,11 +319,15 @@ public:
 	int32 BossBaseDamage = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 EnemyMaxHP = 2000;
+	int32 EnemyMaxHP = 100;
 
 	//채팅이 붙기 전까지 더미 유저들이 매 턴 무작위 행동을 고르게 한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
 	bool bRandomizeTestPlayers = true;
+
+	//에디터에서 자리 배치를 점으로 미리 보여준다. Play 없이 격자를 맞출 때 쓴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
+	bool bPreviewSlots = true;
 
 	// ---- 상태 ----
 
@@ -319,6 +369,16 @@ public:
 
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Battle|Debug")
 	void RunSelfTest();
+
+	//현재 격자 좌표에 BattleSpot을 만들어 준다. 백지에서 시작하지 않도록 하는 용도라
+	//이미 스팟이 있으면 아무것도 하지 않는다
+	UFUNCTION(CallInEditor, Category = "Battle|Arena")
+	void GenerateSpotsFromGrid();
+
+	//유닛 머리 위 이름표로 쓸 위젯. 비워두면 C++ 기본 이름표를 쓴다.
+	//UMG에서 만든 위젯 블루프린트를 지정하면 글꼴·색·배경을 에디터에서 손볼 수 있다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+	TSubclassOf<class UUserWidget> NameplateWidgetClass;
 
 	//유저 기록 저장/불러오기. 저장 위치는 Saved/PlayerData.json.
 	//턴이 끝날 때와 종료 시에 자동으로 불린다. 상점 상호작용처럼
@@ -366,9 +426,14 @@ public:
 	FVector SlotLocation(EBattleLane Lane, int32 SlotIndex) const;
 
 private:
+	//Telegraph → Input → Collect → Resolve 순으로 타이머가 이어진다
 	void StartTurn();
+	void BeginInput();
 	void BeginCollect();
 	void ResolveTurn();
+
+	//전장에서 빼되 기록은 남긴다
+	void RemovePlayer(const FString& UserId);
 
 	void SpawnBoss();
 	void UpdateVisuals();
@@ -389,6 +454,13 @@ private:
 
 	//보스 행동 스텁 — 패턴이 정해지면 이 함수만 통째로 교체
 	FBossAction ChooseBossAction() const;
+
+	//레벨에 놓인 BattleSpot을 전부 찾아 구역별로 모으고 보스에서 가까운 순으로 정렬한다
+	void GatherSpots();
+
+	//구역별 자리 좌표. 비어 있으면 SlotLocation이 격자 계산으로 넘어간다.
+	//FVector라 GC 대상이 아니어서 UPROPERTY가 필요 없다
+	TArray<FVector> Spots[3];
 
 	//지금 전투 중인 참여자
 	UPROPERTY() TMap<FString, FBattlePlayer> Players;

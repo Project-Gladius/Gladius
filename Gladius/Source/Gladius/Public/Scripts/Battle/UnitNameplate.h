@@ -20,7 +20,9 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 private:
-	UPROPERTY()
+	//위젯 블루프린트에 'Label'이라는 이름의 TextBlock이 있으면 자동으로 연결된다.
+	//없으면 RebuildWidget이 C++로 하나 만들어 쓴다
+	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Label;
 
 	//위젯이 만들어지기 전에 SetText가 불릴 수 있어 들고 있다가 적용한다
