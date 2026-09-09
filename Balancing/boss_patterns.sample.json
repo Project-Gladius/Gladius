@@ -1,0 +1,195 @@
+{
+    "schemaVersion":  1,
+    "bossId":  "boss_sample",
+    "name":  "패턴 검증용 보스",
+    "revision":  2,
+    "description":  "1~4턴 패턴의 가중 랜덤 실행을 위한 실험용 예제. 수치와 모션 ID는 실제 게임 확정값이 아닙니다.",
+    "actions":  [
+                    {
+                        "id":  "center_slam",
+                        "name":  "중앙 내려찍기",
+                        "damage":  2,
+                        "target":  {
+                                       "mode":  "fixed",
+                                       "zones":  [
+                                                     "center"
+                                                 ]
+                                   },
+                        "resistanceByZone":  {
+                                                 "left":  {
+                                                              "physical":  "normal",
+                                                              "magical":  "normal"
+                                                          },
+                                                 "center":  {
+                                                                "physical":  "normal",
+                                                                "magical":  "normal"
+                                                            },
+                                                 "right":  {
+                                                               "physical":  "normal",
+                                                               "magical":  "normal"
+                                                           }
+                                             },
+                        "telegraph":  {
+                                          "text":  "보스가 무기를 머리 위로 들어 올린다.",
+                                          "motionId":  "prepare_center_slam"
+                                      },
+                        "attackMotionId":  "center_slam"
+                    },
+                    {
+                        "id":  "right_swing",
+                        "name":  "오른쪽 휘두르기",
+                        "damage":  2,
+                        "target":  {
+                                       "mode":  "fixed",
+                                       "zones":  [
+                                                     "right"
+                                                 ]
+                                   },
+                        "resistanceByZone":  {
+                                                 "left":  {
+                                                              "physical":  "vulnerable",
+                                                              "magical":  "normal"
+                                                          },
+                                                 "center":  {
+                                                                "physical":  "normal",
+                                                                "magical":  "normal"
+                                                            },
+                                                 "right":  {
+                                                               "physical":  "normal",
+                                                               "magical":  "normal"
+                                                           }
+                                             },
+                        "telegraph":  {
+                                          "text":  "보스가 오른팔을 뒤로 젖힌다.",
+                                          "motionId":  "prepare_right_swing"
+                                      },
+                        "attackMotionId":  "right_swing"
+                    },
+                    {
+                        "id":  "left_swing",
+                        "name":  "왼쪽 휘두르기",
+                        "damage":  2,
+                        "target":  {
+                                       "mode":  "fixed",
+                                       "zones":  [
+                                                     "left"
+                                                 ]
+                                   },
+                        "resistanceByZone":  {
+                                                 "left":  {
+                                                              "physical":  "normal",
+                                                              "magical":  "normal"
+                                                          },
+                                                 "center":  {
+                                                                "physical":  "normal",
+                                                                "magical":  "normal"
+                                                            },
+                                                 "right":  {
+                                                               "physical":  "vulnerable",
+                                                               "magical":  "normal"
+                                                           }
+                                             },
+                        "telegraph":  {
+                                          "text":  "보스가 왼팔을 뒤로 젖힌다.",
+                                          "motionId":  "prepare_left_swing"
+                                      },
+                        "attackMotionId":  "left_swing"
+                    },
+                    {
+                        "id":  "center_thrust",
+                        "name":  "중앙 찌르기",
+                        "damage":  2,
+                        "target":  {
+                                       "mode":  "fixed",
+                                       "zones":  [
+                                                     "center"
+                                                 ]
+                                   },
+                        "resistanceByZone":  {
+                                                 "left":  {
+                                                              "physical":  "vulnerable",
+                                                              "magical":  "normal"
+                                                          },
+                                                 "center":  {
+                                                                "physical":  "normal",
+                                                                "magical":  "normal"
+                                                            },
+                                                 "right":  {
+                                                               "physical":  "normal",
+                                                               "magical":  "normal"
+                                                           }
+                                             },
+                        "telegraph":  {
+                                          "text":  "보스가 무기 끝을 중앙으로 겨눈다.",
+                                          "motionId":  "prepare_center_thrust"
+                                      },
+                        "attackMotionId":  "center_thrust"
+                    }
+                ],
+    "patterns":  [
+                     {
+                         "id":  "single_center",
+                         "name":  "중앙 단발",
+                         "description":  "1턴 패턴. 단발 공격 대응을 확인한다.",
+                         "steps":  [
+                                       "center_slam"
+                                   ]
+                     },
+                     {
+                         "id":  "right_center",
+                         "name":  "오른쪽 후 중앙",
+                         "description":  "2턴 패턴. 이동 후 다음 공격을 예측한다.",
+                         "steps":  [
+                                       "right_swing",
+                                       "center_slam"
+                                   ]
+                     },
+                     {
+                         "id":  "side_combo",
+                         "name":  "좌우 연계",
+                         "description":  "3턴 패턴. 위치별 취약과 연속 회피 비용을 비교한다.",
+                         "steps":  [
+                                       "right_swing",
+                                       "left_swing",
+                                       "center_thrust"
+                                   ]
+                     },
+                     {
+                         "id":  "full_combo",
+                         "name":  "4연속 콤보",
+                         "description":  "4턴 패턴. 긴 패턴 기억과 피버 관리를 비교한다.",
+                         "steps":  [
+                                       "left_swing",
+                                       "center_slam",
+                                       "right_swing",
+                                       "center_thrust"
+                                   ]
+                     }
+                 ],
+    "selection":  {
+                      "mode":  "weightedRandom",
+                      "allowImmediateRepeat":  true,
+                      "pool":  [
+                                   {
+                                       "patternId":  "single_center",
+                                       "weight":  40
+                                   },
+                                   {
+                                       "patternId":  "right_center",
+                                       "weight":  30
+                                   },
+                                   {
+                                       "patternId":  "side_combo",
+                                       "weight":  20
+                                   },
+                                   {
+                                       "patternId":  "full_combo",
+                                       "weight":  10
+                                   }
+                               ]
+                  },
+    "encounter":  {
+                      "turns":  10,
+                      "patternFit":  "remainingTurns"
+                  }
+}
