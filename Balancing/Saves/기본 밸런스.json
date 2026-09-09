@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 1,
+  "kind": "gladius-simulator",
+  "mode": "position",
+  "player": {
+    "hp": 5,
+    "fever": 0,
+    "zone": "center",
+    "evadeStreak": 0
+  },
+  "skills": [
+    {
+      "name": "기본 베기",
+      "base": 3,
+      "attribute": "physical",
+      "critChance": 0,
+      "critBonus": 0
+    },
+    {
+      "name": "집중 타격",
+      "base": 3,
+      "attribute": "magical",
+      "critChance": 25,
+      "critBonus": 40
+    }
+  ],
+  "rules": {
+    "defenseDivisor": 2,
+    "attackGain": 1,
+    "defenseGain": 1,
+    "evadeN": 2,
+    "evadeM": 100,
+    "repeat": "everyAfter",
+    "rounding": "floor"
+  },
+  "options": {
+    "initialLines": 5,
+    "additionalLines": 3,
+    "uniqueDamage": false
+  },
+  "turns": [
+    {
+      "id": "turn_1788934296823_0",
+      "name": "보스 행동 1",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_1",
+      "name": "보스 행동 2",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_2",
+      "name": "보스 행동 3",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_3",
+      "name": "보스 행동 4",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_4",
+      "name": "보스 행동 5",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_5",
+      "name": "보스 행동 6",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    }
+  ]
+}
