@@ -1,4 +1,4 @@
-#include "Scripts/Backend/CommandDispatcher.h"
+﻿#include "Scripts/Backend/CommandDispatcher.h"
 
 void UCommandDispatcher::Initialize()
 {
@@ -7,19 +7,19 @@ void UCommandDispatcher::Initialize()
 
 void UCommandDispatcher::RegisterCommandHandlers()
 {
-	CommandHandlers.Add(ECommandType::Attack1, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleAttack1));
-	CommandHandlers.Add(ECommandType::Attack2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleAttack2));
-	CommandHandlers.Add(ECommandType::Defend, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleDefend));
-	CommandHandlers.Add(ECommandType::DodgeLeft, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleDodgeLeft));
-	CommandHandlers.Add(ECommandType::DodgeRight, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleDodgeRight));
-	CommandHandlers.Add(ECommandType::DodgeMid, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleDodgeMid));
+	CommandHandlers.Add(ECommandType::Attack1, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastAttack));
+	CommandHandlers.Add(ECommandType::Attack2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastAttack));
+	CommandHandlers.Add(ECommandType::Defend, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDefend));
+	CommandHandlers.Add(ECommandType::DodgeLeft, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDodge));
+	CommandHandlers.Add(ECommandType::DodgeRight, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDodge));
+	CommandHandlers.Add(ECommandType::DodgeMid, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDodge));
 	CommandHandlers.Add(ECommandType::Logout, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleLogout));
 
-	CommandHandlers.Add(ECommandType::Enhance1, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleEnhance1));
-	CommandHandlers.Add(ECommandType::Enhance2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleEnhance2));
-	CommandHandlers.Add(ECommandType::Enhance3, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleEnhance3));
-	CommandHandlers.Add(ECommandType::Enhance4, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleEnhance4));
-	CommandHandlers.Add(ECommandType::Talk, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleTalk));
+	CommandHandlers.Add(ECommandType::Enhance1, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
+	CommandHandlers.Add(ECommandType::Enhance2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
+	CommandHandlers.Add(ECommandType::Enhance3, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
+	CommandHandlers.Add(ECommandType::Enhance4, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
+	CommandHandlers.Add(ECommandType::Talk, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastTalk));
 }
 
 void UCommandDispatcher::Execute(const FParsedCommand& Command)
@@ -109,40 +109,22 @@ void UCommandDispatcher::ResetLoginForNewBattle()
 
 // ===== 전투상태 명령 처리 함수 =====
 
-void UCommandDispatcher::HandleAttack1(const FParsedCommand& Command)
+//!공격 1, !공격 2 공통 진입점. Argument("1"/"2")와 UserId를 그대로 OnAttackCommand에 전달
+void UCommandDispatcher::BroadcastAttack(const FParsedCommand& Command)
 {
-	//TODO: 캐릭터 공격(1번) 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[공격 1] 유저: %s"), *Command.UserId);
+	OnAttackCommand.Broadcast(Command.UserId, Command.Argument);
 }
 
-void UCommandDispatcher::HandleAttack2(const FParsedCommand& Command)
+//!방어 진입점. 인자가 없는 명령이므로 UserId만 OnDefendCommand에 전달
+void UCommandDispatcher::BroadcastDefend(const FParsedCommand& Command)
 {
-	//TODO: 캐릭터 공격(2번) 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[공격 2] 유저: %s"), *Command.UserId);
+	OnDefendCommand.Broadcast(Command.UserId);
 }
 
-void UCommandDispatcher::HandleDefend(const FParsedCommand& Command)
+//!회피 좌/우/중 공통 진입점. Argument("좌"/"우"/"중")와 UserId를 그대로 OnDodgeCommand에 전달
+void UCommandDispatcher::BroadcastDodge(const FParsedCommand& Command)
 {
-	//TODO: 캐릭터 방어 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[방어] 유저: %s"), *Command.UserId);
-}
-
-void UCommandDispatcher::HandleDodgeLeft(const FParsedCommand& Command)
-{
-	//TODO: 캐릭터 좌측 회피 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[회피 좌] 유저: %s"), *Command.UserId);
-}
-
-void UCommandDispatcher::HandleDodgeRight(const FParsedCommand& Command)
-{
-	//TODO: 캐릭터 우측 회피 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[회피 우] 유저: %s"), *Command.UserId);
-}
-
-void UCommandDispatcher::HandleDodgeMid(const FParsedCommand& Command)
-{
-	//TODO: 캐릭터 중앙 회피 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[회피 중] 유저: %s"), *Command.UserId);
+	OnDodgeCommand.Broadcast(Command.UserId, Command.Argument);
 }
 
 void UCommandDispatcher::HandleLogout(const FParsedCommand& Command)
@@ -153,32 +135,14 @@ void UCommandDispatcher::HandleLogout(const FParsedCommand& Command)
 
 // ===== 신전상태 명령 처리 함수 =====
 
-void UCommandDispatcher::HandleEnhance1(const FParsedCommand& Command)
+//!강화 1~4 공통 진입점. Argument("1"~"4")와 UserId를 그대로 OnEnhanceCommand에 전달
+void UCommandDispatcher::BroadcastEnhance(const FParsedCommand& Command)
 {
-	//TODO: 강화(1번) 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[강화 1] 유저: %s"), *Command.UserId);
+	OnEnhanceCommand.Broadcast(Command.UserId, Command.Argument);
 }
 
-void UCommandDispatcher::HandleEnhance2(const FParsedCommand& Command)
+//!대화 진입점. Argument(대화 내용 전체)와 UserId를 그대로 OnTalkCommand에 전달
+void UCommandDispatcher::BroadcastTalk(const FParsedCommand& Command)
 {
-	//TODO: 강화(2번) 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[강화 2] 유저: %s"), *Command.UserId);
-}
-
-void UCommandDispatcher::HandleEnhance3(const FParsedCommand& Command)
-{
-	//TODO: 강화(3번) 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[강화 3] 유저: %s"), *Command.UserId);
-}
-
-void UCommandDispatcher::HandleEnhance4(const FParsedCommand& Command)
-{
-	//TODO: 강화(4번) 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[강화 4] 유저: %s"), *Command.UserId);
-}
-
-void UCommandDispatcher::HandleTalk(const FParsedCommand& Command)
-{
-	//TODO: 신전 대화 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[대화] 유저: %s | 내용: %s"), *Command.UserId, *Command.Argument);
+	OnTalkCommand.Broadcast(Command.UserId, Command.Argument);
 }

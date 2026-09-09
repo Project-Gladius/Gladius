@@ -35,6 +35,7 @@ bool FChatCommandParser::TryParse(const FString& UserId, const FString& RawConte
 
 		FParsedCommand Result;
 		Result.UserId = UserId;
+		Result.Argument = Remainder; //명령어 뒤에 붙은 인자(ex. "1", "좌", 대화 내용)를 그대로 보관. CommandDispatcher가 외부 델리게이트로 넘길 때 사용
 
 		if (!ResolveCommand(Keyword, Remainder, Result))
 		{
@@ -59,6 +60,7 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	if (Keyword == TEXT("방어"))
 	{
+		if (!Remainder.IsEmpty()) return false; //인자를 받지 않는 명령어라 뒤에 뭔가 더 붙으면 실패
 		OutCommand.CommandType = ECommandType::Defend;
 		return true;
 	}
@@ -73,6 +75,7 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	if (Keyword == TEXT("로그아웃"))
 	{
+		if (!Remainder.IsEmpty()) return false; //인자를 받지 않는 명령어라 뒤에 뭔가 더 붙으면 실패
 		OutCommand.CommandType = ECommandType::Logout;
 		return true;
 	}
@@ -88,9 +91,8 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	if (Keyword == TEXT("대화"))
 	{
-		//대화는 뒤에 남은 문자열 전체를 인자로 사용
+		//대화는 뒤에 남은 문자열 전체를 인자로 사용 (Argument는 TryParse에서 이미 채워둠)
 		OutCommand.CommandType = ECommandType::Talk;
-		OutCommand.Argument = Remainder;
 		return true;
 	}
 

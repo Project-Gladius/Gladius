@@ -14,6 +14,26 @@ DECLARE_DELEGATE_RetVal(EGameState, FGetGameStateDelegate);
 // 구독한 곳(예: 플레이어 매니저)에서 DB 조회/신규 생성 및 필드에 플레이어 스폰 로직을 실행하면 됨
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnUserLoginRequired, const FString& /*UserId*/);
 
+// ===== 명령어별 실행 델리게이트 =====
+// 외부(전투 로직, 캐릭터 스크립트 등)에서 구독해 실제 게임 동작을 처리하는 델리게이트.
+// CommandType은 이미 델리게이트 종류로 구분되므로 넘기지 않고, 대신 명령의 두 번째 인자(!공격 1의 "1", !회피 좌의 "좌" 등)와
+// 적용 대상 UserId만 넘겨서 외부에서 다루기 쉽게 함
+
+// !공격 1, !공격 2 실행 시 브로드캐스트. Argument: 공격 번호("1" 또는 "2")
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+
+// !방어 실행 시 브로드캐스트. 인자를 받지 않는 명령이라 UserId만 전달됨
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnDefendCommand, const FString& /*UserId*/);
+
+// !회피 좌/우/중 실행 시 브로드캐스트. Argument: 방향("좌"/"우"/"중")
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnDodgeCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+
+// !강화 1~4 실행 시 브로드캐스트. Argument: 강화 번호("1"~"4")
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnEnhanceCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+
+// !대화 ... 실행 시 브로드캐스트. Argument: 대화 내용 전체
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTalkCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+
 // 파싱된 명령어(ECommandType)와 이를 처리할 함수를 map으로 연결해 실행시키는 클래스
 UCLASS()
 class GLADIUS_API UCommandDispatcher : public UObject
@@ -33,27 +53,38 @@ public:
 	//외부(플레이어 매니저 등)에서 구독해 로그인 시 DB 조회/신규 생성/필드 스폰 로직을 연결
 	FOnUserLoginRequired OnUserLoginRequired;
 
+	//외부(전투 로직 등)에서 구독해 공격 처리를 연결. Argument: "1" 또는 "2"
+	FOnAttackCommand OnAttackCommand;
+
+	//외부(전투 로직 등)에서 구독해 방어 처리를 연결
+	FOnDefendCommand OnDefendCommand;
+
+	//외부(전투 로직 등)에서 구독해 회피 처리를 연결. Argument: "좌"/"우"/"중"
+	FOnDodgeCommand OnDodgeCommand;
+
+	//외부(신전 로직 등)에서 구독해 강화 처리를 연결. Argument: "1"~"4"
+	FOnEnhanceCommand OnEnhanceCommand;
+
+	//외부(신전 로직 등)에서 구독해 대화 처리를 연결. Argument: 대화 내용 전체
+	FOnTalkCommand OnTalkCommand;
+
 private:
 	//명령어 종류 -> 처리 함수 매핑
 	TMap<ECommandType, FCommandHandler> CommandHandlers;
 
 	void RegisterCommandHandlers();
 
-	// ===== 전투상태 명령 처리 함수 (TODO: 실제 전투 로직 연결 필요) =====
-	void HandleAttack1(const FParsedCommand& Command);
-	void HandleAttack2(const FParsedCommand& Command);
-	void HandleDefend(const FParsedCommand& Command);
-	void HandleDodgeLeft(const FParsedCommand& Command);
-	void HandleDodgeRight(const FParsedCommand& Command);
-	void HandleDodgeMid(const FParsedCommand& Command);
+	// ===== 전투상태 명령 처리 함수 =====
+	//공격(1/2), 회피(좌/우/중)는 각각 하나의 델리게이트로 묶여 있으므로 CommandHandlers에서 같은 함수를 공유함
+	void BroadcastAttack(const FParsedCommand& Command);
+	void BroadcastDefend(const FParsedCommand& Command);
+	void BroadcastDodge(const FParsedCommand& Command);
 	void HandleLogout(const FParsedCommand& Command);
 
-	// ===== 신전상태 명령 처리 함수 (TODO: 실제 신전 로직 연결 필요) =====
-	void HandleEnhance1(const FParsedCommand& Command);
-	void HandleEnhance2(const FParsedCommand& Command);
-	void HandleEnhance3(const FParsedCommand& Command);
-	void HandleEnhance4(const FParsedCommand& Command);
-	void HandleTalk(const FParsedCommand& Command);
+	// ===== 신전상태 명령 처리 함수 =====
+	//강화(1~4)도 하나의 델리게이트로 묶여 있으므로 CommandHandlers에서 같은 함수를 공유함
+	void BroadcastEnhance(const FParsedCommand& Command);
+	void BroadcastTalk(const FParsedCommand& Command);
 
 	// ===== 로그인 / 로그아웃 =====
 
