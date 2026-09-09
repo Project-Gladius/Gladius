@@ -1,4 +1,4 @@
-#include "Scripts/Backend/CommandDispatcher.h"
+﻿#include "Scripts/Backend/CommandDispatcher.h"
 
 void UCommandDispatcher::Initialize()
 {
