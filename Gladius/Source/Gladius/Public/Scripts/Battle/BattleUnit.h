@@ -7,7 +7,8 @@
 class USkeletalMeshComponent;
 class UWidgetComponent;
 
-//전투에 등장하는 유닛. 보스와 플레이어가 같은 클래스를 쓰고 스케일로만 구분한다
+//전투에 등장하는 유닛. 메시·크기·이름표 위치는 블루프린트에서 지정한다.
+//BattleManager가 PlayerUnitClass / BossUnitClass로 어떤 블루프린트를 쓸지 고른다
 UCLASS()
 class GLADIUS_API ABattleUnit : public AActor
 {
@@ -20,14 +21,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetLabel(const FString& Name, int32 Current, int32 Max);
 
-	//이름표 위젯을 갈아끼운다. UnitNameplate를 부모로 하는 위젯 블루프린트여야
-	//글자가 표시된다. 비워두면 C++ 기본 이름표를 그대로 쓴다
-	UFUNCTION(BlueprintCallable, Category = "Battle")
-	void SetNameplateClass(TSubclassOf<class UUserWidget> WidgetClass);
+	//스폰 시 스케일이 1로 덮이므로, 크기는 Mesh 컴포넌트 쪽에서 준다.
+	//그래서 액터 루트는 빈 SceneComponent로 두고 Mesh를 그 아래 붙인다
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
+	TObjectPtr<USceneComponent> Root;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
 	TObjectPtr<USkeletalMeshComponent> Mesh;
 
+	//Mesh가 아니라 Root에 붙는다. 메시 크기와 무관하게 높이를 직접 정할 수 있다
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
 	TObjectPtr<UWidgetComponent> Nameplate;
 

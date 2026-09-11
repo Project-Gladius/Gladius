@@ -217,13 +217,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
 	float ColumnSpreadRatio = 0.8f;
 
-	//DUMMY_MODEL이 높이 16.8cm로 임포트돼 있어 사람 크기로 올리는 보정값
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
-	float UnitScale = 10.f;
+	// ---- 유닛 ----
 
-	//UnitScale에 곱해지는 보스 배율
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Arena")
-	float BossScale = 2.f;
+	//플레이어와 보스로 쓸 블루프린트. 메시·크기·이름표 위치·이름표 위젯이
+	//전부 이 블루프린트 안에 있으므로 코드를 고칠 일이 없다.
+	//비워두면 C++ 기본 클래스를 쓰는데, 메시가 없어 보이지 않는다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
+	TSubclassOf<ABattleUnit> PlayerUnitClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
+	TSubclassOf<ABattleUnit> BossUnitClass;
 
 	// ---- 진행 ----
 
@@ -375,11 +378,6 @@ public:
 	UFUNCTION(CallInEditor, Category = "Battle|Arena")
 	void GenerateSpotsFromGrid();
 
-	//유닛 머리 위 이름표로 쓸 위젯. 비워두면 C++ 기본 이름표를 쓴다.
-	//UMG에서 만든 위젯 블루프린트를 지정하면 글꼴·색·배경을 에디터에서 손볼 수 있다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
-	TSubclassOf<class UUserWidget> NameplateWidgetClass;
-
 	//유저 기록 저장/불러오기. 저장 위치는 Saved/PlayerData.json.
 	//턴이 끝날 때와 종료 시에 자동으로 불린다. 상점 상호작용처럼
 	//기록이 바뀌는 다른 지점이 생기면 거기서도 호출하면 된다
@@ -423,7 +421,12 @@ public:
 	// ---- 좌표 ----
 
 	FVector BossLocation() const;
+
+	//레벨에 BattleSpot이 있으면 그 좌표를, 없으면 격자 계산을 쓴다
 	FVector SlotLocation(EBattleLane Lane, int32 SlotIndex) const;
+
+	//스팟과 무관한 순수 격자 계산. 스팟을 만들어 줄 때와 미리보기에 쓴다
+	FVector GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const;
 
 private:
 	//Telegraph → Input → Collect → Resolve 순으로 타이머가 이어진다

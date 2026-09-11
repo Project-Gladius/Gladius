@@ -39,6 +39,12 @@ void ABattleManager::BeginPlay()
 	LoadRecords();
 	GatherSpots();
 
+	if (!PlayerUnitClass || !BossUnitClass)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[Battle] PlayerUnitClass 또는 BossUnitClass가 비어 있습니다 — 메시가 없어 유닛이 보이지 않습니다"));
+	}
+
 	BindActionKeys();
 	DrawArenaGuides();
 	StartBattle();
@@ -146,8 +152,9 @@ void ABattleManager::GenerateSpotsFromGrid()
 
 		for (int32 Slot = 0; Slot < MaxPlayers; ++Slot)
 		{
+			//스팟을 만드는 중이므로 스팟을 참조하지 않는 격자 계산을 직접 쓴다
 			ABattleSpot* Spot = World->SpawnActor<ABattleSpot>(
-				SlotLocation((EBattleLane)LaneIndex, Slot), FRotator::ZeroRotator);
+				GridSlotLocation((EBattleLane)LaneIndex, Slot), FRotator::ZeroRotator);
 			if (!Spot)
 			{
 				continue;
@@ -169,13 +176,17 @@ void ABattleManager::GenerateSpotsFromGrid()
 
 FVector ABattleManager::SlotLocation(EBattleLane Lane, int32 SlotIndex) const
 {
-	//레벨에 스팟을 놓았으면 그쪽이 우선. 없으면 아래 격자 계산으로 넘어간다
+	//레벨에 스팟을 놓았으면 그쪽이 우선
 	const TArray<FVector>& LaneSpots = Spots[(int32)Lane];
 	if (LaneSpots.Num() > 0)
 	{
 		return LaneSpots[SlotIndex % LaneSpots.Num()];
 	}
+	return GridSlotLocation(Lane, SlotIndex);
+}
 
+FVector ABattleManager::GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const
+{
 	//레인 중심각. 보스에서 중심을 바라본 방향(-X)이 가운데 레인이다
 	const float LaneCenter = (Lane == EBattleLane::Left) ? LaneAngle
 		: (Lane == EBattleLane::Right) ? -LaneAngle : 0.f;
@@ -225,7 +236,7 @@ void ABattleManager::OnConstruction(const FTransform& Transform)
 	{
 		for (int32 Slot = 0; Slot < MaxPlayers; ++Slot)
 		{
-			DrawDebugSphere(World, SlotLocation((EBattleLane)LaneIndex, Slot),
+			DrawDebugSphere(World, GridSlotLocation((EBattleLane)LaneIndex, Slot),
 				25.f, 8, LaneColors[LaneIndex], true, -1.f, 0, 2.f);
 		}
 	}
@@ -423,9 +434,8 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.HP = NewPlayer.MaxHP;
 		NewPlayer.SlotIndex = Slot;
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
+			PlayerUnitClass ? PlayerUnitClass.Get() : ABattleUnit::StaticClass(),
 			SlotLocation(NewPlayer.Lane, Slot), FRotator::ZeroRotator);
-		NewPlayer.Unit->SetActorScale3D(FVector(UnitScale));
-		NewPlayer.Unit->SetNameplateClass(NameplateWidgetClass);
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
 #if WITH_EDITOR
@@ -701,9 +711,9 @@ void ABattleManager::SpawnBoss()
 	}
 
 	//보스는 중심 쪽(-X)을 본다
-	BossUnit = GetWorld()->SpawnActor<ABattleUnit>(BossLocation(), FRotator(0.f, 180.f, 0.f));
-	BossUnit->SetActorScale3D(FVector(UnitScale * BossScale));
-	BossUnit->SetNameplateClass(NameplateWidgetClass);
+	BossUnit = GetWorld()->SpawnActor<ABattleUnit>(
+		BossUnitClass ? BossUnitClass.Get() : ABattleUnit::StaticClass(),
+		BossLocation(), FRotator(0.f, 180.f, 0.f));
 #if WITH_EDITOR
 	BossUnit->SetActorLabel(TEXT("Boss"));
 #endif
@@ -1019,9 +1029,10 @@ void ABattleManager::RunSelfTest()
 		check(FMath::IsNearlyEqual(P.CritChance, BaseCritChance + CritChancePerBonus));
 	}
 
-	//같은 자리 번호는 레인이 달라도 서로 다른 좌표여야 한다
-	check(!SlotLocation(EBattleLane::Left, 0).Equals(SlotLocation(EBattleLane::Right, 0)));
-	check(!SlotLocation(EBattleLane::Mid, 0).Equals(SlotLocation(EBattleLane::Mid, 1)));
+	//같은 자리 번호는 레인이 달라도 서로 다른 좌표여야 한다.
+	//스팟 유무에 좌우되지 않도록 격자 계산을 직접 검사한다
+	check(!GridSlotLocation(EBattleLane::Left, 0).Equals(GridSlotLocation(EBattleLane::Right, 0)));
+	check(!GridSlotLocation(EBattleLane::Mid, 0).Equals(GridSlotLocation(EBattleLane::Mid, 1)));
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] SelfTest 통과"));
 }
