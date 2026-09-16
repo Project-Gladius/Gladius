@@ -569,7 +569,8 @@ void ABattleManager::ResolveTurn()
 				}
 
 				P.HP = P.MaxHP;
-				P.Fever = 0;
+				P.Fever = 0.f;
+				P.EvadeStreak = 0;
 				++Revived;
 			}
 			continue;
@@ -577,13 +578,14 @@ void ABattleManager::ResolveTurn()
 
 		P.Lane = ApplyMove(P.PendingAction, P.Lane);
 
-		const bool bHit = HitAreaContains(Boss.HitArea, P.Lane);
-		const int32 Taken = DamageToPlayer(P.PendingAction, bHit, Boss.Damage, DefenceDivisor);
-		P.HP = FMath::Max(0, P.HP - Taken);
-
 		const bool bAttack1 = P.PendingAction == EBattleAction::Attack1;
 		const bool bAttack2 = P.PendingAction == EBattleAction::Attack2;
+		const bool bEvade = P.PendingAction == EBattleAction::AvoidL
+			|| P.PendingAction == EBattleAction::AvoidM
+			|| P.PendingAction == EBattleAction::AvoidR;
 
+		//기획서 5절 순서 — 플레이어 공격을 먼저 계산한다.
+		//피버는 이번 턴 공격 피해에 반영된 뒤에 갱신된다
 		if (bAttack1 || bAttack2)
 		{
 			const int32 BaseDamage = bAttack1 ? Attack1BaseDamage : Attack2BaseDamage;
@@ -601,14 +603,33 @@ void ABattleManager::ResolveTurn()
 			{
 				Record->TotalDamageDealt += Dealt;
 			}
+		}
 
+		const bool bHit = HitAreaContains(Boss.HitArea, P.Lane);
+		const int32 Taken = DamageToPlayer(P.PendingAction, bHit, Boss.Damage, DefenceDivisor);
+		P.HP = FMath::Max(0, P.HP - Taken);
+
+		//연속 회피 횟수는 회피가 아닌 행동(무입력 포함)에서 끊긴다
+		P.EvadeStreak = bEvade ? P.EvadeStreak + 1 : 0;
+
+		if (bAttack1 || bAttack2)
+		{
 			P.Fever += FeverIncrement;
 		}
-		else if (P.PendingAction == EBattleAction::AvoidL
-			|| P.PendingAction == EBattleAction::AvoidM
-			|| P.PendingAction == EBattleAction::AvoidR)
+		else if (P.PendingAction == EBattleAction::Defense)
 		{
-			P.Fever = FMath::Max(0, P.Fever - FeverDecrement);
+			P.Fever += DefenseFeverGain;
+		}
+		else if (bEvade)
+		{
+			P.Fever = DecayFever(P.Fever, P.EvadeStreak, EvadeStreakN,
+				EvadeFeverLossPercent, EvadeRepeatMode, FeverRounding);
+		}
+
+		//상한은 어느 경로로 바뀌었든 똑같이 적용한다
+		if (FeverCap > 0.f)
+		{
+			P.Fever = FMath::Min(P.Fever, FeverCap);
 		}
 
 		if (P.HP <= 0)
@@ -769,7 +790,7 @@ void ABattleManager::Tick(float DeltaTime)
 	{
 		const FBattlePlayer* Me = Players.Find(DebugUserId);
 		const FString MyLine = Me
-			? FString::Printf(TEXT("%s: %s   HP %d/%d   Fever %d"), *DebugUserId,
+			? FString::Printf(TEXT("%s: %s   HP %d/%d   Fever %.1f"), *DebugUserId,
 				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction),
 				Me->HP, Me->MaxHP, Me->Fever)
 			: FString::Printf(TEXT("%s: not joined"), *DebugUserId);
@@ -931,11 +952,37 @@ FString ABattleManager::HitAreaLabel(EHitArea Area)
 	}
 }
 
-int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever,
+int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever,
 	float Resist, bool bCrit, float CritDamage)
 {
 	const float Raw = (BaseDamage + DamageBonus + Fever) * Resist * (1.f + (bCrit ? CritDamage : 0.f));
+	// ponytail: 피해의 소수 처리는 기획서에 명시가 없어 반올림으로 둔다 (Battle-data-reference.md 6.3 ⑩)
 	return FMath::Max(0, FMath::RoundToInt(Raw));
+}
+
+float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
+	float LossPercent, EEvadeRepeatMode Repeat, EFeverRounding Rounding)
+{
+	const int32 N = FMath::Max(1, StreakN);
+
+	//기준 도달 후 매회는 N회째부터 계속, N회마다는 N의 배수일 때만
+	const bool bTrigger = (Repeat == EEvadeRepeatMode::EveryAfter)
+		? EvadeStreak >= N
+		: (EvadeStreak > 0 && EvadeStreak % N == 0);
+
+	if (!bTrigger)
+	{
+		return Fever;
+	}
+
+	const float Reduced = Fever * (1.f - LossPercent / 100.f);
+
+	switch (Rounding)
+	{
+	case EFeverRounding::Floor: return FMath::Max(0.f, FMath::FloorToFloat(Reduced));
+	case EFeverRounding::Round: return FMath::Max(0.f, FMath::RoundToFloat(Reduced));
+	default:                    return FMath::Max(0.f, Reduced);
+	}
 }
 
 int32 ABattleManager::DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, int32 Divisor)
@@ -999,6 +1046,54 @@ void ABattleManager::RunSelfTest()
 	check(DamageToBoss(2, 0, 0, 0.5f, false, 0.4f) == 1);
 	check(DamageToBoss(2, 0, 0, 1.5f, false, 0.4f) == 3);
 	check(DamageToBoss(10, 0, 0, 1.0f, true, 0.4f) == 14);
+
+	// ---- 연속 회피 피버 감소 (기획서 10절 검증 기준) ----
+
+	//F=8, N=2, M=50, 소수 유지, 4회 연속 회피
+	//  기준 도달 후 매회 → 8, 4, 2, 1
+	{
+		float F = 8.f;
+		const float Expected[] = { 8.f, 4.f, 2.f, 1.f };
+		for (int32 e = 1; e <= 4; ++e)
+		{
+			F = DecayFever(F, e, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Keep);
+			check(F == Expected[e - 1]);
+		}
+	}
+
+	//  N회마다 → 8, 4, 4, 2
+	{
+		float F = 8.f;
+		const float Expected[] = { 8.f, 4.f, 4.f, 2.f };
+		for (int32 e = 1; e <= 4; ++e)
+		{
+			F = DecayFever(F, e, 2, 50.f, EEvadeRepeatMode::EveryN, EFeverRounding::Keep);
+			check(F == Expected[e - 1]);
+		}
+	}
+
+	//M=100이면 기준에 닿는 순간 0이 된다
+	check(DecayFever(7.f, 2, 2, 100.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 0.f);
+	//기준에 닿기 전에는 손대지 않는다
+	check(DecayFever(7.f, 1, 2, 100.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 7.f);
+	//소수 처리 — 5 × 0.5 = 2.5
+	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Keep) == 2.5f);
+	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 2.f);
+	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Round) == 3.f);
+
+	//피버 0·피격 없음·배율 1에서 10회 공격 총피해 = 10A + 45.
+	//피버가 '피해 계산 뒤'에 오르는 순서를 검증한다
+	{
+		const int32 A = 3;
+		float F = 0.f;
+		int32 Total = 0;
+		for (int32 i = 0; i < 10; ++i)
+		{
+			Total += DamageToBoss(A, 0, F, 1.0f, false, 0.f);
+			F += 1.f;
+		}
+		check(Total == 10 * A + 45);
+	}
 
 	check(AllocateSlotIndex({}, 30) == 0);
 	check(AllocateSlotIndex({ 0, 1, 3 }, 30) == 2);

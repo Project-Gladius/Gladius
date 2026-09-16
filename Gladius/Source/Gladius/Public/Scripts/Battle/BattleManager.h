@@ -60,6 +60,25 @@ enum class EResistance : uint8
 	Vulnerable	// 1.5
 };
 
+//연속 회피로 피버가 줄어들 때, 기준 횟수에 닿은 뒤 어떤 주기로 줄일지
+UENUM(BlueprintType)
+enum class EEvadeRepeatMode : uint8
+{
+	//기준 도달 후 매회 — N회째부터 회피할 때마다 줄어든다 (기획서 기본값)
+	EveryAfter,
+	//N회마다 — 연속 회피 횟수가 N의 배수일 때만 줄어든다
+	EveryN
+};
+
+//피버 감소 결과의 소수 처리. 기획서의 rules.rounding에 대응한다
+UENUM(BlueprintType)
+enum class EFeverRounding : uint8
+{
+	Keep,	//소수 유지
+	Floor,	//내림 (시뮬레이터 기본값)
+	Round	//반올림
+};
+
 //보스 행동이 때리는 구역.
 //Random은 '행동을 정할 때 무작위로 고른다'는 뜻이라, 예고 시점에
 //ResolveHitArea로 구체 범위가 확정된다. 예고 이후에는 나타나지 않는다
@@ -134,7 +153,12 @@ struct FBattlePlayer
 	UPROPERTY() FString DisplayName;
 
 	UPROPERTY() int32 HP = 0;
-	UPROPERTY() int32 Fever = 0;
+
+	//소수 유지 모드가 있어 실수다. 피해 계산에 그대로 더해진다
+	UPROPERTY() float Fever = 0.f;
+
+	//연속으로 회피한 턴 수. 회피가 아닌 행동을 하면 0으로 돌아간다
+	UPROPERTY() int32 EvadeStreak = 0;
 
 	//참가할 때 기록에서 계산해 넣는 값들. 매 판정마다 다시 조회하지 않으려고 들고 있는다
 	UPROPERTY() int32 MaxHP = 0;
@@ -293,12 +317,32 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
 	float CritDamagePerBonus = 0.1f;
 
-	//공격 시 피버가 오르고, 회피 시 내려간다. 하한은 0
+	//공격 시 오르는 피버 (기획서 G_A)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
 	int32 FeverIncrement = 1;
 
+	//방어 시 오르는 피버 (기획서 G_D).
+	// ponytail: 방어 행동 자체를 조건으로 본다. '실제로 피격을 막아야 오르는지'는 기획서 미정
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 FeverDecrement = 2;
+	int32 DefenseFeverGain = 1;
+
+	//피버 상한. 0이면 무제한 (기획서 11절 미정 항목)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	float FeverCap = 0.f;
+
+	//연속 회피 감소 (기획서 N / M). N회 연속 회피하면 피버가 M% 줄어든다.
+	//회피가 아닌 행동을 하면 연속 횟수가 0으로 돌아간다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	int32 EvadeStreakN = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	float EvadeFeverLossPercent = 100.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	EEvadeRepeatMode EvadeRepeatMode = EEvadeRepeatMode::EveryAfter;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	EFeverRounding FeverRounding = EFeverRounding::Floor;
 
 	//방어 시 받는 피해를 이 값으로 나눈다 (올림)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
@@ -409,8 +453,13 @@ public:
 	static FString HitAreaLabel(EHitArea Area);
 
 	//기획서 공식: (기본 + 강화 + 피버) * 내성 * (1 + 치명타 시 치명타 피해)
-	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever,
+	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever,
 		float Resist, bool bCrit, float CritDamage);
+
+	//회피한 턴의 피버. EvadeStreak은 이번 회피까지 센 값을 넘긴다.
+	//기준에 닿지 않았으면 그대로 돌려준다
+	static float DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
+		float LossPercent, EEvadeRepeatMode Repeat, EFeverRounding Rounding);
 
 	//방어 시에는 나눗셈 후 올림
 	static int32 DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, int32 Divisor);
