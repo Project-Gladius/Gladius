@@ -1,0 +1,363 @@
+{
+  "schemaVersion": 1,
+  "kind": "gladius-simulator",
+  "mode": "position",
+  "player": {
+    "hp": 7,
+    "fever": 0,
+    "zone": "left",
+    "evadeStreak": 0
+  },
+  "skills": [
+    {
+      "name": "기본 베기",
+      "base": 10,
+      "attribute": "physical",
+      "critChance": 0,
+      "critBonus": 0
+    },
+    {
+      "name": "집중 타격",
+      "base": 7,
+      "attribute": "physical",
+      "critChance": 25,
+      "critBonus": 50
+    }
+  ],
+  "rules": {
+    "defenseDivisor": 2,
+    "attackGain": 5,
+    "defenseGain": 5,
+    "evadeN": 2,
+    "evadeM": 100,
+    "repeat": "everyAfter",
+    "rounding": "floor"
+  },
+  "options": {
+    "initialLines": 10,
+    "additionalLines": 3,
+    "uniqueDamage": true
+  },
+  "turns": [
+    {
+      "id": "turn_1788934296823_0",
+      "name": "좌",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_1",
+      "name": "우",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_2",
+      "name": "중",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_3",
+      "name": "좌우",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_4",
+      "name": "충전",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "enduring",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934296824_5",
+      "name": "분노",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934676921_6",
+      "name": "무방비",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "vulnerable"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "vulnerable"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "vulnerable"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934682494_7",
+      "name": "좌쓸기",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934687854_8",
+      "name": "우쓸기",
+      "zones": {
+        "left": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    },
+    {
+      "id": "turn_1788934693127_9",
+      "name": "좌우",
+      "zones": {
+        "left": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "damage": 0,
+          "attribute": "physical",
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "damage": 2,
+          "attribute": "physical",
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "probability": {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    }
+  ]
+}

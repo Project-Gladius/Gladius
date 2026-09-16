@@ -2,10 +2,18 @@
 
 
 #include "Scripts/Backend/YouTubeChatManager.h"
-#include "HttpModule.h" 
+#include "Scripts/Backend/ChatCommandParser.h"
+#include "Scripts/Backend/CommandDispatcher.h"
+#include "Scripts/Backend/GameManager.h"
+#include "GameFramework/Actor.h" 
+#include "Kismet/GameplayStatics.h"
+#include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/PlatformFileManager.h"
 //이걸 왜 헤더가 아니라 여기다가 추가한거지? -> .h를 참조하는 모든 cpp에 헤더가 박히면 느려짐
 
 // Sets default values
@@ -20,7 +28,19 @@ AYouTubeChatManager::AYouTubeChatManager()
 void AYouTubeChatManager::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
+	if (!GameManagerRef)
+	{
+		GameManagerRef = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(GetWorld(), AGameManager::StaticClass()));
+	}
+
+	CommandDispatcher = NewObject<UCommandDispatcher>(this);
+	CommandDispatcher->Initialize();
+
+	//전투/신전 상태 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
+	CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
+	CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
+
 	StartFetchingChat();
 }
 
@@ -54,6 +74,9 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 
 	//공백 제거 등 명령어 전처리
 	FString CleanContent = PreprocessCommand(Content);
+
+	//받은 채팅을 그날그날 txt 파일로 저장 (도배/블랙 여부와 무관하게 원본 로그로 남김)
+	SaveCommentLogToFile(UserId, CleanContent, Now);
 
 	FUserInfo* User = UserDatabase.Find(UserId); //왜 포인터로 받게 되는거? -> 데이터 없음 (null) 표현과 데이터 복사방지
 
@@ -216,12 +239,8 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
 		}
 
-		float NextPollDelay = 5.0f;
-		if (JsonObject->HasField(TEXT("pollingIntervalMillis"))) 
-		{
-			NextPollDelay = JsonObject->GetNumberField(TEXT("pollingIntervalMillis"));
-			NextPollDelay /= 1000.0;
-		}
+		//유튜브가 알려주는 pollingIntervalMillis는 무시하고, 신전(40초)/전투(5초) 상태별 고정 주기만 사용
+		const float NextPollDelay = GetPollIntervalForCurrentState();
 
 		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
 
@@ -264,13 +283,76 @@ void AYouTubeChatManager::HandleSpamPenalty(FUserInfo& User, const FDateTime& No
 
 void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FString& Command)
 {
-	//TODO: 나중에 로직 넣을것
-	UE_LOG(LogTemp, Log, TEXT("[명령어 실행] 유저: %s | 명령: %s"), *UserId, *Command);
+	FParsedCommand ParsedCommand;
+
+	//"!"로 시작하는 명령어 형식이 아니거나 알 수 없는 명령어는 전부 무시
+	if (!FChatCommandParser::TryParse(UserId, Command, ParsedCommand))
+	{
+		return;
+	}
+
+	if (CommandDispatcher)
+	{
+		CommandDispatcher->Execute(ParsedCommand);
+	}
 }
 
 void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimespan Remaining)
 {
-	//TODO: 채팅으로 얼마동안 블랙인지 쏴줄 것 
+	//TODO: 채팅으로 얼마동안 블랙인지 쏴줄 것
 	UE_LOG(LogTemp, Warning, TEXT("[%s] 유저에게 남은 차단 시간 알림 송신: %.0f초"), *UserId, Remaining.GetTotalSeconds());
+}
+
+EGameState AYouTubeChatManager::GetCurrentGameState() const
+{
+	//GameManagerRef를 찾지 못한 경우(월드에 배치 안 됨 등) 기본값으로 신전상태 취급
+	return GameManagerRef ? GameManagerRef->GetGameState() : EGameState::Temple;
+}
+
+float AYouTubeChatManager::GetPollIntervalForCurrentState() const
+{
+	return GetCurrentGameState() == EGameState::Combat ? CombatPollIntervalSeconds : TemplePollIntervalSeconds;
+}
+
+void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)
+{
+	//TODO: DB에서 UserId에 해당하는 플레이어 데이터를 조회하고, 없으면 새로 생성한 뒤 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
+	UE_LOG(LogTemp, Log, TEXT("[로그인] 유저 %s 의 전투 참가 로그인 처리 필요"), *UserId);
+}
+
+//받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장
+void AYouTubeChatManager::SaveCommentLogToFile(const FString& UserId, const FString& Content, const FDateTime& Now)
+{
+	//로그 폴더 경로: <프로젝트>/Saved/ChatLogs
+	const FString LogDir = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("ChatLogs"));
+
+	//폴더가 없으면 생성 (두 번째 인자 true: 상위 폴더까지 재귀적으로 생성)
+	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+	if (!PlatformFile.DirectoryExists(*LogDir))
+	{
+		PlatformFile.CreateDirectoryTree(*LogDir);
+	}
+
+	//파일 이름: 그날 날짜(로컬 시간 기준) 예) 2026-08-02.txt
+	const FDateTime LocalNow = FDateTime::Now();
+	const FString FileName = LocalNow.ToString(TEXT("%Y-%m-%d")) + TEXT(".txt");
+	const FString FilePath = FPaths::Combine(LogDir, FileName);
+
+	//한 줄 형식: [HH:MM:SS] UserId: Content
+	const FString LogLine = FString::Printf(
+		TEXT("[%s] %s: %s") LINE_TERMINATOR,
+		*LocalNow.ToString(TEXT("%H:%M:%S")),
+		*UserId,
+		*Content
+	);
+
+	//기존 파일에 이어 붙이기 (없으면 새로 생성), UTF-8로 저장
+	FFileHelper::SaveStringToFile(
+		LogLine,
+		*FilePath,
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM,
+		&IFileManager::Get(),
+		FILEWRITE_Append
+	);
 }
 
