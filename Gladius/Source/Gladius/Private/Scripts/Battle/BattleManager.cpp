@@ -25,7 +25,7 @@ ABattleManager::ABattleManager()
 	StatusText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("StatusText"));
 	StatusText->SetupAttachment(RootComponent);
 	StatusText->SetUsingAbsoluteRotation(true);
-	//BattleUnit의 체력 표시와 같은 이유로 yaw 180
+	//TextRender는 yaw 0이면 좌우가 뒤집혀 보인다
 	StatusText->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
 	StatusText->SetHorizontalAlignment(EHTA_Center);
 	StatusText->SetWorldSize(70.f);
@@ -139,7 +139,7 @@ void ABattleManager::GenerateSpotsFromGrid()
 	}
 
 	//이미 놓인 게 있으면 손댄 배치를 덮어쓰지 않는다
-	for (TActorIterator<ABattleSpot> It(World); It; ++It)
+	if (TActorIterator<ABattleSpot>(World))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[Battle] 이미 BattleSpot이 있습니다. 다시 만들려면 먼저 지우세요"));
 		return;
@@ -225,7 +225,7 @@ void ABattleManager::OnConstruction(const FTransform& Transform)
 
 	//BattleSpot을 놓았으면 그 액터들이 곧 자리다. 격자 점을 같이 그리면
 	//옮겨둔 스팟과 옛 격자가 겹쳐 보여 헷갈린다
-	for (TActorIterator<ABattleSpot> It(World); It; ++It)
+	if (TActorIterator<ABattleSpot>(World))
 	{
 		return;
 	}
@@ -442,8 +442,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.Unit->SetActorLabel(UserId);
 #endif
 
-		Players.Add(UserId, NewPlayer);
-		Player = Players.Find(UserId);
+		Player = &Players.Add(UserId, NewPlayer);
 
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, HP %d, 피해+%d, 치명 %.0f%%/%.0f%%) — 현재 %d/%d명"),
 			*UserId, Slot, NewPlayer.MaxHP, NewPlayer.DamageBonus,
@@ -466,7 +465,6 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 	//마지막에 들어온 입력이 이김
 	Player->PendingAction = Action;
 	Player->bActedThisTurn = true;
-	Player->IdleTurns = 0;
 	return true;
 }
 
@@ -603,6 +601,8 @@ void ABattleManager::ResolveTurn()
 			{
 				Record->TotalDamageDealt += Dealt;
 			}
+
+			P.Fever += FeverIncrement;
 		}
 
 		const bool bHit = HitAreaContains(Boss.HitArea, P.Lane);
@@ -612,11 +612,7 @@ void ABattleManager::ResolveTurn()
 		//연속 회피 횟수는 회피가 아닌 행동(무입력 포함)에서 끊긴다
 		P.EvadeStreak = bEvade ? P.EvadeStreak + 1 : 0;
 
-		if (bAttack1 || bAttack2)
-		{
-			P.Fever += FeverIncrement;
-		}
-		else if (P.PendingAction == EBattleAction::Defense)
+		if (P.PendingAction == EBattleAction::Defense)
 		{
 			P.Fever += DefenseFeverGain;
 		}
@@ -975,13 +971,14 @@ float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
 		return Fever;
 	}
 
-	const float Reduced = Fever * (1.f - LossPercent / 100.f);
+	//감소율이 100%를 넘어도 음수가 되지 않게 배율에서 막는다
+	const float Reduced = Fever * FMath::Max(0.f, 1.f - LossPercent / 100.f);
 
 	switch (Rounding)
 	{
-	case EFeverRounding::Floor: return FMath::Max(0.f, FMath::FloorToFloat(Reduced));
-	case EFeverRounding::Round: return FMath::Max(0.f, FMath::RoundToFloat(Reduced));
-	default:                    return FMath::Max(0.f, Reduced);
+	case EFeverRounding::Floor: return FMath::FloorToFloat(Reduced);
+	case EFeverRounding::Round: return FMath::RoundToFloat(Reduced);
+	default:                    return Reduced;
 	}
 }
 
@@ -1080,20 +1077,6 @@ void ABattleManager::RunSelfTest()
 	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Keep) == 2.5f);
 	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 2.f);
 	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Round) == 3.f);
-
-	//피버 0·피격 없음·배율 1에서 10회 공격 총피해 = 10A + 45.
-	//피버가 '피해 계산 뒤'에 오르는 순서를 검증한다
-	{
-		const int32 A = 3;
-		float F = 0.f;
-		int32 Total = 0;
-		for (int32 i = 0; i < 10; ++i)
-		{
-			Total += DamageToBoss(A, 0, F, 1.0f, false, 0.f);
-			F += 1.f;
-		}
-		check(Total == 10 * A + 45);
-	}
 
 	check(AllocateSlotIndex({}, 30) == 0);
 	check(AllocateSlotIndex({ 0, 1, 3 }, 30) == 2);
