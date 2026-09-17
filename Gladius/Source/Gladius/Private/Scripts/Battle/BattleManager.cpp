@@ -352,8 +352,8 @@ void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePla
 {
 	Player.MaxHP = MaxHPFor(Record);
 	Player.DamageBonus = Record.DamageBonus * DamagePerBonus;
-	Player.CritChance = BaseCritChance + Record.CritChanceBonus * CritChancePerBonus;
-	Player.CritDamage = BaseCritDamage + Record.CritDamageBonus * CritDamagePerBonus;
+	Player.CritChanceBonus = Record.CritChanceBonus * CritChancePerBonus;
+	Player.CritDamageBonus = Record.CritDamageBonus * CritDamagePerBonus;
 }
 
 int32 ABattleManager::AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots)
@@ -444,9 +444,9 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 		Player = &Players.Add(UserId, NewPlayer);
 
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, HP %d, 피해+%d, 치명 %.0f%%/%.0f%%) — 현재 %d/%d명"),
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, HP %d, 피해+%d, 치명+%.0f%%/+%.0f%%) — 현재 %d/%d명"),
 			*UserId, Slot, NewPlayer.MaxHP, NewPlayer.DamageBonus,
-			NewPlayer.CritChance * 100.f, NewPlayer.CritDamage * 100.f, Players.Num(), MaxPlayers);
+			NewPlayer.CritChanceBonus * 100.f, NewPlayer.CritDamageBonus * 100.f, Players.Num(), MaxPlayers);
 	}
 
 	//핸들은 바뀔 수 있으니 매번 갱신
@@ -586,14 +586,14 @@ void ABattleManager::ResolveTurn()
 		//피버는 이번 턴 공격 피해에 반영된 뒤에 갱신된다
 		if (bAttack1 || bAttack2)
 		{
-			const int32 BaseDamage = bAttack1 ? Attack1BaseDamage : Attack2BaseDamage;
-			const EDamageType Type = bAttack1 ? Attack1Type : Attack2Type;
+			const FAttackDef& Attack = bAttack1 ? Attack1 : Attack2;
 			const float Resist = ResistanceMultiplier(
-				Type == EDamageType::Physical ? Boss.PhysicalResist : Boss.MagicalResist);
+				Attack.Type == EDamageType::Physical ? Boss.PhysicalResist : Boss.MagicalResist);
 
-			//치명타는 플레이어마다 따로 굴린다
-			const bool bCrit = FMath::FRand() < P.CritChance;
-			const int32 Dealt = DamageToBoss(BaseDamage, P.DamageBonus, P.Fever, Resist, bCrit, P.CritDamage);
+			//치명타는 플레이어마다 따로 굴린다. 공격의 기본 치명타 + 신전 강화분
+			const bool bCrit = FMath::FRand() < Attack.CritChance + P.CritChanceBonus;
+			const int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, P.Fever, Resist, bCrit,
+				Attack.CritDamage + P.CritDamageBonus);
 
 			TotalDealt += Dealt;
 			Crits += bCrit ? 1 : 0;
@@ -1104,7 +1104,7 @@ void ABattleManager::RunSelfTest()
 		ApplyRecordToPlayer(R, P);
 		check(P.MaxHP == PlayerBaseHP + 3 * HPPerBonus);
 		check(P.DamageBonus == 2 * DamagePerBonus);
-		check(FMath::IsNearlyEqual(P.CritChance, BaseCritChance + CritChancePerBonus));
+		check(FMath::IsNearlyEqual(P.CritChanceBonus, CritChancePerBonus));
 	}
 
 	//같은 자리 번호는 레인이 달라도 서로 다른 좌표여야 한다.

@@ -116,6 +116,20 @@ struct FBossAction
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString NoticeText;
 };
 
+//플레이어 공격 하나의 정의. 시뮬레이터 밸런스 파일의 skills 항목과 대응한다
+USTRUCT(BlueprintType)
+struct FAttackDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 BaseDamage = 3;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) EDamageType Type = EDamageType::Physical;
+
+	//이 공격의 기본 치명타. 신전 강화분이 여기에 더해진다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float CritChance = 0.f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float CritDamage = 0.f;
+};
+
 //전투가 끝나도 남는 유저 기록. 이 구조체가 그대로 JSON 파일이 된다.
 //능력치를 추가하려면 여기에 UPROPERTY를 넣기만 하면 저장 파일에 자동으로 따라온다
 USTRUCT()
@@ -163,8 +177,9 @@ struct FBattlePlayer
 	//참가할 때 기록에서 계산해 넣는 값들. 매 판정마다 다시 조회하지 않으려고 들고 있는다
 	UPROPERTY() int32 MaxHP = 0;
 	UPROPERTY() int32 DamageBonus = 0;
-	UPROPERTY() float CritChance = 0.f;
-	UPROPERTY() float CritDamage = 0.f;
+	//신전 강화로 얻은 치명타. 공격별 기본 치명타에 더해진다
+	UPROPERTY() float CritChanceBonus = 0.f;
+	UPROPERTY() float CritDamageBonus = 0.f;
 
 	UPROPERTY() EBattleLane Lane = EBattleLane::Mid;
 
@@ -298,12 +313,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
 	int32 PlayerBaseHP = 5;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	float BaseCritChance = 0.25f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	float BaseCritDamage = 0.4f;
-
 	//강화 한 단계당 오르는 양
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
 	int32 HPPerBonus = 1;
@@ -348,18 +357,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
 	int32 DefenceDivisor = 2;
 
+	//치명타 기본값은 시뮬레이터 기본 밸런스 (기본 베기 0% / 집중 타격 25%·40%).
 	// ponytail: 원래 직업군별로 갖는 값이다. 직업군이 붙으면 그쪽으로 옮긴다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 Attack1BaseDamage = 1;
+	FAttackDef Attack1 = { 1, EDamageType::Physical, 0.f, 0.f };
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	EDamageType Attack1Type = EDamageType::Physical;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 Attack2BaseDamage = 2;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	EDamageType Attack2Type = EDamageType::Magical;
+	FAttackDef Attack2 = { 2, EDamageType::Magical, 0.25f, 0.4f };
 
 	//보스 행동 스텁이 쓰는 피해량
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
@@ -452,7 +456,8 @@ public:
 	static bool HitAreaContains(EHitArea Area, EBattleLane Lane);
 	static FString HitAreaLabel(EHitArea Area);
 
-	//기획서 공식: (기본 + 강화 + 피버) * 내성 * (1 + 치명타 시 치명타 피해)
+	//기획서 공식 (A + F) × R × K 에 신전 강화 피해를 더한 형태.
+	//(기본 + 강화 + 피버) * 내성 * (1 + 치명타 시 치명타 피해)
 	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever,
 		float Resist, bool bCrit, float CritDamage);
 
