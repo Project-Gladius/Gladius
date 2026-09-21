@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "Temple AI Client",
+  "Description": "HTTP client component for the Temple AI Python server.",
+  "Category": "Gameplay",
+  "CreatedBy": "OpenAI",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "TempleAIClient",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

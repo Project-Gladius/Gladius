@@ -1,0 +1,9 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+TempleAI_Phase1.zip
+TempleAI_Phase1_with_runner.zip
+TempleAI_Remote_Phase3.zip
