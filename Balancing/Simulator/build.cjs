@@ -1,0 +1,18 @@
+const fs=require('fs'),path=require('path');
+const root=__dirname, inRepository=fs.existsSync(path.join(root,'..','Data','abilities.json')), out=inRepository?path.join(root,'..'):path.join(root,'dist'), dataDir=inRepository?path.join(root,'..','Data'):path.join(root,'data');
+fs.mkdirSync(path.join(out,'Data'),{recursive:true});
+if(!fs.existsSync(dataDir)){
+ fs.mkdirSync(dataDir);
+ const s=JSON.parse(fs.readFileSync(path.join(root,'latest-save.json'),'utf8'));
+ const character=(id,name)=>({id,name,baseHp:s.player.hp,defenseDamageRatio:1/s.rules.defenseDivisor,skills:s.skills.map((x,i)=>({id:'attack_'+(i+1),name:x.name,baseDamage:x.base,attribute:x.attribute,critChance:x.critChance/100,critBonus:x.critBonus/100}))});
+ const abilities={schemaVersion:1,kind:'gladius-abilities',revision:1,sourceSave:'V1_2026-09-09T06-34-31-643Z.json',rules:{attackFeverGain:s.rules.attackGain,defenseFeverGain:s.rules.defenseGain,feverDamageCoefficient:1,evadeThreshold:s.rules.evadeN,evadeReduction:s.rules.evadeM/100,evadeRepeat:s.rules.repeat,feverRounding:s.rules.rounding,feverCap:null,allowStayEvade:true,attackDamageRounding:'roundHalfUp',defenseDamageRounding:'ceil',turnOrder:['move','playerAttack','bossAttack','feverAndDeath'],resistanceMultipliers:{enduring:.5,normal:1,vulnerable:1.5}},initial:{fever:s.player.fever,zone:s.player.zone,evadeStreak:s.player.evadeStreak},characters:[character('gladius','글라디우스'),character('sera','세라')],simulationDefaults:{initialLines:s.options.initialLines,additionalLines:s.options.additionalLines,uniqueDamage:s.options.uniqueDamage,probabilityByTurn:s.turns.map(t=>t.probability)}};
+ const actions=s.turns.map((t,i)=>({id:'action_'+String(i+1).padStart(2,'0'),name:t.name,hitCount:1,damageByZone:Object.fromEntries(Object.entries(t.zones).map(([z,v])=>[z,v.damage])),attributeByZone:Object.fromEntries(Object.entries(t.zones).map(([z,v])=>[z,v.attribute])),resistanceByZone:Object.fromEntries(Object.entries(t.zones).map(([z,v])=>[z,{physical:v.physical,magical:v.magical}])),telegraph:{text:t.name,motionId:''},attackMotionId:''}));
+ const bosses={schemaVersion:1,kind:'gladius-boss-patterns',revision:1,bossId:'saved_balance_boss',name:'최신 세이브 보스',maxHp:100,encounter:{turns:s.turns.length,patternFit:'remainingTurns'},actions,patterns:actions.map((a,i)=>({id:'pattern_'+(i+1),name:a.name+(i===9?' (마지막)':''),steps:[a.id]})),selection:{mode:'weightedRandom',allowImmediateRepeat:true,pool:actions.map((a,i)=>({patternId:'pattern_'+(i+1),weight:1}))},preset:{mode:'direct',seed:20260909,customPatterns:actions.map((a,i)=>'pattern_'+(i+1)),directActions:actions.map(a=>a.id)}};
+ const enhancements={schemaVersion:1,kind:'gladius-enhancements',revision:1,perLevel:{hp:1,damage:1,critChance:.05,critBonus:.1},initialLevels:{hp:0,damage:0,critChance:0,critBonus:0},critChanceCap:1};
+ for(const [n,v] of Object.entries({abilities,bosses,enhancements}))fs.writeFileSync(path.join(dataDir,n+'.json'),JSON.stringify(v,null,2)+'\n');
+}
+const data={}; for(const n of ['abilities','bosses','enhancements']){const text=fs.readFileSync(path.join(dataDir,n+'.json'),'utf8');data[n]=JSON.parse(text);fs.writeFileSync(path.join(out,'Data',n+'.json'),text);}
+const inline=x=>x.replace(/<\/script/gi,'<\\/script');
+const html=fs.readFileSync(path.join(root,'shell.html'),'utf8').replace('/*STYLE*/',fs.readFileSync(path.join(root,'style.css'),'utf8')).replace('/*ENGINE*/',inline(fs.readFileSync(path.join(root,'engine.js'),'utf8'))).replace('/*DATA*/','const EMBEDDED = '+JSON.stringify(data).replace(/</g,'\\u003c')+';').replace('/*UI*/',inline(fs.readFileSync(path.join(root,'ui.js'),'utf8')));
+fs.writeFileSync(path.join(out,'Gladius 통합 시뮬레이터.html'),html);
+console.log('Built standalone HTML and 3 shared JSON files.');

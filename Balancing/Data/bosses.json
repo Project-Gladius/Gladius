@@ -1,0 +1,500 @@
+{
+  "schemaVersion": 1,
+  "kind": "gladius-boss-patterns",
+  "revision": 1,
+  "bossId": "saved_balance_boss",
+  "name": "최신 세이브 보스",
+  "maxHp": 100,
+  "encounter": {
+    "turns": 10,
+    "patternFit": "remainingTurns"
+  },
+  "actions": [
+    {
+      "id": "action_01",
+      "name": "좌",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 0,
+        "right": 0
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "좌",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_02",
+      "name": "우",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "우",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_03",
+      "name": "중",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 2,
+        "right": 0
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "중",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_04",
+      "name": "좌우",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 0,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "좌우",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_05",
+      "name": "충전",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 0
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "충전",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_06",
+      "name": "분노",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 2,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "분노",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_07",
+      "name": "무방비",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 0
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "vulnerable"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "vulnerable"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "vulnerable"
+        }
+      },
+      "telegraph": {
+        "text": "무방비",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_08",
+      "name": "좌쓸기",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 2,
+        "right": 0
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "좌쓸기",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_09",
+      "name": "우쓸기",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 2,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "우쓸기",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    },
+    {
+      "id": "action_10",
+      "name": "좌우",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 0,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "좌우",
+        "motionId": ""
+      },
+      "attackMotionId": ""
+    }
+  ],
+  "patterns": [
+    {
+      "id": "pattern_1",
+      "name": "좌",
+      "steps": [
+        "action_01"
+      ]
+    },
+    {
+      "id": "pattern_2",
+      "name": "우",
+      "steps": [
+        "action_02"
+      ]
+    },
+    {
+      "id": "pattern_3",
+      "name": "중",
+      "steps": [
+        "action_03"
+      ]
+    },
+    {
+      "id": "pattern_4",
+      "name": "좌우",
+      "steps": [
+        "action_04"
+      ]
+    },
+    {
+      "id": "pattern_5",
+      "name": "충전",
+      "steps": [
+        "action_05"
+      ]
+    },
+    {
+      "id": "pattern_6",
+      "name": "분노",
+      "steps": [
+        "action_06"
+      ]
+    },
+    {
+      "id": "pattern_7",
+      "name": "무방비",
+      "steps": [
+        "action_07"
+      ]
+    },
+    {
+      "id": "pattern_8",
+      "name": "좌쓸기",
+      "steps": [
+        "action_08"
+      ]
+    },
+    {
+      "id": "pattern_9",
+      "name": "우쓸기",
+      "steps": [
+        "action_09"
+      ]
+    },
+    {
+      "id": "pattern_10",
+      "name": "좌우 (마지막)",
+      "steps": [
+        "action_10"
+      ]
+    }
+  ],
+  "selection": {
+    "mode": "weightedRandom",
+    "allowImmediateRepeat": true,
+    "pool": [
+      {
+        "patternId": "pattern_1",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_2",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_3",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_4",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_5",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_6",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_7",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_8",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_9",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_10",
+        "weight": 1
+      }
+    ]
+  },
+  "preset": {
+    "mode": "direct",
+    "seed": 20260909,
+    "customPatterns": [
+      "pattern_1",
+      "pattern_2",
+      "pattern_3",
+      "pattern_4",
+      "pattern_5",
+      "pattern_6",
+      "pattern_7",
+      "pattern_8",
+      "pattern_9",
+      "pattern_10"
+    ],
+    "directActions": [
+      "action_01",
+      "action_02",
+      "action_03",
+      "action_04",
+      "action_05",
+      "action_06",
+      "action_07",
+      "action_08",
+      "action_09",
+      "action_10"
+    ]
+  }
+}

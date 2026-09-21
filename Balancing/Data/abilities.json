@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "kind": "gladius-abilities",
+  "revision": 1,
+  "sourceSave": "V1_2026-09-09T06-34-31-643Z.json",
+  "rules": {
+    "attackFeverGain": 5,
+    "defenseFeverGain": 5,
+    "feverDamageCoefficient": 1,
+    "evadeThreshold": 2,
+    "evadeReduction": 1,
+    "evadeRepeat": "everyAfter",
+    "feverRounding": "floor",
+    "feverCap": null,
+    "allowStayEvade": true,
+    "attackDamageRounding": "roundHalfUp",
+    "defenseDamageRounding": "ceil",
+    "turnOrder": [
+      "move",
+      "playerAttack",
+      "bossAttack",
+      "feverAndDeath"
+    ],
+    "resistanceMultipliers": {
+      "enduring": 0.5,
+      "normal": 1,
+      "vulnerable": 1.5
+    }
+  },
+  "initial": {
+    "fever": 0,
+    "zone": "left",
+    "evadeStreak": 0
+  },
+  "characters": [
+    {
+      "id": "gladius",
+      "name": "글라디우스",
+      "baseHp": 7,
+      "defenseDamageRatio": 0.5,
+      "skills": [
+        {
+          "id": "attack_1",
+          "name": "기본 베기",
+          "baseDamage": 10,
+          "attribute": "physical",
+          "critChance": 0,
+          "critBonus": 0
+        },
+        {
+          "id": "attack_2",
+          "name": "집중 타격",
+          "baseDamage": 7,
+          "attribute": "physical",
+          "critChance": 0.25,
+          "critBonus": 0.5
+        }
+      ]
+    },
+    {
+      "id": "sera",
+      "name": "세라",
+      "baseHp": 7,
+      "defenseDamageRatio": 0.5,
+      "skills": [
+        {
+          "id": "attack_1",
+          "name": "기본 베기",
+          "baseDamage": 10,
+          "attribute": "physical",
+          "critChance": 0,
+          "critBonus": 0
+        },
+        {
+          "id": "attack_2",
+          "name": "집중 타격",
+          "baseDamage": 7,
+          "attribute": "physical",
+          "critChance": 0.25,
+          "critBonus": 0.5
+        }
+      ]
+    }
+  ],
+  "simulationDefaults": {
+    "initialLines": 10,
+    "additionalLines": 3,
+    "uniqueDamage": true,
+    "probabilityByTurn": [
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      },
+      {
+        "pa": 0.5,
+        "pd": 0.5,
+        "pe": 0.15,
+        "damage": 2,
+        "physical": "normal",
+        "magical": "normal"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "gladius-enhancements",
+  "revision": 1,
+  "perLevel": {
+    "hp": 1,
+    "damage": 1,
+    "critChance": 0.05,
+    "critBonus": 0.1
+  },
+  "initialLevels": {
+    "hp": 0,
+    "damage": 0,
+    "critChance": 0,
+    "critBonus": 0
+  },
+  "critChanceCap": 1
+}
