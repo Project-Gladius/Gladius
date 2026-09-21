@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Battle/BattleBalance.h"
 #include "BattleSpot.generated.h"
 
 class USceneComponent;

@@ -36,6 +36,7 @@ void ABattleManager::BeginPlay()
 {
 	Super::BeginPlay();
 
+	ApplyBalanceFiles();
 	LoadRecords();
 	GatherSpots();
 
@@ -61,6 +62,11 @@ void ABattleManager::StartBattle()
 {
 	EnemyHP = EnemyMaxHP;
 	TurnIndex = 0;
+
+	// ponytail: 플레이어 체력·피버는 아직 초기화하지 않는다 (다음 판 흐름이 정해지면 같이)
+	CurrentPatternId.Reset();
+	PreviousPatternId.Reset();
+	PatternStep = 0;
 	SpawnBoss();
 	UpdateVisuals();
 	StartTurn();
@@ -430,6 +436,8 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 		FBattlePlayer NewPlayer;
 		NewPlayer.DisplayName = DisplayName;
+		NewPlayer.Lane = Balance.InitialZone;
+		NewPlayer.Fever = Balance.InitialFever;
 		ApplyRecordToPlayer(Record, NewPlayer);
 		NewPlayer.HP = NewPlayer.MaxHP;
 		NewPlayer.SlotIndex = Slot;
@@ -462,6 +470,12 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		return false;
 	}
 
+	//서 있는 구역으로 다시 회피하는 것을 막는 설정이면 거절한다
+	if (!bAllowStayEvade && IsEvade(Action) && ApplyMove(Action, Player->Lane) == Player->Lane)
+	{
+		return false;
+	}
+
 	//마지막에 들어온 입력이 이김
 	Player->PendingAction = Action;
 	Player->bActedThisTurn = true;
@@ -477,7 +491,7 @@ void ABattleManager::StartTurn()
 
 	//보스 행동을 먼저 정해 예고한다.
 	//판정 시점에 정하면 회피가 순수 확률 찍기가 되어 선택지의 의미가 없어진다
-	TelegraphedAction = ChooseBossAction();
+	TelegraphedAction = NextBossAction();
 
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
@@ -498,10 +512,9 @@ void ABattleManager::StartTurn()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / Boss %d / %s 피해 %d (물리내성 %d 마법내성 %d)"),
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / Boss %d / '%s' → %s"),
 		TurnIndex, Turns, TelegraphSeconds, Players.Num(), EnemyHP,
-		*HitAreaLabel(TelegraphedAction.HitArea), TelegraphedAction.Damage,
-		(int32)TelegraphedAction.PhysicalResist, (int32)TelegraphedAction.MagicalResist);
+		*TelegraphedAction.Name, *ZonesLabel(TelegraphedAction));
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, TelegraphSeconds, false);
 }
@@ -578,22 +591,21 @@ void ABattleManager::ResolveTurn()
 
 		const bool bAttack1 = P.PendingAction == EBattleAction::Attack1;
 		const bool bAttack2 = P.PendingAction == EBattleAction::Attack2;
-		const bool bEvade = P.PendingAction == EBattleAction::AvoidL
-			|| P.PendingAction == EBattleAction::AvoidM
-			|| P.PendingAction == EBattleAction::AvoidR;
+		const bool bEvade = IsEvade(P.PendingAction);
 
 		//기획서 5절 순서 — 플레이어 공격을 먼저 계산한다.
 		//피버는 이번 턴 공격 피해에 반영된 뒤에 갱신된다
 		if (bAttack1 || bAttack2)
 		{
 			const FAttackDef& Attack = bAttack1 ? Attack1 : Attack2;
-			const float Resist = ResistanceMultiplier(
-				Attack.Type == EDamageType::Physical ? Boss.PhysicalResist : Boss.MagicalResist);
+			//내성은 이동 후 구역 기준 (기획서 2절)
+			const float Resist = ZoneResistMultiplier(Boss, P.Lane, Attack.Type);
 
-			//치명타는 플레이어마다 따로 굴린다. 공격의 기본 치명타 + 신전 강화분
-			const bool bCrit = FMath::FRand() < Attack.CritChance + P.CritChanceBonus;
-			const int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, P.Fever, Resist, bCrit,
-				Attack.CritDamage + P.CritDamageBonus);
+			//치명타는 플레이어마다 따로 굴린다. 공격의 기본 치명타 + 신전 강화분 (상한 적용)
+			const float Chance = FMath::Min(Attack.CritChance + P.CritChanceBonus, CritChanceCap);
+			const bool bCrit = FMath::FRand() < Chance;
+			const int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, P.Fever, FeverDamageCoefficient,
+				Resist, bCrit, Attack.CritDamage + P.CritDamageBonus);
 
 			TotalDealt += Dealt;
 			Crits += bCrit ? 1 : 0;
@@ -605,8 +617,8 @@ void ABattleManager::ResolveTurn()
 			P.Fever += FeverIncrement;
 		}
 
-		const bool bHit = HitAreaContains(Boss.HitArea, P.Lane);
-		const int32 Taken = DamageToPlayer(P.PendingAction, bHit, Boss.Damage, DefenceDivisor);
+		const int32 Taken = DamageToPlayer(P.PendingAction,
+			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, DefenseDamageRatio);
 		P.HP = FMath::Max(0, P.HP - Taken);
 
 		//연속 회피 횟수는 회피가 아닌 행동(무입력 포함)에서 끊긴다
@@ -619,7 +631,7 @@ void ABattleManager::ResolveTurn()
 		else if (bEvade)
 		{
 			P.Fever = DecayFever(P.Fever, P.EvadeStreak, EvadeStreakN,
-				EvadeFeverLossPercent, EvadeRepeatMode, FeverRounding);
+				EvadeFeverReduction, EvadeRepeatMode, FeverRounding);
 		}
 
 		//상한은 어느 경로로 바뀌었든 똑같이 적용한다
@@ -654,11 +666,11 @@ void ABattleManager::ResolveTurn()
 
 	UpdateVisuals();
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → Boss %d"),
-		TurnIndex, *HitAreaLabel(Boss.HitArea), Boss.Damage, TotalDealt, Crits, Died, Revived, EnemyHP);
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d타) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → Boss %d"),
+		TurnIndex, *ZonesLabel(Boss), Boss.HitCount, TotalDealt, Crits, Died, Revived, EnemyHP);
 
 	LastTurnSummary = FString::Printf(TEXT("Boss hit %s   Damage dealt %d (%d crit)   Down %d   Revived %d"),
-		*HitAreaLabel(Boss.HitArea), TotalDealt, Crits, Died, Revived);
+		*ZonesLabel(Boss), TotalDealt, Crits, Died, Revived);
 
 	//기록이 바뀌는 건 참가와 강화뿐이고 둘 다 턴 안에서 끝난다.
 	//주기 저장 대신 턴 경계에서만 쓰면 조절할 값도 없고 저장 시점도 분명해진다
@@ -705,17 +717,140 @@ void ABattleManager::RemovePlayer(const FString& UserId)
 		*UserId, IdleTurnsBeforeKick, Players.Num(), MaxPlayers);
 }
 
-// ponytail: 균등 랜덤 스텁. 패턴이 정해지면 이 함수만 데이터 조회로 교체하면 된다.
-// 구조체와 피격 범위 9종은 이미 지원하므로 값만 채워 넣으면 동작한다
-FBossAction ABattleManager::ChooseBossAction() const
+void ABattleManager::ApplyBalanceFiles()
 {
-	FBossAction Action;
-	Action.Damage = BossBaseDamage;
-	Action.PhysicalResist = (EResistance)FMath::RandRange(0, 2);
-	Action.MagicalResist = (EResistance)FMath::RandRange(0, 2);
-	Action.HitArea = ResolveHitArea(EHitArea::Random);
-	Action.NoticeText = FString::Printf(TEXT("BOSS WILL HIT: %s"), *HitAreaLabel(Action.HitArea));
-	return Action;
+	if (!bUseBalanceFiles)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Balance] 파일을 쓰지 않습니다 — 에디터 값으로 진행합니다"));
+		return;
+	}
+
+	const FString Folder = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / BalanceDataDir);
+	if (!Balance.LoadFromFolder(Folder))
+	{
+		//기획서 7절: 모르는 값을 조용히 기본값으로 대체하지 않는다.
+		//전부 포기하고 에디터에 들어 있던 값으로 진행한다
+		UE_LOG(LogTemp, Warning, TEXT("[Balance] %s 를 읽지 못해 에디터 값으로 진행합니다"), *Folder);
+		return;
+	}
+
+	FeverIncrement = Balance.AttackFeverGain;
+	DefenseFeverGain = Balance.DefenseFeverGain;
+	FeverDamageCoefficient = Balance.FeverDamageCoefficient;
+	FeverCap = Balance.FeverCap;
+	EvadeStreakN = Balance.EvadeThreshold;
+	EvadeFeverReduction = Balance.EvadeReduction;
+	EvadeRepeatMode = Balance.EvadeRepeat;
+	FeverRounding = Balance.FeverRounding;
+	bAllowStayEvade = Balance.bAllowStayEvade;
+	DefenseDamageRatio = Balance.DefenseDamageRatio;
+
+	PlayerBaseHP = Balance.BaseHP;
+	Attack1 = Balance.Attacks[0];
+	Attack2 = Balance.Attacks[1];
+
+	HPPerBonus = Balance.HPPerLevel;
+	DamagePerBonus = Balance.DamagePerLevel;
+	CritChancePerBonus = Balance.CritChancePerLevel;
+	CritDamagePerBonus = Balance.CritDamagePerLevel;
+	CritChanceCap = Balance.CritChanceCap;
+
+	EnemyMaxHP = Balance.BossMaxHP;
+	Turns = Balance.Turns;
+
+	//에디터에서 고친 값이 조용히 사라지는 일이 없도록, 덮어쓴 결과를 남긴다
+	UE_LOG(LogTemp, Log, TEXT("[Balance] 에디터 값을 파일 값으로 덮어썼습니다 — ")
+		TEXT("HP %d / 공격 %d·%d / 피버 +%.0f·%.0f×%.0f / 보스 HP %d / %d턴"),
+		PlayerBaseHP, Attack1.BaseDamage, Attack2.BaseDamage,
+		FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns);
+}
+
+const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft) const
+{
+	//가중치가 있고, 연속 재선택 제한에 걸리지 않고, 남은 턴에 들어가는 것만 후보
+	TArray<const FBossPattern*> Candidates;
+	TArray<float> Weights;
+	float Total = 0.f;
+
+	for (const FPatternWeight& Entry : Balance.Pool)
+	{
+		if (Entry.Weight <= 0.f)
+		{
+			continue;
+		}
+		if (!Balance.bAllowImmediateRepeat && Entry.PatternId == PreviousPatternId)
+		{
+			continue;
+		}
+
+		const FBossPattern* Pattern = Balance.FindPattern(Entry.PatternId);
+		if (!Pattern || Pattern->Steps.Num() > TurnsLeft)
+		{
+			continue;
+		}
+
+		Candidates.Add(Pattern);
+		Weights.Add(Entry.Weight);
+		Total += Entry.Weight;
+	}
+
+	if (Candidates.Num() == 0)
+	{
+		return nullptr;
+	}
+
+	//누적 가중치 구간. pool의 배열 순서를 그대로 쓴다 (기획서 4절)
+	float Pick = FMath::FRand() * Total;
+	for (int32 i = 0; i < Candidates.Num(); ++i)
+	{
+		Pick -= Weights[i];
+		if (Pick < 0.f)
+		{
+			return Candidates[i];
+		}
+	}
+	return Candidates.Last();
+}
+
+FBossAction ABattleManager::NextBossAction()
+{
+	if (!Balance.bLoaded)
+	{
+		// ponytail: 파일이 없을 때만 도는 임시 행동. 가운데를 2로 친다
+		FBossAction Action;
+		Action.Id = TEXT("fallback");
+		Action.DamageByZone[(int32)EBattleLane::Mid] = 2;
+		Action.TelegraphText = TEXT("NO BALANCE FILE");
+		return Action;
+	}
+
+	const FBossPattern* Pattern = Balance.FindPattern(CurrentPatternId);
+
+	//패턴이 없거나 끝났으면 새로 뽑는다. 실행 중에는 다시 뽑지 않는다
+	if (!Pattern || PatternStep >= Pattern->Steps.Num())
+	{
+		//이번 턴을 포함해 남은 턴. 여기에 딱 맞게 끝나야 한다 (기획서 5절)
+		const int32 TurnsLeft = Turns - TurnIndex + 1;
+
+		Pattern = ChoosePattern(TurnsLeft);
+		if (!Pattern)
+		{
+			UE_LOG(LogTemp, Error, TEXT("[Battle] 남은 %d턴에 들어가는 패턴이 없습니다"), TurnsLeft);
+			return FBossAction();
+		}
+
+		PreviousPatternId = CurrentPatternId;
+		CurrentPatternId = Pattern->Id;
+		PatternStep = 0;
+
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 패턴 '%s' 선택 (%d턴, 남은 %d턴)"),
+			*Pattern->Name, Pattern->Steps.Num(), TurnsLeft);
+	}
+
+	const FBossAction* Action = Balance.FindAction(Pattern->Steps[PatternStep]);
+	++PatternStep;
+
+	return Action ? *Action : FBossAction();
 }
 
 // ---------------- 표시 ----------------
@@ -770,10 +905,20 @@ void ABattleManager::Tick(float DeltaTime)
 
 	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
 
-	const FString Telegraph = FString::Printf(TEXT("%s   damage %d   resist P%.1f M%.1f"),
-		*TelegraphedAction.NoticeText, TelegraphedAction.Damage,
-		ResistanceMultiplier(TelegraphedAction.PhysicalResist),
-		ResistanceMultiplier(TelegraphedAction.MagicalResist));
+	//구역마다 피해와 내성이 다르므로 좌·중·우를 나란히 보여준다
+	static const TCHAR* ZoneNames[] = { TEXT("L"), TEXT("M"), TEXT("R") };
+	FString Zones;
+	for (int32 i = 0; i < 3; ++i)
+	{
+		Zones += FString::Printf(TEXT("  %s dmg %d P%.1f M%.1f"),
+			ZoneNames[i], TelegraphedAction.DamageByZone[i],
+			ResistanceMultiplier(TelegraphedAction.ResistanceByZone[i].Physical),
+			ResistanceMultiplier(TelegraphedAction.ResistanceByZone[i].Magical));
+	}
+
+	const FString Telegraph = FString::Printf(TEXT("%s   hits %s (x%d)\n%s"),
+		*TelegraphedAction.TelegraphText, *ZonesLabel(TelegraphedAction),
+		TelegraphedAction.HitCount, *Zones);
 
 	FString Body;
 	switch (Phase)
@@ -890,74 +1035,60 @@ EBattleLane ABattleManager::ApplyMove(EBattleAction Action, EBattleLane Current)
 	}
 }
 
-float ABattleManager::ResistanceMultiplier(EResistance Resistance)
+bool ABattleManager::IsEvade(EBattleAction Action)
 {
-	switch (Resistance)
-	{
-	case EResistance::Enduring:   return 0.5f;
-	case EResistance::Vulnerable: return 1.5f;
-	default:                      return 1.0f;
-	}
+	return Action == EBattleAction::AvoidL
+		|| Action == EBattleAction::AvoidM
+		|| Action == EBattleAction::AvoidR;
 }
 
-EHitArea ABattleManager::ResolveHitArea(EHitArea Area)
+float ABattleManager::ResistanceMultiplier(EResistance Resistance) const
 {
-	if (Area != EHitArea::Random)
-	{
-		return Area;
-	}
-
-	//예고를 보고 대응할 수 있어야 하므로, 무작위는 예고 전에 구체 범위로 확정한다.
-	//None과 Random을 뺀 나머지 중에서 고른다
-	static const EHitArea Concrete[] = {
-		EHitArea::Left, EHitArea::Mid, EHitArea::Right,
-		EHitArea::LeftMid, EHitArea::MidRight, EHitArea::LeftRight, EHitArea::All };
-
-	return Concrete[FMath::RandRange(0, UE_ARRAY_COUNT(Concrete) - 1)];
+	//배율도 밸런스 파일이 들고 있다 (resistanceMultipliers)
+	return Balance.ResistanceMultipliers[(int32)Resistance];
 }
 
-bool ABattleManager::HitAreaContains(EHitArea Area, EBattleLane Lane)
+float ABattleManager::ZoneResistMultiplier(const FBossAction& Action, EBattleLane Lane, EDamageType Type) const
 {
-	switch (Area)
-	{
-	case EHitArea::All:       return true;
-	case EHitArea::Left:      return Lane == EBattleLane::Left;
-	case EHitArea::Mid:       return Lane == EBattleLane::Mid;
-	case EHitArea::Right:     return Lane == EBattleLane::Right;
-	case EHitArea::LeftMid:   return Lane != EBattleLane::Right;
-	case EHitArea::MidRight:  return Lane != EBattleLane::Left;
-	case EHitArea::LeftRight: return Lane != EBattleLane::Mid;
-	//None은 아무도 안 맞고, Random은 ResolveHitArea를 거치므로 여기 오지 않는다
-	default:                  return false;
-	}
+	const FZoneResistance& Zone = Action.ResistanceByZone[(int32)Lane];
+	return ResistanceMultiplier(Type == EDamageType::Physical ? Zone.Physical : Zone.Magical);
 }
 
-FString ABattleManager::HitAreaLabel(EHitArea Area)
+FString ABattleManager::ZonesLabel(const FBossAction& Action)
 {
-	switch (Area)
+	static const TCHAR* Names[] = { TEXT("Left"), TEXT("Mid"), TEXT("Right") };
+
+	FString Label;
+	for (int32 Zone = 0; Zone < 3; ++Zone)
 	{
-	case EHitArea::None:      return TEXT("Nothing");
-	case EHitArea::Left:      return TEXT("Left");
-	case EHitArea::Mid:       return TEXT("Mid");
-	case EHitArea::Right:     return TEXT("Right");
-	case EHitArea::LeftMid:   return TEXT("Left+Mid");
-	case EHitArea::MidRight:  return TEXT("Mid+Right");
-	case EHitArea::LeftRight: return TEXT("Left+Right");
-	case EHitArea::All:       return TEXT("Everywhere");
-	default:                  return TEXT("Random");
+		//피해가 0인 구역은 맞지 않는다
+		if (Action.DamageByZone[Zone] <= 0)
+		{
+			continue;
+		}
+
+		if (!Label.IsEmpty())
+		{
+			Label += TEXT("+");
+		}
+		Label += Names[Zone];
 	}
+
+	return Label.IsEmpty() ? TEXT("Nothing") : Label;
 }
 
-int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever,
+int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever, float FeverCoefficient,
 	float Resist, bool bCrit, float CritDamage)
 {
-	const float Raw = (BaseDamage + DamageBonus + Fever) * Resist * (1.f + (bCrit ? CritDamage : 0.f));
-	// ponytail: 피해의 소수 처리는 기획서에 명시가 없어 반올림으로 둔다 (Battle-data-reference.md 6.3 ⑩)
+	const float Raw = (BaseDamage + DamageBonus + Fever * FeverCoefficient)
+		* Resist * (1.f + (bCrit ? CritDamage : 0.f));
+
+	//파일의 attackDamageRounding: roundHalfUp
 	return FMath::Max(0, FMath::RoundToInt(Raw));
 }
 
 float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
-	float LossPercent, EEvadeRepeatMode Repeat, EFeverRounding Rounding)
+	float Reduction, EEvadeRepeatMode Repeat, EFeverRounding Rounding)
 {
 	const int32 N = FMath::Max(1, StreakN);
 
@@ -966,13 +1097,14 @@ float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
 		? EvadeStreak >= N
 		: (EvadeStreak > 0 && EvadeStreak % N == 0);
 
+
 	if (!bTrigger)
 	{
 		return Fever;
 	}
 
-	//감소율이 100%를 넘어도 음수가 되지 않게 배율에서 막는다
-	const float Reduced = Fever * FMath::Max(0.f, 1.f - LossPercent / 100.f);
+	//감소율이 1을 넘어도 음수가 되지 않게 배율에서 막는다
+	const float Reduced = Fever * FMath::Max(0.f, 1.f - Reduction);
 
 	switch (Rounding)
 	{
@@ -982,18 +1114,19 @@ float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
 	}
 }
 
-int32 ABattleManager::DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, int32 Divisor)
+int32 ABattleManager::DamageToPlayer(EBattleAction Action, int32 ZoneDamage, int32 HitCount, float DefenseRatio)
 {
-	if (!bHit)
+	if (ZoneDamage <= 0)
 	{
 		return 0;
 	}
-	if (Action != EBattleAction::Defense)
-	{
-		return Base;
-	}
-	//기획서상 방어는 나눗셈 후 올림
-	return FMath::DivideAndRoundUp(Base, FMath::Max(1, Divisor));
+
+	//방어는 비율을 곱한 뒤 올림 (파일의 defenseDamageRounding: ceil)
+	const int32 PerHit = Action == EBattleAction::Defense
+		? FMath::CeilToInt(ZoneDamage * DefenseRatio)
+		: ZoneDamage;
+
+	return PerHit * FMath::Max(1, HitCount);
 }
 
 void ABattleManager::RunSelfTest()
@@ -1001,59 +1134,67 @@ void ABattleManager::RunSelfTest()
 	check(ApplyMove(EBattleAction::AvoidL, EBattleLane::Right) == EBattleLane::Left);
 	check(ApplyMove(EBattleAction::AvoidR, EBattleLane::Left) == EBattleLane::Right);
 	check(ApplyMove(EBattleAction::Attack1, EBattleLane::Right) == EBattleLane::Right);
+
+	check(IsEvade(EBattleAction::AvoidL) && IsEvade(EBattleAction::AvoidM) && IsEvade(EBattleAction::AvoidR));
+	check(!IsEvade(EBattleAction::Attack1) && !IsEvade(EBattleAction::Defense) && !IsEvade(EBattleAction::Idle));
 	check(ApplyMove(EBattleAction::Idle, EBattleLane::Mid) == EBattleLane::Mid);
 
-	check(DamageToPlayer(EBattleAction::Idle, false, 20, 2) == 0);
-	check(DamageToPlayer(EBattleAction::Idle, true, 20, 2) == 20);
-	check(DamageToPlayer(EBattleAction::Defense, true, 20, 2) == 10);
-	check(DamageToPlayer(EBattleAction::Defense, false, 20, 2) == 0);
-	//홀수는 올림이어야 한다 (5 / 2 = 3)
-	check(DamageToPlayer(EBattleAction::Defense, true, 5, 2) == 3);
-	check(DamageToPlayer(EBattleAction::Defense, true, 1, 2) == 1);
+	//구역 피해 0 = 안 맞음, 방어는 비율 곱한 뒤 올림, 마지막에 타격 횟수
+	check(DamageToPlayer(EBattleAction::Idle, 0, 1, 0.5f) == 0);
+	check(DamageToPlayer(EBattleAction::Idle, 20, 1, 0.5f) == 20);
+	check(DamageToPlayer(EBattleAction::Defense, 20, 1, 0.5f) == 10);
+	check(DamageToPlayer(EBattleAction::Defense, 0, 1, 0.5f) == 0);
+	//홀수는 올림이어야 한다 (5 × 0.5 = 2.5 → 3)
+	check(DamageToPlayer(EBattleAction::Defense, 5, 1, 0.5f) == 3);
+	check(DamageToPlayer(EBattleAction::Defense, 1, 1, 0.5f) == 1);
+	//올림은 타격마다 따로 적용된다 (3 → 2씩 두 번 = 4)
+	check(DamageToPlayer(EBattleAction::Defense, 3, 2, 0.5f) == 4);
+	check(DamageToPlayer(EBattleAction::Idle, 3, 2, 0.5f) == 6);
 
 	check(ResistanceMultiplier(EResistance::Enduring) == 0.5f);
 	check(ResistanceMultiplier(EResistance::Normal) == 1.0f);
 	check(ResistanceMultiplier(EResistance::Vulnerable) == 1.5f);
 
-	//피격 범위 9종
-	check(!HitAreaContains(EHitArea::None, EBattleLane::Mid));
-	check(HitAreaContains(EHitArea::All, EBattleLane::Left));
-	check(HitAreaContains(EHitArea::Left, EBattleLane::Left));
-	check(!HitAreaContains(EHitArea::Left, EBattleLane::Mid));
-	check(HitAreaContains(EHitArea::LeftMid, EBattleLane::Left));
-	check(HitAreaContains(EHitArea::LeftMid, EBattleLane::Mid));
-	check(!HitAreaContains(EHitArea::LeftMid, EBattleLane::Right));
-	check(HitAreaContains(EHitArea::MidRight, EBattleLane::Right));
-	check(!HitAreaContains(EHitArea::MidRight, EBattleLane::Left));
-	check(HitAreaContains(EHitArea::LeftRight, EBattleLane::Left));
-	check(HitAreaContains(EHitArea::LeftRight, EBattleLane::Right));
-	check(!HitAreaContains(EHitArea::LeftRight, EBattleLane::Mid));
-
-	//Random은 예고 전에 반드시 구체 범위로 바뀐다
-	for (int32 i = 0; i < 30; ++i)
+	//구역별 내성 — 오른쪽을 치는 동안 왼쪽에서 물리로 때리면 취약
 	{
-		const EHitArea Resolved = ResolveHitArea(EHitArea::Random);
-		check(Resolved != EHitArea::Random && Resolved != EHitArea::None);
-	}
-	check(ResolveHitArea(EHitArea::Left) == EHitArea::Left);
+		FBossAction Action;
+		Action.DamageByZone[(int32)EBattleLane::Right] = 2;
+		Action.ResistanceByZone[(int32)EBattleLane::Left].Physical = EResistance::Vulnerable;
+		Action.ResistanceByZone[(int32)EBattleLane::Mid].Physical = EResistance::Enduring;
 
-	//(기본 + 강화 + 피버) * 내성 * (1 + 치명타 피해)
-	check(DamageToBoss(1, 0, 0, 1.0f, false, 0.4f) == 1);
-	check(DamageToBoss(1, 2, 3, 1.0f, false, 0.4f) == 6);
-	check(DamageToBoss(2, 0, 0, 0.5f, false, 0.4f) == 1);
-	check(DamageToBoss(2, 0, 0, 1.5f, false, 0.4f) == 3);
-	check(DamageToBoss(10, 0, 0, 1.0f, true, 0.4f) == 14);
+		check(ZoneResistMultiplier(Action, EBattleLane::Left, EDamageType::Physical) == 1.5f);
+		check(ZoneResistMultiplier(Action, EBattleLane::Left, EDamageType::Magical) == 1.0f);
+		check(ZoneResistMultiplier(Action, EBattleLane::Mid, EDamageType::Physical) == 0.5f);
+		check(ZoneResistMultiplier(Action, EBattleLane::Right, EDamageType::Physical) == 1.0f);
+
+		check(ZonesLabel(Action) == TEXT("Right"));
+		Action.DamageByZone[(int32)EBattleLane::Left] = 1;
+		check(ZonesLabel(Action) == TEXT("Left+Right"));
+
+		//피해가 하나도 없으면 아무도 맞지 않는다
+		check(ZonesLabel(FBossAction()) == TEXT("Nothing"));
+	}
+
+	//(기본 + 강화 + 피버×계수) * 내성 * (1 + 치명타 피해)
+	check(DamageToBoss(1, 0, 0, 1.f, 1.0f, false, 0.4f) == 1);
+	check(DamageToBoss(1, 2, 3, 1.f, 1.0f, false, 0.4f) == 6);
+	check(DamageToBoss(2, 0, 0, 1.f, 0.5f, false, 0.4f) == 1);
+	check(DamageToBoss(2, 0, 0, 1.f, 1.5f, false, 0.4f) == 3);
+	check(DamageToBoss(10, 0, 0, 1.f, 1.0f, true, 0.4f) == 14);
+	//피버 계수가 0이면 피버가 피해에 영향을 주지 않는다
+	check(DamageToBoss(10, 0, 5, 0.f, 1.0f, false, 0.f) == 10);
+	check(DamageToBoss(10, 0, 5, 2.f, 1.0f, false, 0.f) == 20);
 
 	// ---- 연속 회피 피버 감소 (기획서 10절 검증 기준) ----
 
-	//F=8, N=2, M=50, 소수 유지, 4회 연속 회피
+	//F=8, N=2, 감소율 0.5, 소수 유지, 4회 연속 회피
 	//  기준 도달 후 매회 → 8, 4, 2, 1
 	{
 		float F = 8.f;
 		const float Expected[] = { 8.f, 4.f, 2.f, 1.f };
 		for (int32 e = 1; e <= 4; ++e)
 		{
-			F = DecayFever(F, e, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Keep);
+			F = DecayFever(F, e, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::None);
 			check(F == Expected[e - 1]);
 		}
 	}
@@ -1064,19 +1205,19 @@ void ABattleManager::RunSelfTest()
 		const float Expected[] = { 8.f, 4.f, 4.f, 2.f };
 		for (int32 e = 1; e <= 4; ++e)
 		{
-			F = DecayFever(F, e, 2, 50.f, EEvadeRepeatMode::EveryN, EFeverRounding::Keep);
+			F = DecayFever(F, e, 2, 0.5f, EEvadeRepeatMode::EachN, EFeverRounding::None);
 			check(F == Expected[e - 1]);
 		}
 	}
 
-	//M=100이면 기준에 닿는 순간 0이 된다
-	check(DecayFever(7.f, 2, 2, 100.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 0.f);
+	//감소율 1이면 기준에 닿는 순간 0이 된다 (밸런스 파일 기본값)
+	check(DecayFever(7.f, 2, 2, 1.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 0.f);
 	//기준에 닿기 전에는 손대지 않는다
-	check(DecayFever(7.f, 1, 2, 100.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 7.f);
+	check(DecayFever(7.f, 1, 2, 1.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 7.f);
 	//소수 처리 — 5 × 0.5 = 2.5
-	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Keep) == 2.5f);
-	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 2.f);
-	check(DecayFever(5.f, 2, 2, 50.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Round) == 3.f);
+	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::None) == 2.5f);
+	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 2.f);
+	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Round) == 3.f);
 
 	check(AllocateSlotIndex({}, 30) == 0);
 	check(AllocateSlotIndex({ 0, 1, 3 }, 30) == 2);

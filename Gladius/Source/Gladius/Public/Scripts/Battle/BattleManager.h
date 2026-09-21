@@ -2,19 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Scripts/Battle/BattleBalance.h"
 #include "BattleManager.generated.h"
 
 class ABattleUnit;
 class UTextRenderComponent;
-
-//필드 영역 — 좌 / 중 / 우
-UENUM(BlueprintType)
-enum class EBattleLane : uint8
-{
-	Left,
-	Mid,
-	Right
-};
 
 //플레이어가 한 턴에 고를 수 있는 행동
 UENUM(BlueprintType)
@@ -41,93 +33,6 @@ enum class EBattlePhase : uint8
 	Collect,
 	//유저 행동 및 보스 모션. 입력을 받지 않는다
 	Resolve
-};
-
-//공격의 속성. 보스는 속성별로 다른 내성을 가진다
-UENUM(BlueprintType)
-enum class EDamageType : uint8
-{
-	Physical,
-	Magical
-};
-
-//보스가 특정 행동 중에 갖는 내성. 실제 배율은 ResistanceMultiplier 참조
-UENUM(BlueprintType)
-enum class EResistance : uint8
-{
-	Enduring,	// 0.5
-	Normal,		// 1.0
-	Vulnerable	// 1.5
-};
-
-//연속 회피로 피버가 줄어들 때, 기준 횟수에 닿은 뒤 어떤 주기로 줄일지
-UENUM(BlueprintType)
-enum class EEvadeRepeatMode : uint8
-{
-	//기준 도달 후 매회 — N회째부터 회피할 때마다 줄어든다 (기획서 기본값)
-	EveryAfter,
-	//N회마다 — 연속 회피 횟수가 N의 배수일 때만 줄어든다
-	EveryN
-};
-
-//피버 감소 결과의 소수 처리. 기획서의 rules.rounding에 대응한다
-UENUM(BlueprintType)
-enum class EFeverRounding : uint8
-{
-	Keep,	//소수 유지
-	Floor,	//내림 (시뮬레이터 기본값)
-	Round	//반올림
-};
-
-//보스 행동이 때리는 구역.
-//Random은 '행동을 정할 때 무작위로 고른다'는 뜻이라, 예고 시점에
-//ResolveHitArea로 구체 범위가 확정된다. 예고 이후에는 나타나지 않는다
-UENUM(BlueprintType)
-enum class EHitArea : uint8
-{
-	None,
-	Left,
-	Mid,
-	Right,
-	LeftMid,
-	MidRight,
-	LeftRight,
-	All,
-	Random
-};
-
-//보스의 한 가지 행동. 패턴은 이 행동들의 조합이 된다.
-//지금은 ChooseBossAction이 무작위로 만들어내지만, 패턴이 정해지면
-//데이터로 채워 넣기만 하면 된다
-USTRUCT(BlueprintType)
-struct FBossAction
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 Damage = 1;
-
-	//이 행동을 하는 동안의 보스 내성
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) EResistance PhysicalResist = EResistance::Normal;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) EResistance MagicalResist = EResistance::Normal;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) EHitArea HitArea = EHitArea::Mid;
-
-	//예고에 띄울 문구
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString NoticeText;
-};
-
-//플레이어 공격 하나의 정의. 시뮬레이터 밸런스 파일의 skills 항목과 대응한다
-USTRUCT(BlueprintType)
-struct FAttackDef
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 BaseDamage = 3;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) EDamageType Type = EDamageType::Physical;
-
-	//이 공격의 기본 치명타. 신전 강화분이 여기에 더해진다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) float CritChance = 0.f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) float CritDamage = 0.f;
 };
 
 //전투가 끝나도 남는 유저 기록. 이 구조체가 그대로 JSON 파일이 된다.
@@ -282,7 +187,7 @@ public:
 	float GameOverLoss = 0.5f;
 
 	//한 게임을 이루는 턴 수. 이만큼 버티면 무승부로 끝난다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings (밸런스 파일이 덮어씀)")
 	int32 Turns = 10;
 
 	//전투 명령어를 이만큼의 턴 동안 연속으로 안 치면 전장에서 빠진다.
@@ -308,69 +213,93 @@ public:
 	float ResolveSeconds = 4.f;
 
 	// ---- 전투 수치 ----
+	//
+	//'(밸런스 파일이 덮어씀)'이 붙은 항목은 게임이 시작될 때 Balancing/Data 의
+	//.json 값으로 교체된다. 여기서 고쳐도 반영되지 않으므로 수치는 그 파일에서 고칠 것.
+	//파일을 읽지 못했을 때만 아래 값이 쓰인다
 
 	//강화 없는 플레이어의 기본 체력
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 PlayerBaseHP = 5;
 
 	//강화 한 단계당 오르는 양
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 HPPerBonus = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 DamagePerBonus = 1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float CritChancePerBonus = 0.05f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float CritDamagePerBonus = 0.1f;
 
-	//공격 시 오르는 피버 (기획서 G_A)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 FeverIncrement = 1;
+	//공격 시 오르는 피버 (파일의 attackFeverGain)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	float FeverIncrement = 5.f;
 
-	//방어 시 오르는 피버 (기획서 G_D).
+	//방어 시 오르는 피버 (파일의 defenseFeverGain).
 	// ponytail: 방어 행동 자체를 조건으로 본다. '실제로 피격을 막아야 오르는지'는 기획서 미정
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 DefenseFeverGain = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	float DefenseFeverGain = 5.f;
 
-	//피버 상한. 0이면 무제한 (기획서 11절 미정 항목)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	//피해 계산에서 피버에 곱하는 계수 (파일의 feverDamageCoefficient)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	float FeverDamageCoefficient = 1.f;
+
+	//피버 상한. 0이면 무제한 (파일의 feverCap: null)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float FeverCap = 0.f;
 
-	//연속 회피 감소 (기획서 N / M). N회 연속 회피하면 피버가 M% 줄어든다.
+	//연속 회피 감소. N회 연속 회피하면 피버가 비율만큼 줄어든다.
 	//회피가 아닌 행동을 하면 연속 횟수가 0으로 돌아간다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 EvadeStreakN = 2;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	float EvadeFeverLossPercent = 100.f;
+	//0~1 비율. 1이면 피버가 0이 된다 (파일의 evadeReduction)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	float EvadeFeverReduction = 1.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	EEvadeRepeatMode EvadeRepeatMode = EEvadeRepeatMode::EveryAfter;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	EFeverRounding FeverRounding = EFeverRounding::Floor;
 
-	//방어 시 받는 피해를 이 값으로 나눈다 (올림)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 DefenceDivisor = 2;
+	//서 있는 구역으로 다시 회피하는 것을 허용할지 (파일의 allowStayEvade)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	bool bAllowStayEvade = true;
 
-	//치명타 기본값은 시뮬레이터 기본 밸런스 (기본 베기 0% / 집중 타격 25%·40%).
+	//방어 시 받는 피해 비율. 올림해서 적용한다 (파일의 defenseDamageRatio)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	float DefenseDamageRatio = 0.5f;
+
+	//치명타 확률 상한 (파일의 critChanceCap)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	float CritChanceCap = 1.f;
+
 	// ponytail: 원래 직업군별로 갖는 값이다. 직업군이 붙으면 그쪽으로 옮긴다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	FAttackDef Attack1 = { 1, EDamageType::Physical, 0.f, 0.f };
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	FAttackDef Attack1;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	FAttackDef Attack2 = { 2, EDamageType::Magical, 0.25f, 0.4f };
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	FAttackDef Attack2;
 
-	//보스 행동 스텁이 쓰는 피해량
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
-	int32 BossBaseDamage = 2;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 EnemyMaxHP = 100;
+
+	// ---- 밸런스 파일 ----
+
+	//Balancing/Data 의 abilities / enhancements / bosses .json 을 읽어
+	//위 수치들을 덮어쓴다. 파일에 문제가 있으면 읽지 않고 에디터 값을 그대로 쓴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Balance")
+	bool bUseBalanceFiles = true;
+
+	//프로젝트 폴더(.uproject가 있는 곳) 기준 상대 경로.
+	//저장소에서는 Gladius/ 바깥에 Balancing/ 이 있어 한 단계 올라간다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Balance")
+	FString BalanceDataDir = TEXT("../Balancing/Data");
 
 	//채팅이 붙기 전까지 더미 유저들이 매 턴 무작위 행동을 고르게 한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
@@ -445,29 +374,32 @@ public:
 	//회피 행동이면 그 영역으로 이동, 아니면 제자리
 	static EBattleLane ApplyMove(EBattleAction Action, EBattleLane Current);
 
+	//세 회피 중 하나인지. 연속 회피 판정과 제자리 회피 금지에 쓴다
+	static bool IsEvade(EBattleAction Action);
+
 	//비어 있는 가장 앞 자리 번호. 만석이면 INDEX_NONE
 	static int32 AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots);
 
-	static float ResistanceMultiplier(EResistance Resistance);
+	float ResistanceMultiplier(EResistance Resistance) const;
 
-	//Random을 구체 범위로 확정한다. 나머지는 그대로 돌려준다
-	static EHitArea ResolveHitArea(EHitArea Area);
+	//이동 후 플레이어 구역과 공격 속성으로 내성 배율을 구한다 (기획서 2절)
+	float ZoneResistMultiplier(const FBossAction& Action, EBattleLane Lane, EDamageType Type) const;
 
-	static bool HitAreaContains(EHitArea Area, EBattleLane Lane);
-	static FString HitAreaLabel(EHitArea Area);
+	//로그와 표시판에 쓸 피격 구역 문자열
+	static FString ZonesLabel(const FBossAction& Action);
 
-	//기획서 공식 (A + F) × R × K 에 신전 강화 피해를 더한 형태.
-	//(기본 + 강화 + 피버) * 내성 * (1 + 치명타 시 치명타 피해)
-	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever,
+	//시뮬레이터와 같은 식: (기본 + 강화 + 피버×계수) * 내성 * (1 + 치명타 시 치명타 피해).
+	//강화 피해는 시뮬레이터가 기본 피해에 더해 넣는 것과 같은 자리다
+	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever, float FeverCoefficient,
 		float Resist, bool bCrit, float CritDamage);
 
 	//회피한 턴의 피버. EvadeStreak은 이번 회피까지 센 값을 넘긴다.
 	//기준에 닿지 않았으면 그대로 돌려준다
 	static float DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
-		float LossPercent, EEvadeRepeatMode Repeat, EFeverRounding Rounding);
+		float Reduction, EEvadeRepeatMode Repeat, EFeverRounding Rounding);
 
-	//방어 시에는 나눗셈 후 올림
-	static int32 DamageToPlayer(EBattleAction Action, bool bHit, int32 Base, int32 Divisor);
+	//구역 피해 0이면 안 맞는다. 방어는 비율을 곱한 뒤 올림, 그 뒤 타격 횟수만큼 곱한다
+	static int32 DamageToPlayer(EBattleAction Action, int32 ZoneDamage, int32 HitCount, float DefenseRatio);
 
 	//강화 단계를 실제 수치로 바꾼다
 	int32 MaxHPFor(const FPlayerRecord& Record) const;
@@ -509,8 +441,22 @@ private:
 	//기록의 강화 수치를 전투용 스냅샷에 반영한다
 	void ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const;
 
-	//보스 행동 스텁 — 패턴이 정해지면 이 함수만 통째로 교체
-	FBossAction ChooseBossAction() const;
+	//밸런스 파일을 읽어 위 수치들에 반영한다. 실패하면 아무것도 바꾸지 않는다
+	void ApplyBalanceFiles();
+
+	//이번 턴 보스 행동. 패턴이 끝났으면 새 패턴을 먼저 뽑는다
+	FBossAction NextBossAction();
+
+	//남은 턴에 들어가는 패턴 중 가중 랜덤으로 하나. 못 고르면 nullptr
+	const FBossPattern* ChoosePattern(int32 TurnsLeft) const;
+
+	//밸런스 파일 내용. bLoaded가 false면 에디터 값으로 돈다
+	FBattleBalance Balance;
+
+	//진행 중인 패턴과 그 안에서의 위치. 패턴이 끝나야 다음 패턴을 뽑는다
+	FString CurrentPatternId;
+	FString PreviousPatternId;
+	int32 PatternStep = 0;
 
 	//레벨에 놓인 BattleSpot을 전부 찾아 구역별로 모으고 보스에서 가까운 순으로 정렬한다
 	void GatherSpots();
