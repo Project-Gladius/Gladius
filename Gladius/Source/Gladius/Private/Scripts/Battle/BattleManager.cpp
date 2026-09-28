@@ -65,7 +65,6 @@ void ABattleManager::StartBattle()
 
 	// ponytail: 플레이어 체력·피버는 아직 초기화하지 않는다 (다음 판 흐름이 정해지면 같이)
 	CurrentPatternId.Reset();
-	PreviousPatternId.Reset();
 	PatternStep = 0;
 	SpawnBoss();
 	UpdateVisuals();
@@ -430,14 +429,25 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		}
 
 		//저장된 기록이 있으면 능력치를 이어받고, 없으면 새로 만든다
+		const bool bNewRecord = !Records.Contains(UserId);
 		FPlayerRecord& Record = Records.FindOrAdd(UserId);
 		Record.UserId = UserId;
 		Record.DisplayName = DisplayName;
+
+		//처음 참가하는 유저는 밸런스 파일의 initialLevels 단계를 들고 시작한다
+		if (bNewRecord)
+		{
+			Record.MaxHPBonus = Balance.InitialHPLevel;
+			Record.DamageBonus = Balance.InitialDamageLevel;
+			Record.CritChanceBonus = Balance.InitialCritChanceLevel;
+			Record.CritDamageBonus = Balance.InitialCritDamageLevel;
+		}
 
 		FBattlePlayer NewPlayer;
 		NewPlayer.DisplayName = DisplayName;
 		NewPlayer.Lane = Balance.InitialZone;
 		NewPlayer.Fever = Balance.InitialFever;
+		NewPlayer.EvadeStreak = Balance.InitialEvadeStreak;
 		ApplyRecordToPlayer(Record, NewPlayer);
 		NewPlayer.HP = NewPlayer.MaxHP;
 		NewPlayer.SlotIndex = Slot;
@@ -579,9 +589,10 @@ void ABattleManager::ResolveTurn()
 					ApplyRecordToPlayer(*Record, P);
 				}
 
+				//부활은 처음 참가한 것과 같은 상태로 되돌린다
 				P.HP = P.MaxHP;
-				P.Fever = 0.f;
-				P.EvadeStreak = 0;
+				P.Fever = Balance.InitialFever;
+				P.EvadeStreak = Balance.InitialEvadeStreak;
 				++Revived;
 			}
 			continue;
@@ -717,6 +728,11 @@ void ABattleManager::RemovePlayer(const FString& UserId)
 		*UserId, IdleTurnsBeforeKick, Players.Num(), MaxPlayers);
 }
 
+FString ABattleManager::BalanceFolderPath() const
+{
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / BalanceDataDir);
+}
+
 void ABattleManager::ApplyBalanceFiles()
 {
 	if (!bUseBalanceFiles)
@@ -725,7 +741,7 @@ void ABattleManager::ApplyBalanceFiles()
 		return;
 	}
 
-	const FString Folder = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / BalanceDataDir);
+	const FString Folder = BalanceFolderPath();
 	if (!Balance.LoadFromFolder(Folder))
 	{
 		//기획서 7절: 모르는 값을 조용히 기본값으로 대체하지 않는다.
@@ -765,7 +781,7 @@ void ABattleManager::ApplyBalanceFiles()
 		FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns);
 }
 
-const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft) const
+const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft, const FString& PreviousId) const
 {
 	//가중치가 있고, 연속 재선택 제한에 걸리지 않고, 남은 턴에 들어가는 것만 후보
 	TArray<const FBossPattern*> Candidates;
@@ -778,7 +794,7 @@ const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft) const
 		{
 			continue;
 		}
-		if (!Balance.bAllowImmediateRepeat && Entry.PatternId == PreviousPatternId)
+		if (!Balance.bAllowImmediateRepeat && Entry.PatternId == PreviousId)
 		{
 			continue;
 		}
@@ -832,14 +848,14 @@ FBossAction ABattleManager::NextBossAction()
 		//이번 턴을 포함해 남은 턴. 여기에 딱 맞게 끝나야 한다 (기획서 5절)
 		const int32 TurnsLeft = Turns - TurnIndex + 1;
 
-		Pattern = ChoosePattern(TurnsLeft);
+		//직전에 끝난 패턴은 지금 CurrentPatternId에 들어 있다
+		Pattern = ChoosePattern(TurnsLeft, CurrentPatternId);
 		if (!Pattern)
 		{
 			UE_LOG(LogTemp, Error, TEXT("[Battle] 남은 %d턴에 들어가는 패턴이 없습니다"), TurnsLeft);
 			return FBossAction();
 		}
 
-		PreviousPatternId = CurrentPatternId;
 		CurrentPatternId = Pattern->Id;
 		PatternStep = 0;
 
@@ -1252,6 +1268,48 @@ void ABattleManager::RunSelfTest()
 	//스팟 유무에 좌우되지 않도록 격자 계산을 직접 검사한다
 	check(!GridSlotLocation(EBattleLane::Left, 0).Equals(GridSlotLocation(EBattleLane::Right, 0)));
 	check(!GridSlotLocation(EBattleLane::Mid, 0).Equals(GridSlotLocation(EBattleLane::Mid, 1)));
+
+	//패턴이 정확히 Turns에 맞춰 끝나는지. 난수가 끼어 있어 한 번으로는 못 잡는다.
+	//밸런스 파일을 읽지 못했으면 검사할 패턴이 없으므로 건너뛴다
+	//에디터에서 버튼으로 부르면 BeginPlay를 거치지 않아 아직 비어 있다.
+	//수치를 매니저에 옮기지는 않고 검사용으로만 읽는다
+	if (!Balance.bLoaded && bUseBalanceFiles)
+	{
+		Balance.LoadFromFolder(BalanceFolderPath());
+	}
+
+	if (Balance.bLoaded)
+	{
+		//에디터의 Turns는 아직 파일 값으로 덮이기 전일 수 있으므로 파일 쪽을 본다
+		const int32 TotalTurns = Balance.Turns;
+
+		for (int32 Trial = 0; Trial < 200; ++Trial)
+		{
+			int32 Left = TotalTurns;
+			FString Previous;
+
+			while (Left > 0)
+			{
+				const FBossPattern* Pattern = ChoosePattern(Left, Previous);
+				//후보가 없으면 로딩 검증이 놓친 것이다
+				check(Pattern);
+				//남은 턴보다 긴 패턴은 후보가 될 수 없다
+				check(Pattern->Steps.Num() <= Left);
+
+				Left -= Pattern->Steps.Num();
+				Previous = Pattern->Id;
+			}
+
+			//남기지도 넘기지도 않고 딱 맞아야 한다
+			check(Left == 0);
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 패턴 검사 통과 — %d턴을 200회 모두 정확히 채움"), TotalTurns);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Battle] 밸런스 파일이 없어 패턴 검사를 건너뜁니다"));
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] SelfTest 통과"));
 }

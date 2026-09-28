@@ -444,18 +444,21 @@ private:
 	//밸런스 파일을 읽어 위 수치들에 반영한다. 실패하면 아무것도 바꾸지 않는다
 	void ApplyBalanceFiles();
 
+	//BalanceDataDir을 절대 경로로
+	FString BalanceFolderPath() const;
+
 	//이번 턴 보스 행동. 패턴이 끝났으면 새 패턴을 먼저 뽑는다
 	FBossAction NextBossAction();
 
-	//남은 턴에 들어가는 패턴 중 가중 랜덤으로 하나. 못 고르면 nullptr
-	const FBossPattern* ChoosePattern(int32 TurnsLeft) const;
+	//남은 턴에 들어가는 패턴 중 가중 랜덤으로 하나. 못 고르면 nullptr.
+	//PreviousId는 직전에 끝난 패턴 (연속 재선택 금지에 쓴다)
+	const FBossPattern* ChoosePattern(int32 TurnsLeft, const FString& PreviousId) const;
 
 	//밸런스 파일 내용. bLoaded가 false면 에디터 값으로 돈다
 	FBattleBalance Balance;
 
 	//진행 중인 패턴과 그 안에서의 위치. 패턴이 끝나야 다음 패턴을 뽑는다
 	FString CurrentPatternId;
-	FString PreviousPatternId;
 	int32 PatternStep = 0;
 
 	//레벨에 놓인 BattleSpot을 전부 찾아 구역별로 모으고 보스에서 가까운 순으로 정렬한다

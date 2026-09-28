@@ -144,6 +144,7 @@ struct FBattleBalance
 	// ---- abilities.json : initial / characters ----
 	EBattleLane InitialZone = EBattleLane::Mid;
 	float InitialFever = 0.f;
+	int32 InitialEvadeStreak = 0;
 	FString CharacterName;
 	int32 BaseHP = 7;
 	//방어 시 받는 피해 비율. 올림해서 적용한다
@@ -156,6 +157,17 @@ struct FBattleBalance
 	float CritChancePerLevel = 0.05f;
 	float CritDamagePerLevel = 0.1f;
 	float CritChanceCap = 1.f;
+
+	//새 유저가 들고 시작하는 강화 단계 (initialLevels)
+	int32 InitialHPLevel = 0;
+	int32 InitialDamageLevel = 0;
+	int32 InitialCritChanceLevel = 0;
+	int32 InitialCritDamageLevel = 0;
+
+	//각 파일의 revision. 어떤 개정판으로 돌았는지 로그에 남긴다
+	int32 AbilitiesRevision = 0;
+	int32 EnhancementsRevision = 0;
+	int32 BossRevision = 0;
 
 	// ---- bosses.json ----
 	FString BossName;

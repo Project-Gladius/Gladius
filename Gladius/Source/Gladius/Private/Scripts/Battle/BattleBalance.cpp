@@ -36,18 +36,6 @@ namespace
 		return true;
 	}
 
-	//필수 숫자. 없으면 실패로 처리한다
-	bool GetNumber(const TSharedPtr<FJsonObject>& Obj, const FString& Field,
-		const FString& File, double& Out)
-	{
-		if (!Obj.IsValid() || !Obj->TryGetNumberField(Field, Out))
-		{
-			Fail(File, FString::Printf(TEXT("'%s' 값이 없거나 숫자가 아닙니다"), *Field));
-			return false;
-		}
-		return true;
-	}
-
 	bool GetString(const TSharedPtr<FJsonObject>& Obj, const FString& Field,
 		const FString& File, FString& Out)
 	{
@@ -56,6 +44,141 @@ namespace
 			Fail(File, FString::Printf(TEXT("'%s' 값이 없거나 문자열이 아닙니다"), *Field));
 			return false;
 		}
+		return true;
+	}
+
+	//숫자를 읽으면서 범위까지 확인한다. 시뮬레이터(engine.js)의 검사 범위와 맞춘다
+	bool GetFloat(const TSharedPtr<FJsonObject>& Obj, const FString& Field,
+		const FString& File, float& Out, double Min, double Max)
+	{
+		double Num = 0.0;
+		if (!Obj.IsValid() || !Obj->TryGetNumberField(Field, Num))
+		{
+			Fail(File, FString::Printf(TEXT("'%s' 값이 없거나 숫자가 아닙니다"), *Field));
+			return false;
+		}
+
+		if (Num < Min || Num > Max)
+		{
+			Fail(File, FString::Printf(TEXT("'%s' 값 %g 은(는) %g ~ %g 범위를 벗어납니다"), *Field, Num, Min, Max));
+			return false;
+		}
+
+		Out = Num;
+		return true;
+	}
+
+	bool GetInt(const TSharedPtr<FJsonObject>& Obj, const FString& Field,
+		const FString& File, int32& Out, double Min, double Max)
+	{
+		float Value = 0.f;
+		if (!GetFloat(Obj, Field, File, Value, Min, Max))
+		{
+			return false;
+		}
+
+		Out = FMath::RoundToInt(Value);
+		return true;
+	}
+
+	//readme '읽는 방법과 공통 항목'의 schemaVersion / kind / revision 검사.
+	//세 파일 모두 이 셋을 가진다
+	bool CheckHeader(const TSharedPtr<FJsonObject>& Obj, const FString& File,
+		const TCHAR* ExpectedKind, int32& OutRevision)
+	{
+		static constexpr int32 SupportedSchemaVersion = 1;
+
+		double Version = 0.0;
+		if (!Obj->TryGetNumberField(TEXT("schemaVersion"), Version))
+		{
+			Fail(File, TEXT("'schemaVersion' 이 없습니다"));
+			return false;
+		}
+
+		if (FMath::RoundToInt(Version) != SupportedSchemaVersion)
+		{
+			Fail(File, FString::Printf(
+				TEXT("형식 버전 %d 는 지원하지 않습니다 (지원: %d) — 게임 코드를 함께 갱신해야 합니다"),
+				FMath::RoundToInt(Version), SupportedSchemaVersion));
+			return false;
+		}
+
+		FString Kind;
+		if (!Obj->TryGetStringField(TEXT("kind"), Kind))
+		{
+			Fail(File, TEXT("'kind' 가 없습니다"));
+			return false;
+		}
+
+		if (Kind != ExpectedKind)
+		{
+			Fail(File, FString::Printf(TEXT("'%s' 파일이어야 하는데 '%s' 입니다 — 파일이 바뀐 것 같습니다"),
+				ExpectedKind, *Kind));
+			return false;
+		}
+
+		//재현 기록용. 없으면 0으로 두고 진행한다
+		double Revision = 0.0;
+		Obj->TryGetNumberField(TEXT("revision"), Revision);
+		OutRevision = FMath::RoundToInt(Revision);
+
+		return true;
+	}
+
+	//"이 값이어야 한다"가 정해진 문자열 항목. 다르면 실행하지 않는다
+	bool CheckFixedString(const TSharedPtr<FJsonObject>& Obj, const TCHAR* Field,
+		const TCHAR* Expected, const FString& File)
+	{
+		FString Value;
+		if (!Obj->TryGetStringField(Field, Value))
+		{
+			Fail(File, FString::Printf(TEXT("'%s' 가 없습니다"), Field));
+			return false;
+		}
+
+		if (Value != Expected)
+		{
+			Fail(File, FString::Printf(
+				TEXT("'%s' 는 '%s' 고정입니다 (현재 '%s') — 바꾸려면 게임 코드도 함께 고쳐야 합니다"),
+				Field, Expected, *Value));
+			return false;
+		}
+
+		return true;
+	}
+
+	//readme가 '고정 계약'이라고 못 박은 항목들. 게임 코드가 이 방식으로 짜여 있어서
+	//파일만 바뀌면 시뮬레이터와 결과가 갈린다. 다르면 실행하지 않는다
+	bool CheckFixedContract(const TSharedPtr<FJsonObject>& Rules, const FString& File)
+	{
+		if (!CheckFixedString(Rules, TEXT("attackDamageRounding"), TEXT("roundHalfUp"), File)
+			|| !CheckFixedString(Rules, TEXT("defenseDamageRounding"), TEXT("ceil"), File))
+		{
+			return false;
+		}
+
+		static const TCHAR* ExpectedOrder[] = {
+			TEXT("move"), TEXT("playerAttack"), TEXT("bossAttack"), TEXT("feverAndDeath") };
+
+		const TArray<TSharedPtr<FJsonValue>>* Order = nullptr;
+		if (!Rules->TryGetArrayField(TEXT("turnOrder"), Order)
+			|| Order->Num() != UE_ARRAY_COUNT(ExpectedOrder))
+		{
+			Fail(File, TEXT("'turnOrder' 는 move / playerAttack / bossAttack / feverAndDeath 네 개여야 합니다"));
+			return false;
+		}
+
+		for (int32 i = 0; i < Order->Num(); ++i)
+		{
+			if ((*Order)[i]->AsString() != ExpectedOrder[i])
+			{
+				Fail(File, FString::Printf(
+					TEXT("'turnOrder' %d번째는 '%s' 고정입니다 (현재 '%s') — 바꾸려면 게임 코드도 함께 고쳐야 합니다"),
+					i + 1, ExpectedOrder[i], *(*Order)[i]->AsString()));
+				return false;
+			}
+		}
+
 		return true;
 	}
 
@@ -97,6 +220,9 @@ bool FBattleBalance::LoadFromFolder(const FString& FolderPath)
 		|| !LoadEnhancements(FolderPath / TEXT("enhancements.json"))
 		|| !LoadBosses(FolderPath / TEXT("bosses.json")))
 	{
+		//여기까지 읽은 값이 남아 있으면 '파일 절반 + 에디터 절반'으로 돈다.
+		//전부 통과했을 때만 쓴다는 약속을 지키려면 되돌려야 한다
+		*this = FBattleBalance();
 		return false;
 	}
 
@@ -104,6 +230,10 @@ bool FBattleBalance::LoadFromFolder(const FString& FolderPath)
 
 	UE_LOG(LogTemp, Log, TEXT("[Balance] 불러옴 — 보스 '%s' HP %d / %d턴 / 행동 %d개 / 패턴 %d개 / 캐릭터 '%s' HP %d"),
 		*BossName, BossMaxHP, Turns, Actions.Num(), Patterns.Num(), *CharacterName, BaseHP);
+
+	//어떤 개정판으로 돌았는지 남겨야 나중에 통계를 그때 수치와 맞춰볼 수 있다
+	UE_LOG(LogTemp, Log, TEXT("[Balance] revision — abilities %d / enhancements %d / bosses %d"),
+		AbilitiesRevision, EnhancementsRevision, BossRevision);
 
 	return true;
 }
@@ -116,6 +246,11 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		return false;
 	}
 
+	if (!CheckHeader(Abilities, AbilitiesPath, TEXT("gladius-abilities"), AbilitiesRevision))
+	{
+		return false;
+	}
+
 	const TSharedPtr<FJsonObject>* RulesPtr = nullptr;
 	if (!Abilities->TryGetObjectField(TEXT("rules"), RulesPtr))
 	{
@@ -124,21 +259,17 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 	}
 	const TSharedPtr<FJsonObject>& Rules = *RulesPtr;
 
-	double Num = 0.0;
-	if (!GetNumber(Rules, TEXT("attackFeverGain"), AbilitiesPath, Num)) { return false; }
-	AttackFeverGain = Num;
-	if (!GetNumber(Rules, TEXT("defenseFeverGain"), AbilitiesPath, Num)) { return false; }
-	DefenseFeverGain = Num;
-	if (!GetNumber(Rules, TEXT("feverDamageCoefficient"), AbilitiesPath, Num)) { return false; }
-	FeverDamageCoefficient = Num;
-	if (!GetNumber(Rules, TEXT("evadeThreshold"), AbilitiesPath, Num)) { return false; }
-	EvadeThreshold = FMath::RoundToInt(Num);
-	if (!GetNumber(Rules, TEXT("evadeReduction"), AbilitiesPath, Num)) { return false; }
-	EvadeReduction = Num;
-
-	if (EvadeThreshold < 1 || EvadeReduction < 0.0 || EvadeReduction > 1.0)
+	if (!CheckFixedContract(Rules, AbilitiesPath))
 	{
-		Fail(AbilitiesPath, TEXT("evadeThreshold는 1 이상, evadeReduction은 0~1 이어야 합니다"));
+		return false;
+	}
+
+	if (!GetFloat(Rules, TEXT("attackFeverGain"), AbilitiesPath, AttackFeverGain, 0, 100)
+		|| !GetFloat(Rules, TEXT("defenseFeverGain"), AbilitiesPath, DefenseFeverGain, 0, 100)
+		|| !GetFloat(Rules, TEXT("feverDamageCoefficient"), AbilitiesPath, FeverDamageCoefficient, 0, 20)
+		|| !GetInt(Rules, TEXT("evadeThreshold"), AbilitiesPath, EvadeThreshold, 1, 100)
+		|| !GetFloat(Rules, TEXT("evadeReduction"), AbilitiesPath, EvadeReduction, 0, 1))
+	{
 		return false;
 	}
 
@@ -164,10 +295,10 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 
 	//null이면 상한 없음. 게임에서는 0이 상한 없음을 뜻한다
 	FeverCap = 0.f;
-	if (Rules->HasField(TEXT("feverCap")) && !Rules->HasTypedField<EJson::Null>(TEXT("feverCap")))
+	if (Rules->HasField(TEXT("feverCap")) && !Rules->HasTypedField<EJson::Null>(TEXT("feverCap"))
+		&& !GetFloat(Rules, TEXT("feverCap"), AbilitiesPath, FeverCap, 0, 10000))
 	{
-		if (!GetNumber(Rules, TEXT("feverCap"), AbilitiesPath, Num)) { return false; }
-		FeverCap = Num;
+		return false;
 	}
 
 	if (!Rules->TryGetBoolField(TEXT("allowStayEvade"), bAllowStayEvade))
@@ -186,8 +317,10 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		static const TCHAR* Names[] = { TEXT("enduring"), TEXT("normal"), TEXT("vulnerable") };
 		for (int32 i = 0; i < 3; ++i)
 		{
-			if (!GetNumber(*MultipliersPtr, Names[i], AbilitiesPath, Num)) { return false; }
-			ResistanceMultipliers[i] = Num;
+			if (!GetFloat(*MultipliersPtr, Names[i], AbilitiesPath, ResistanceMultipliers[i], 0, 100))
+			{
+				return false;
+			}
 		}
 	}
 
@@ -197,8 +330,11 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		Fail(AbilitiesPath, TEXT("'initial' 항목이 없습니다"));
 		return false;
 	}
-	if (!GetNumber(*InitialPtr, TEXT("fever"), AbilitiesPath, Num)) { return false; }
-	InitialFever = Num;
+	if (!GetFloat(*InitialPtr, TEXT("fever"), AbilitiesPath, InitialFever, 0, 10000)
+		|| !GetInt(*InitialPtr, TEXT("evadeStreak"), AbilitiesPath, InitialEvadeStreak, 0, 100))
+	{
+		return false;
+	}
 	if (!GetString(*InitialPtr, TEXT("zone"), AbilitiesPath, Text)) { return false; }
 	if (Text == TEXT("left")) { InitialZone = EBattleLane::Left; }
 	else if (Text == TEXT("center")) { InitialZone = EBattleLane::Mid; }
@@ -227,10 +363,11 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 
 	//이름은 표시용이라 없어도 진행한다
 	Character->TryGetStringField(TEXT("name"), CharacterName);
-	if (!GetNumber(Character, TEXT("baseHp"), AbilitiesPath, Num)) { return false; }
-	BaseHP = FMath::RoundToInt(Num);
-	if (!GetNumber(Character, TEXT("defenseDamageRatio"), AbilitiesPath, Num)) { return false; }
-	DefenseDamageRatio = Num;
+	if (!GetInt(Character, TEXT("baseHp"), AbilitiesPath, BaseHP, 1, 1000)
+		|| !GetFloat(Character, TEXT("defenseDamageRatio"), AbilitiesPath, DefenseDamageRatio, 0, 1))
+	{
+		return false;
+	}
 
 	const TArray<TSharedPtr<FJsonValue>>* Skills = nullptr;
 	if (!Character->TryGetArrayField(TEXT("skills"), Skills) || Skills->Num() != 2)
@@ -249,12 +386,12 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		}
 
 		Skill->TryGetStringField(TEXT("name"), Attacks[i].Name);
-		if (!GetNumber(Skill, TEXT("baseDamage"), AbilitiesPath, Num)) { return false; }
-		Attacks[i].BaseDamage = FMath::RoundToInt(Num);
-		if (!GetNumber(Skill, TEXT("critChance"), AbilitiesPath, Num)) { return false; }
-		Attacks[i].CritChance = Num;
-		if (!GetNumber(Skill, TEXT("critBonus"), AbilitiesPath, Num)) { return false; }
-		Attacks[i].CritDamage = Num;
+		if (!GetInt(Skill, TEXT("baseDamage"), AbilitiesPath, Attacks[i].BaseDamage, 0, 10000)
+			|| !GetFloat(Skill, TEXT("critChance"), AbilitiesPath, Attacks[i].CritChance, 0, 1)
+			|| !GetFloat(Skill, TEXT("critBonus"), AbilitiesPath, Attacks[i].CritDamage, 0, 10))
+		{
+			return false;
+		}
 
 		if (!GetString(Skill, TEXT("attribute"), AbilitiesPath, Text)
 			|| !ParseAttribute(Text, AbilitiesPath, Attacks[i].Type))
@@ -274,24 +411,41 @@ bool FBattleBalance::LoadEnhancements(const FString& EnhancementsPath)
 		return false;
 	}
 
-	double Num = 0.0;
+	if (!CheckHeader(Enhancements, EnhancementsPath, TEXT("gladius-enhancements"), EnhancementsRevision))
+	{
+		return false;
+	}
+
 	const TSharedPtr<FJsonObject>* PerLevelPtr = nullptr;
 	if (!Enhancements->TryGetObjectField(TEXT("perLevel"), PerLevelPtr))
 	{
 		Fail(EnhancementsPath, TEXT("'perLevel' 항목이 없습니다"));
 		return false;
 	}
-	if (!GetNumber(*PerLevelPtr, TEXT("hp"), EnhancementsPath, Num)) { return false; }
-	HPPerLevel = FMath::RoundToInt(Num);
-	if (!GetNumber(*PerLevelPtr, TEXT("damage"), EnhancementsPath, Num)) { return false; }
-	DamagePerLevel = FMath::RoundToInt(Num);
-	if (!GetNumber(*PerLevelPtr, TEXT("critChance"), EnhancementsPath, Num)) { return false; }
-	CritChancePerLevel = Num;
-	if (!GetNumber(*PerLevelPtr, TEXT("critBonus"), EnhancementsPath, Num)) { return false; }
-	CritDamagePerLevel = Num;
+	if (!GetInt(*PerLevelPtr, TEXT("hp"), EnhancementsPath, HPPerLevel, 0, 1000)
+		|| !GetInt(*PerLevelPtr, TEXT("damage"), EnhancementsPath, DamagePerLevel, 0, 1000)
+		|| !GetFloat(*PerLevelPtr, TEXT("critChance"), EnhancementsPath, CritChancePerLevel, 0, 1)
+		|| !GetFloat(*PerLevelPtr, TEXT("critBonus"), EnhancementsPath, CritDamagePerLevel, 0, 10)
+		|| !GetFloat(Enhancements, TEXT("critChanceCap"), EnhancementsPath, CritChanceCap, 0, 1))
+	{
+		return false;
+	}
 
-	if (!GetNumber(Enhancements, TEXT("critChanceCap"), EnhancementsPath, Num)) { return false; }
-	CritChanceCap = Num;
+	//새 유저가 들고 시작하는 강화 단계
+	const TSharedPtr<FJsonObject>* InitialLevelsPtr = nullptr;
+	if (!Enhancements->TryGetObjectField(TEXT("initialLevels"), InitialLevelsPtr))
+	{
+		Fail(EnhancementsPath, TEXT("'initialLevels' 항목이 없습니다"));
+		return false;
+	}
+
+	if (!GetInt(*InitialLevelsPtr, TEXT("hp"), EnhancementsPath, InitialHPLevel, 0, 100)
+		|| !GetInt(*InitialLevelsPtr, TEXT("damage"), EnhancementsPath, InitialDamageLevel, 0, 100)
+		|| !GetInt(*InitialLevelsPtr, TEXT("critChance"), EnhancementsPath, InitialCritChanceLevel, 0, 100)
+		|| !GetInt(*InitialLevelsPtr, TEXT("critBonus"), EnhancementsPath, InitialCritDamageLevel, 0, 100))
+	{
+		return false;
+	}
 
 	return true;
 }
@@ -304,12 +458,15 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		return false;
 	}
 
-	double Num = 0.0;
+	if (!CheckHeader(Bosses, BossesPath, TEXT("gladius-boss-patterns"), BossRevision))
+	{
+		return false;
+	}
+
 	FString Text;
 
 	Bosses->TryGetStringField(TEXT("name"), BossName);
-	if (!GetNumber(Bosses, TEXT("maxHp"), BossesPath, Num)) { return false; }
-	BossMaxHP = FMath::RoundToInt(Num);
+	if (!GetInt(Bosses, TEXT("maxHp"), BossesPath, BossMaxHP, 1, 1e9)) { return false; }
 
 	const TSharedPtr<FJsonObject>* EncounterPtr = nullptr;
 	if (!Bosses->TryGetObjectField(TEXT("encounter"), EncounterPtr))
@@ -317,13 +474,10 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		Fail(BossesPath, TEXT("'encounter' 항목이 없습니다"));
 		return false;
 	}
-	if (!GetNumber(*EncounterPtr, TEXT("turns"), BossesPath, Num)) { return false; }
-	Turns = FMath::RoundToInt(Num);
+	if (!GetInt(*EncounterPtr, TEXT("turns"), BossesPath, Turns, 1, 10)) { return false; }
 
-	if (!GetString(*EncounterPtr, TEXT("patternFit"), BossesPath, Text)) { return false; }
-	if (Text != TEXT("remainingTurns"))
+	if (!CheckFixedString(*EncounterPtr, TEXT("patternFit"), TEXT("remainingTurns"), BossesPath))
 	{
-		Fail(BossesPath, TEXT("patternFit은 remainingTurns 만 지원합니다"));
 		return false;
 	}
 
@@ -332,6 +486,12 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 	if (!Bosses->TryGetArrayField(TEXT("actions"), ActionArray) || ActionArray->Num() == 0)
 	{
 		Fail(BossesPath, TEXT("'actions' 가 비어 있습니다"));
+		return false;
+	}
+
+	if (ActionArray->Num() > 100)
+	{
+		Fail(BossesPath, FString::Printf(TEXT("공격은 최대 100개입니다 (현재 %d개)"), ActionArray->Num()));
 		return false;
 	}
 
@@ -355,13 +515,7 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 			return false;
 		}
 
-		if (!GetNumber(Obj, TEXT("hitCount"), BossesPath, Num)) { return false; }
-		Action.HitCount = FMath::RoundToInt(Num);
-		if (Action.HitCount < 1)
-		{
-			Fail(BossesPath, FString::Printf(TEXT("'%s' 의 hitCount는 1 이상이어야 합니다"), *Action.Id));
-			return false;
-		}
+		if (!GetInt(Obj, TEXT("hitCount"), BossesPath, Action.HitCount, 1, 10)) { return false; }
 
 		const TSharedPtr<FJsonObject>* DamagePtr = nullptr;
 		const TSharedPtr<FJsonObject>* AttributePtr = nullptr;
@@ -379,11 +533,8 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		{
 			const FString ZoneName = ZoneNames[Zone];
 
-			if (!GetNumber(*DamagePtr, ZoneName, BossesPath, Num)) { return false; }
-			Action.DamageByZone[Zone] = FMath::RoundToInt(Num);
-			if (Action.DamageByZone[Zone] < 0)
+			if (!GetInt(*DamagePtr, ZoneName, BossesPath, Action.DamageByZone[Zone], 0, 100))
 			{
-				Fail(BossesPath, FString::Printf(TEXT("'%s' 의 피해는 0 이상이어야 합니다"), *Action.Id));
 				return false;
 			}
 
@@ -426,6 +577,12 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 	if (!Bosses->TryGetArrayField(TEXT("patterns"), PatternArray) || PatternArray->Num() == 0)
 	{
 		Fail(BossesPath, TEXT("'patterns' 가 비어 있습니다"));
+		return false;
+	}
+
+	if (PatternArray->Num() > 100)
+	{
+		Fail(BossesPath, FString::Printf(TEXT("패턴은 최대 100개입니다 (현재 %d개)"), PatternArray->Num()));
 		return false;
 	}
 
@@ -486,10 +643,8 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		return false;
 	}
 
-	if (!GetString(*SelectionPtr, TEXT("mode"), BossesPath, Text)) { return false; }
-	if (Text != TEXT("weightedRandom"))
+	if (!CheckFixedString(*SelectionPtr, TEXT("mode"), TEXT("weightedRandom"), BossesPath))
 	{
-		Fail(BossesPath, TEXT("selection.mode는 weightedRandom 만 지원합니다"));
 		return false;
 	}
 
@@ -529,33 +684,27 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 			return false;
 		}
 
-		if (!GetNumber(Obj, TEXT("weight"), BossesPath, Num) || Num < 0.0)
-		{
-			Fail(BossesPath, FString::Printf(TEXT("'%s' 의 가중치가 잘못되었습니다"), *Weight.PatternId));
-			return false;
-		}
-		Weight.Weight = Num;
+		if (!GetFloat(Obj, TEXT("weight"), BossesPath, Weight.Weight, 0, 10000)) { return false; }
 
 		Pool.Add(MoveTemp(Weight));
 	}
 
-	//정확히 10턴을 채울 수 있는지. 1턴 패턴이 하나도 없으면 남은 턴 1에서 막힌다.
-	// ponytail: 기획서는 '도달 가능한 모든 상태'를 검사하라고 하지만, 연속 재선택을
-	// 허용하는 한 길이별 후보 유무만 보면 충분하다. 금지 모드가 실제로 쓰이면 그때 확장
-	for (int32 Left = 1; Left <= Turns; ++Left)
+	//정확히 Turns턴에 맞춰 끝내려면 1턴 패턴이 반드시 있어야 한다.
+	//남은 턴이 1일 때 쓸 수 있는 패턴은 그것뿐이고, 1턴 패턴이 있으면 남은 턴이
+	//얼마든 후보가 생기므로 이 검사 하나로 모든 남은 턴을 덮는다.
+	// ponytail: 기획서는 '도달 가능한 모든 상태'를 보라고 하지만 연속 재선택을 허용하는
+	// 한 결과가 같다. 금지 모드가 실제로 쓰이면 그때 상태 탐색으로 확장
+	const bool bHasSingleTurn = Pool.ContainsByPredicate([this](const FPatternWeight& W)
 	{
-		const bool bHasFit = Pool.ContainsByPredicate([this, Left](const FPatternWeight& W)
-		{
-			const FBossPattern* Pattern = FindPattern(W.PatternId);
-			return W.Weight > 0.f && Pattern && Pattern->Steps.Num() <= Left;
-		});
+		const FBossPattern* Pattern = FindPattern(W.PatternId);
+		return W.Weight > 0.f && Pattern && Pattern->Steps.Num() == 1;
+	});
 
-		if (!bHasFit)
-		{
-			Fail(BossesPath, FString::Printf(
-				TEXT("남은 턴 %d 에 들어가는 패턴이 없습니다 — 정확히 %d턴에 끝낼 수 없습니다"), Left, Turns));
-			return false;
-		}
+	if (!bHasSingleTurn)
+	{
+		Fail(BossesPath, FString::Printf(
+			TEXT("가중치가 있는 1턴 패턴이 없습니다 — 마지막 1턴을 채울 수 없어 정확히 %d턴에 끝낼 수 없습니다"), Turns));
+		return false;
 	}
 
 	if (!bAllowImmediateRepeat)
