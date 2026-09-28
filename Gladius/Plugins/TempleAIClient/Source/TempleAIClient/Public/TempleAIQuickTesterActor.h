@@ -26,7 +26,7 @@ public:
     FString TestMessage = TEXT("여신님, 제 목소리가 들리시나요?");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI")
-    bool bSendOnBeginPlay = false;
+    bool bSendOnBeginPlay = true;
 
     UFUNCTION(BlueprintCallable, Category = "Temple AI")
     void SendTestMessage();

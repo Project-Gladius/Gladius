@@ -23,6 +23,8 @@
 
 ## Windows 실행
 
+CMD에서 간단히 실행하려면 `run_server.cmd`를 사용합니다. 같은 로컬 네트워크의 다른 컴퓨터에서 접속해야 하면 `run_server_lan.cmd`를 사용합니다. 자세한 절차는 `EXTERNAL_PC_SERVER_GUIDE_KO.md`를 참고합니다.
+
 PowerShell에서 프로젝트 폴더로 이동한 뒤 실행합니다.
 
 ```powershell

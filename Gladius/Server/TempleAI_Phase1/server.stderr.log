@@ -1,7 +1,16 @@
 
 [notice] A new release of pip is available: 26.1.1 -> 26.2.1
 [notice] To update, run: C:\Users\user\Documents\GitHub\Gladius\Gladius\Server\TempleAI_Phase1\.venv\Scripts\python.exe -m pip install --upgrade pip
-INFO:     Started server process [47572]
+INFO:     Started server process [33816]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
+Gemini model gemini-3.7-flash failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+Gemini model gemini-3.8-flash failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+All Gemini models failed; using local safe fallback
+Gemini models are cooling down; using local safe fallback
+Gemini models are cooling down; using local safe fallback
+Gemini models are cooling down; using local safe fallback
+Gemini model gemini-3.7-flash failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+Gemini model gemini-3.8-flash failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}
+All Gemini models failed; using local safe fallback

@@ -1,3 +1,4 @@
+Starting TempleAI on this computer only...
 Requirement already satisfied: fastapi<1,>=0.115 in .\.venv\Lib\site-packages (from -r requirements.txt (line 1)) (0.141.1)
 Requirement already satisfied: google-genai<3,>=2 in .\.venv\Lib\site-packages (from -r requirements.txt (line 2)) (2.24.0)
 Requirement already satisfied: korcen<2,>=1.0.3 in .\.venv\Lib\site-packages (from -r requirements.txt (line 3)) (1.0.3)
@@ -35,11 +36,9 @@ Requirement already satisfied: watchfiles>=0.20 in .\.venv\Lib\site-packages (fr
 Requirement already satisfied: cffi>=2.0.0 in .\.venv\Lib\site-packages (from cryptography>=41.0.5->google-auth<3.0.0,>=2.56.0->google-auth[requests]<3.0.0,>=2.56.0->google-genai<3,>=2->-r requirements.txt (line 2)) (2.1.1)
 Requirement already satisfied: pycparser in .\.venv\Lib\site-packages (from cffi>=2.0.0->cryptography>=41.0.5->google-auth<3.0.0,>=2.56.0->google-auth[requests]<3.0.0,>=2.56.0->google-genai<3,>=2->-r requirements.txt (line 2)) (3.0)
 Requirement already satisfied: pyasn1<0.7.0,>=0.6.1 in .\.venv\Lib\site-packages (from pyasn1-modules>=0.2.1->google-auth<3.0.0,>=2.56.0->google-auth[requests]<3.0.0,>=2.56.0->google-genai<3,>=2->-r requirements.txt (line 2)) (0.6.4)
-INFO:     127.0.0.1:55362 - "GET /health HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55387 - "POST /temple/respond HTTP/1.1" 422 Unprocessable Content
-INFO:     127.0.0.1:55387 - "POST /temple/respond HTTP/1.1" 422 Unprocessable Content
-INFO:     127.0.0.1:55387 - "POST /temple/respond HTTP/1.1" 422 Unprocessable Content
-INFO:     127.0.0.1:55387 - "POST /temple/respond HTTP/1.1" 422 Unprocessable Content
-INFO:     127.0.0.1:58365 - "POST /temple/respond HTTP/1.1" 422 Unprocessable Content
-INFO:     127.0.0.1:59008 - "POST /temple/respond HTTP/1.1" 422 Unprocessable Content
-INFO:     127.0.0.1:60040 - "POST /temple/respond HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54292 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53199 - "POST /temple/respond HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53199 - "POST /temple/respond HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53199 - "POST /temple/respond HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53199 - "POST /temple/respond HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50309 - "POST /temple/respond HTTP/1.1" 200 OK

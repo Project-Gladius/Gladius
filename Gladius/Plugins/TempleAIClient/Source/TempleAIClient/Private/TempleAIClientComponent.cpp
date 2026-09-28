@@ -98,7 +98,11 @@ void UTempleAIClientComponent::HandleTempleResponse(
 
     if (!bWasSuccessful || !Response.IsValid())
     {
-        BroadcastError(TEXT("Temple AI request failed before receiving a response."));
+        BroadcastError(FString::Printf(
+            TEXT("Temple AI request failed before receiving a response. status=%d elapsed=%.1fs endpoint=%s"),
+            static_cast<int32>(Request->GetStatus()),
+            Request->GetElapsedTime(),
+            *Request->GetURL()));
         return;
     }
 

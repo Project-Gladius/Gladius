@@ -15,10 +15,7 @@ void ATempleAIQuickTesterActor::BeginPlay()
     TempleAIClient->OnResponse.AddDynamic(this, &ATempleAIQuickTesterActor::HandleTempleAIResponse);
     TempleAIClient->OnError.AddDynamic(this, &ATempleAIQuickTesterActor::HandleTempleAIError);
 
-    if (bSendOnBeginPlay)
-    {
-        SendTestMessage();
-    }
+    SendTestMessage();
 }
 
 void ATempleAIQuickTesterActor::SendTestMessage()
@@ -28,6 +25,13 @@ void ATempleAIQuickTesterActor::SendTestMessage()
         UE_LOG(LogTemp, Error, TEXT("TempleAIClient component is missing."));
         return;
     }
+
+    UE_LOG(
+        LogTemp,
+        Log,
+        TEXT("Temple AI request: endpoint=%s uid=%s"),
+        *TempleAIClient->EndpointUrl,
+        *TestUid);
 
     if (GEngine)
     {
