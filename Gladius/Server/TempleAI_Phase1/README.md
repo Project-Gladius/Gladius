@@ -4,6 +4,8 @@
 
 현재 목표는 하나의 질문을 받아 여신 답변을 구조화된 JSON으로 반환하는 것입니다. 아직 Unreal 연결, YouTube API, 다중 댓글 큐, 축복, 스트리밍은 포함하지 않습니다.
 
+YouTube 라이브 채팅과 Temple AI의 다음 단계 연동 구조는 [`YOUTUBE_TEMPLE_AI_INTEGRATION_PLAN_KO.md`](YOUTUBE_TEMPLE_AI_INTEGRATION_PLAN_KO.md)를 참고하세요.
+
 ## 포함된 기능
 
 - `POST /temple/respond`
