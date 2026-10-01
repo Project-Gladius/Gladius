@@ -30,6 +30,33 @@ ABattleManager::ABattleManager()
 	StatusText->SetHorizontalAlignment(EHTA_Center);
 	StatusText->SetWorldSize(70.f);
 	StatusText->SetTextRenderColor(FColor::Yellow);
+
+	//밸런스 파일을 읽지 못했을 때만 쓰이는 기본값. 수치는 abilities.json 이 기준이다.
+	//배열 순서가 자리 배치의 앞뒤를 뜻한다 — 0번이 보스 쪽
+	FCharacterDef Front;
+	Front.Id = TEXT("gladius");
+	Front.Name = TEXT("글라디우스");
+	Front.Attacks[1].CritChance = 0.25f;
+	Front.Attacks[1].CritDamage = 0.5f;
+	Classes.Add(Front);
+
+	FCharacterDef Back = Front;
+	Back.Id = TEXT("sera");
+	Back.Name = TEXT("세라");
+	Classes.Add(Back);
+}
+
+int32 ABattleManager::ClassIndexFor(const FString& CharacterId) const
+{
+	const int32 Index = Classes.IndexOfByPredicate(
+		[&CharacterId](const FCharacterDef& C) { return C.Id == CharacterId; });
+
+	if (Index == INDEX_NONE)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Battle] 모르는 직업군 '%s' — 첫 번째 직업군으로 넣습니다"), *CharacterId);
+		return 0;
+	}
+	return Index;
 }
 
 void ABattleManager::BeginPlay()
@@ -40,10 +67,20 @@ void ABattleManager::BeginPlay()
 	LoadRecords();
 	GatherSpots();
 
-	if (!PlayerUnitClass || !BossUnitClass)
+	for (const FCharacterDef& Class : Classes)
 	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[Battle] PlayerUnitClass 또는 BossUnitClass가 비어 있습니다 — 메시가 없어 유닛이 보이지 않습니다"));
+		const TSubclassOf<ABattleUnit>* Found = UnitClassByCharacter.Find(Class.Id);
+		if (!Found || !*Found)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[Battle] 직업군 '%s'에 블루프린트가 지정되지 않았습니다 — 메시가 없어 보이지 않습니다"),
+				*Class.Id);
+		}
+	}
+
+	if (!BossUnitClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Battle] BossUnitClass가 비어 있습니다"));
 	}
 
 	BindActionKeys();
@@ -341,15 +378,104 @@ void ABattleManager::LoadRecords()
 
 int32 ABattleManager::MaxHPFor(const FPlayerRecord& Record) const
 {
-	return PlayerBaseHP + Record.MaxHPBonus * HPPerBonus;
+	return Classes[ClassIndexFor(Record.CharacterId)].BaseHP + Record.MaxHPBonus * HPPerBonus;
 }
 
 void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const
 {
+	Player.ClassIndex = ClassIndexFor(Record.CharacterId);
 	Player.MaxHP = MaxHPFor(Record);
 	Player.DamageBonus = Record.DamageBonus * DamagePerBonus;
 	Player.CritChanceBonus = Record.CritChanceBonus * CritChancePerBonus;
 	Player.CritDamageBonus = Record.CritDamageBonus * CritDamagePerBonus;
+}
+
+void ABattleManager::ChooseClassSpots(const TArray<FVector>& Candidates, const TArray<int32>& CountsByClass,
+	const FVector& Anchor, TArray<TArray<int32>>& OutIndicesByClass)
+{
+	OutIndicesByClass.Reset();
+	OutIndicesByClass.SetNum(CountsByClass.Num());
+
+	int32 Total = 0;
+	for (const int32 Count : CountsByClass)
+	{
+		Total += Count;
+	}
+
+	if (Candidates.Num() == 0 || Total <= 0)
+	{
+		return;
+	}
+
+	//후보를 보스에서 가까운 순으로 늘어놓는다. 이 순서가 곧 앞뒤다
+	TArray<int32> Order;
+	for (int32 i = 0; i < Candidates.Num(); ++i)
+	{
+		Order.Add(i);
+	}
+	Order.Sort([&Candidates, &Anchor](const int32 A, const int32 B)
+	{
+		return FVector::DistSquared(Candidates[A], Anchor) < FVector::DistSquared(Candidates[B], Anchor);
+	});
+
+	//인원 비율로 구간을 쪼갠다. 자리가 인원보다 적으면 구간이 겹칠 수 있는데,
+	//그건 ChooseSpreadSpots가 '앞에서부터 다시 쓰기'로 처리한다
+	int32 Cursor = 0;
+	int32 Remaining = Total;
+
+	for (int32 ClassIdx = 0; ClassIdx < CountsByClass.Num(); ++ClassIdx)
+	{
+		const int32 Count = CountsByClass[ClassIdx];
+		if (Count <= 0)
+		{
+			continue;
+		}
+
+		//뒤에 아직 사람이 남은 직업군이 몇 개인지. 그만큼은 자리를 남겨 둬야
+		//뒤 직업군이 앞 직업군의 자리를 다시 쓰는 일이 없다
+		int32 ClassesAfter = 0;
+		for (int32 j = ClassIdx + 1; j < CountsByClass.Num(); ++j)
+		{
+			ClassesAfter += CountsByClass[j] > 0 ? 1 : 0;
+		}
+
+		//남은 자리를 남은 인원으로 나눠 이 직업군의 몫을 정한다
+		const int32 Left = Candidates.Num() - Cursor;
+		const int32 Share = ClassesAfter == 0
+			? FMath::Max(Left, 1)
+			: FMath::Clamp(FMath::RoundToInt((float)Left * Count / Remaining),
+				1, FMath::Max(Left - ClassesAfter, 1));
+
+		TArray<FVector> Slice;
+		TArray<int32> SliceToCandidate;
+		for (int32 i = 0; i < Share && Cursor + i < Order.Num(); ++i)
+		{
+			SliceToCandidate.Add(Order[Cursor + i]);
+			Slice.Add(Candidates[Order[Cursor + i]]);
+		}
+
+		if (Slice.Num() == 0)
+		{
+			//자리가 바닥났으면 맨 뒤 자리를 같이 쓴다
+			SliceToCandidate.Add(Order.Last());
+			Slice.Add(Candidates[Order.Last()]);
+		}
+
+		//맨 뒤 직업군은 자기 구간의 '뒤에서부터' 채운다.
+		//그래서 기준점을 보스에서 가장 먼 자리로 준다
+		const FVector SliceAnchor = ClassesAfter == 0 ? Slice.Last() : Anchor;
+
+		TArray<int32> Picked;
+		ChooseSpreadSpots(Slice, Count, SliceAnchor, Picked);
+
+		for (const int32 Index : Picked)
+		{
+			OutIndicesByClass[ClassIdx].Add(SliceToCandidate[Index]);
+		}
+
+		Cursor += Share;
+		Remaining -= Count;
+	}
 }
 
 void ABattleManager::ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 Count,
@@ -374,10 +500,12 @@ void ABattleManager::ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 
 
 	while (OutIndices.Num() < Count)
 	{
-		//자리가 인원보다 적으면 앞에서부터 다시 쓴다. 겹치지만 아무도 빠지지는 않는다
+		//자리가 인원보다 적으면 앞에서부터 다시 쓴다. 겹치지만 아무도 빠지지는 않는다.
+		//Add에 자기 배열의 원소를 직접 넘기면 재할당 때 끊어지므로 값으로 복사해 둔다
 		if (OutIndices.Num() >= Candidates.Num())
 		{
-			OutIndices.Add(OutIndices[OutIndices.Num() - Candidates.Num()]);
+			const int32 Reused = OutIndices[OutIndices.Num() - Candidates.Num()];
+			OutIndices.Add(Reused);
 			continue;
 		}
 
@@ -435,7 +563,8 @@ bool ABattleManager::SubmitChat(const FString& UserId, const FString& DisplayNam
 	return SubmitAction(UserId, DisplayName, Action);
 }
 
-bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayName, EBattleAction Action)
+bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayName, EBattleAction Action,
+	const FString& CharacterId)
 {
 	if (!IsAcceptingInput())
 	{
@@ -458,6 +587,13 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		Record.UserId = UserId;
 		Record.DisplayName = DisplayName;
 
+		//직업군은 한 번 정해지면 기록에 남아 다시 참가해도 유지된다.
+		//직업군이 생기기 전에 저장된 기록은 비어 있으므로 이때 채워 넣는다
+		if (Record.CharacterId.IsEmpty())
+		{
+			Record.CharacterId = CharacterId.IsEmpty() ? DefaultCharacterId : CharacterId;
+		}
+
 		//처음 참가하는 유저는 밸런스 파일의 initialLevels 단계를 들고 시작한다
 		if (bNewRecord)
 		{
@@ -474,8 +610,10 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.EvadeStreak = Balance.InitialEvadeStreak;
 		ApplyRecordToPlayer(Record, NewPlayer);
 		NewPlayer.HP = NewPlayer.MaxHP;
+		//직업군에 지정된 블루프린트로 스폰한다
+		const TSubclassOf<ABattleUnit>* UnitClass = UnitClassByCharacter.Find(Record.CharacterId);
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
-			PlayerUnitClass ? PlayerUnitClass.Get() : ABattleUnit::StaticClass(),
+			(UnitClass && *UnitClass) ? UnitClass->Get() : ABattleUnit::StaticClass(),
 			BossLocation(), FRotator::ZeroRotator);
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
@@ -485,16 +623,30 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 		Player = &Players.Add(UserId, NewPlayer);
 
-		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분하고, 본인은 바로 세운다.
-		//나머지는 다음 이동 단계에 미끄러져 옮겨간다
+		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분한다.
+		//본인은 바로 세우고, 자리가 밀린 사람들은 그 즉시 비켜 준다 —
+		//다음 이동 단계까지 미루면 그 사이 두 명이 같은 자리에 겹쳐 보인다
 		AssignSlots();
-		if (Player->Unit)
+		for (const TPair<FString, FBattlePlayer>& Pair : Players)
 		{
-			Player->Unit->SetActorLocation(Player->TargetLocation);
+			const FBattlePlayer& Other = Pair.Value;
+			if (!Other.Unit)
+			{
+				continue;
+			}
+
+			if (Pair.Key == UserId)
+			{
+				Other.Unit->SetActorLocation(Other.TargetLocation);
+			}
+			else
+			{
+				Other.Unit->MoveTo(Other.TargetLocation, MoveSeconds);
+			}
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (HP %d, 피해+%d, 치명+%.0f%%/+%.0f%%) — 현재 %d/%d명"),
-			*UserId, NewPlayer.MaxHP, NewPlayer.DamageBonus,
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s [%s] (HP %d, 피해+%d, 치명+%.0f%%/+%.0f%%) — 현재 %d/%d명"),
+			*UserId, *Record.CharacterId, NewPlayer.MaxHP, NewPlayer.DamageBonus,
 			NewPlayer.CritChanceBonus * 100.f, NewPlayer.CritDamageBonus * 100.f, Players.Num(), MaxPlayers);
 	}
 
@@ -614,21 +766,33 @@ void ABattleManager::AssignSlots()
 
 	for (int32 LaneIndex = 0; LaneIndex < 3; ++LaneIndex)
 	{
-		//이 구역에 서 있는 참가자. 배치가 매번 같도록 순서를 고정한다
-		TArray<FString> Ids;
+		//이 구역에 서 있는 참가자를 직업군별로 모은다. 배치가 매번 같도록 순서를 고정한다
+		TArray<TArray<FString>> IdsByClass;
+		IdsByClass.SetNum(Classes.Num());
+
+		int32 Total = 0;
 		for (const TPair<FString, FBattlePlayer>& Pair : Players)
 		{
-			if ((int32)Pair.Value.Lane == LaneIndex)
+			if ((int32)Pair.Value.Lane != LaneIndex)
 			{
-				Ids.Add(Pair.Key);
+				continue;
 			}
+
+			IdsByClass[FMath::Clamp(Pair.Value.ClassIndex, 0, Classes.Num() - 1)].Add(Pair.Key);
+			++Total;
 		}
 
-		if (Ids.Num() == 0)
+		if (Total == 0)
 		{
 			continue;
 		}
-		Ids.Sort();
+
+		TArray<int32> Counts;
+		for (TArray<FString>& Ids : IdsByClass)
+		{
+			Ids.Sort();
+			Counts.Add(Ids.Num());
+		}
 
 		//레벨에 스팟이 있으면 그것이 후보고, 없으면 격자 좌표를 후보로 쓴다
 		TArray<FVector> Candidates = Spots[LaneIndex];
@@ -640,35 +804,39 @@ void ABattleManager::AssignSlots()
 			}
 		}
 
-		TArray<int32> Chosen;
-		ChooseSpreadSpots(Candidates, Ids.Num(), Boss, Chosen);
+		//직업군 순서대로 앞에서 뒤로 자리를 나눠 받는다
+		TArray<TArray<int32>> ChosenByClass;
+		ChooseClassSpots(Candidates, Counts, Boss, ChosenByClass);
 
-		TArray<FVector> Targets;
-		for (const int32 Index : Chosen)
+		for (int32 ClassIdx = 0; ClassIdx < IdsByClass.Num(); ++ClassIdx)
 		{
-			Targets.Add(Candidates[Index]);
-		}
-
-		//덜 움직이도록, 지금 서 있는 곳에서 가장 가까운 자리부터 가져간다
-		for (const FString& Id : Ids)
-		{
-			FBattlePlayer& P = Players[Id];
-			const FVector From = P.Unit ? P.Unit->GetActorLocation() : Targets[0];
-
-			int32 Best = 0;
-			float BestDist = TNumericLimits<float>::Max();
-			for (int32 i = 0; i < Targets.Num(); ++i)
+			TArray<FVector> Targets;
+			for (const int32 Index : ChosenByClass[ClassIdx])
 			{
-				const float Dist = FVector::DistSquared(From, Targets[i]);
-				if (Dist < BestDist)
-				{
-					BestDist = Dist;
-					Best = i;
-				}
+				Targets.Add(Candidates[Index]);
 			}
 
-			P.TargetLocation = Targets[Best];
-			Targets.RemoveAt(Best);
+			//덜 움직이도록, 지금 서 있는 곳에서 가장 가까운 자리부터 가져간다
+			for (const FString& Id : IdsByClass[ClassIdx])
+			{
+				FBattlePlayer& P = Players[Id];
+				const FVector From = P.Unit ? P.Unit->GetActorLocation() : Targets[0];
+
+				int32 Best = 0;
+				float BestDist = TNumericLimits<float>::Max();
+				for (int32 i = 0; i < Targets.Num(); ++i)
+				{
+					const float Dist = FVector::DistSquared(From, Targets[i]);
+					if (Dist < BestDist)
+					{
+						BestDist = Dist;
+						Best = i;
+					}
+				}
+
+				P.TargetLocation = Targets[Best];
+				Targets.RemoveAt(Best);
+			}
 		}
 	}
 }
@@ -737,7 +905,7 @@ void ABattleManager::ResolveTurn()
 		//피버는 이번 턴 공격 피해에 반영된 뒤에 갱신된다
 		if (bAttack1 || bAttack2)
 		{
-			const FAttackDef& Attack = bAttack1 ? Attack1 : Attack2;
+			const FAttackDef& Attack = Classes[P.ClassIndex].Attacks[bAttack1 ? 0 : 1];
 			//내성은 이동 후 구역 기준 (기획서 2절)
 			const float Resist = ZoneResistMultiplier(Boss, P.Lane, Attack.Type);
 
@@ -763,7 +931,7 @@ void ABattleManager::ResolveTurn()
 		}
 
 		const int32 Taken = DamageToPlayer(P.PendingAction,
-			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, DefenseDamageRatio);
+			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, Classes[P.ClassIndex].DefenseDamageRatio);
 		P.HP = FMath::Max(0, P.HP - Taken);
 
 		if (P.Unit)
@@ -923,11 +1091,8 @@ void ABattleManager::ApplyBalanceFiles()
 	EvadeRepeatMode = Balance.EvadeRepeat;
 	FeverRounding = Balance.FeverRounding;
 	bAllowStayEvade = Balance.bAllowStayEvade;
-	DefenseDamageRatio = Balance.DefenseDamageRatio;
 
-	PlayerBaseHP = Balance.BaseHP;
-	Attack1 = Balance.Attacks[0];
-	Attack2 = Balance.Attacks[1];
+	Classes = Balance.Characters;
 
 	HPPerBonus = Balance.HPPerLevel;
 	DamagePerBonus = Balance.DamagePerLevel;
@@ -940,9 +1105,8 @@ void ABattleManager::ApplyBalanceFiles()
 
 	//에디터에서 고친 값이 조용히 사라지는 일이 없도록, 덮어쓴 결과를 남긴다
 	UE_LOG(LogTemp, Log, TEXT("[Balance] 에디터 값을 파일 값으로 덮어썼습니다 — ")
-		TEXT("HP %d / 공격 %d·%d / 피버 +%.0f·%.0f×%.0f / 보스 HP %d / %d턴"),
-		PlayerBaseHP, Attack1.BaseDamage, Attack2.BaseDamage,
-		FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns);
+		TEXT("직업군 %d종 / 피버 +%.0f·%.0f×%.0f / 보스 HP %d / %d턴"),
+		Classes.Num(), FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns);
 }
 
 const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft, const FString& PreviousId) const
@@ -1116,7 +1280,7 @@ void ABattleManager::Tick(float DeltaTime)
 			: FString::Printf(TEXT("%s: not joined"), *DebugUserId);
 
 		Body = FString::Printf(
-			TEXT("%s\nCHOOSE YOUR ACTION   %.1fs\n%s\n1=Idle 2=Attack1 3=Attack2  4=AvoidL 5=AvoidM 6=AvoidR 7=Defense\nQ=add test player  E=grant bonus"),
+			TEXT("%s\nCHOOSE YOUR ACTION   %.1fs\n%s\n1=Idle 2=Attack1 3=Attack2  4=AvoidL 5=AvoidM 6=AvoidR 7=Defense\nQ=add front class  W=add back class  E=grant bonus"),
 			*Telegraph, Remaining, *MyLine);
 		break;
 	}
@@ -1134,13 +1298,13 @@ void ABattleManager::Tick(float DeltaTime)
 
 // ---------------- 입력 ----------------
 
-void ABattleManager::AddTestPlayer()
+void ABattleManager::AddTestPlayer(const FString& CharacterId)
 {
 	const FString Id = FString::Printf(TEXT("@testuser%02d"), Players.Num());
 	//표시 이름을 한글로 둬서 UMG 이름표가 UTF-8을 제대로 그리는지 눈으로 확인한다.
 	//실제 핸들이 붙으면 이 줄은 사라진다
 	const FString Name = FString::Printf(TEXT("테스터%02d"), Players.Num());
-	SubmitAction(Id, Name, (EBattleAction)FMath::RandRange(1, 6));
+	SubmitAction(Id, Name, (EBattleAction)FMath::RandRange(1, 6), CharacterId);
 }
 
 void ABattleManager::GrantBonusToAll()
@@ -1190,10 +1354,18 @@ void ABattleManager::BindActionKeys()
 		InputComponent->KeyBindings.Emplace(MoveTemp(Binding));
 	}
 
+	//Q는 첫 번째 직업군, W는 마지막 직업군으로 더미를 넣는다. 앞뒤 배치를 눈으로 보려는 용도
 	FInputKeyBinding AddBinding(FInputChord(EKeys::Q), IE_Pressed);
 	AddBinding.bConsumeInput = false;
-	AddBinding.KeyDelegate.GetDelegateForManualSet().BindLambda([this]() { AddTestPlayer(); });
+	AddBinding.KeyDelegate.GetDelegateForManualSet().BindLambda(
+		[this]() { AddTestPlayer(Classes.Num() > 0 ? Classes[0].Id : FString()); });
 	InputComponent->KeyBindings.Emplace(MoveTemp(AddBinding));
+
+	FInputKeyBinding AddBackBinding(FInputChord(EKeys::W), IE_Pressed);
+	AddBackBinding.bConsumeInput = false;
+	AddBackBinding.KeyDelegate.GetDelegateForManualSet().BindLambda(
+		[this]() { AddTestPlayer(Classes.Num() > 0 ? Classes.Last().Id : FString()); });
+	InputComponent->KeyBindings.Emplace(MoveTemp(AddBackBinding));
 
 	FInputKeyBinding BonusBinding(FInputChord(EKeys::E), IE_Pressed);
 	BonusBinding.bConsumeInput = false;
@@ -1434,6 +1606,73 @@ void ABattleManager::RunSelfTest()
 		check(Picked.Num() == 0);
 	}
 
+	//직업군별 앞뒤 분할 — 앞 직업군은 전원이 뒤 직업군 전원보다 보스에 가까워야 한다
+	{
+		const FVector Boss = FVector::ZeroVector;
+		TArray<FVector> Line;
+		for (int32 i = 0; i < 10; ++i)
+		{
+			Line.Add(FVector(i * 100.f, 0.f, 0.f));
+		}
+
+		TArray<TArray<int32>> ByClass;
+		ChooseClassSpots(Line, { 2, 3 }, Boss, ByClass);
+
+		check(ByClass.Num() == 2);
+		check(ByClass[0].Num() == 2 && ByClass[1].Num() == 3);
+
+		//자리가 겹치지 않는다
+		TSet<int32> Used;
+		for (const TArray<int32>& Picks : ByClass)
+		{
+			for (const int32 Index : Picks)
+			{
+				check(!Used.Contains(Index));
+				Used.Add(Index);
+			}
+		}
+
+		//앞 직업군의 가장 먼 자리 < 뒤 직업군의 가장 가까운 자리
+		float FrontFar = 0.f;
+		for (const int32 Index : ByClass[0])
+		{
+			FrontFar = FMath::Max(FrontFar, FVector::Dist(Line[Index], Boss));
+		}
+
+		float BackNear = TNumericLimits<float>::Max();
+		for (const int32 Index : ByClass[1])
+		{
+			BackNear = FMath::Min(BackNear, FVector::Dist(Line[Index], Boss));
+		}
+		check(FrontFar < BackNear);
+
+		//맨 뒤 직업군은 가장 먼 자리를 쓴다
+		check(ByClass[1].Contains(9));
+
+		//한 직업군만 있으면 그 구역을 전부 쓴다
+		ChooseClassSpots(Line, { 0, 2 }, Boss, ByClass);
+		check(ByClass[0].Num() == 0 && ByClass[1].Num() == 2);
+		check(ByClass[1].Contains(9));
+
+		//자리가 인원보다 적어도 직업군끼리는 자리를 섞어 쓰지 않는다.
+		//같은 직업군 안에서는 겹치되, 앞 직업군이 뒤 직업군 자리를 침범하면 안 된다
+		{
+			TArray<FVector> Few;
+			for (int32 i = 0; i < 3; ++i)
+			{
+				Few.Add(FVector(i * 100.f, 0.f, 0.f));
+			}
+
+			ChooseClassSpots(Few, { 4, 4 }, Boss, ByClass);
+			check(ByClass[0].Num() == 4 && ByClass[1].Num() == 4);
+
+			for (const int32 FrontIndex : ByClass[0])
+			{
+				check(!ByClass[1].Contains(FrontIndex));
+			}
+		}
+	}
+
 	EBattleAction A;
 	check(ParseCommand(TEXT("  공격 "), A) && A == EBattleAction::Attack1);
 	check(ParseCommand(TEXT("!왼쪽"), A) && A == EBattleAction::AvoidL);
@@ -1445,16 +1684,17 @@ void ABattleManager::RunSelfTest()
 	//강화 단계가 실제 수치로 반영되는지
 	{
 		FPlayerRecord R;
-		check(MaxHPFor(R) == PlayerBaseHP);
+		R.CharacterId = Classes[0].Id;
+		check(MaxHPFor(R) == Classes[0].BaseHP);
 		R.MaxHPBonus = 3;
-		check(MaxHPFor(R) == PlayerBaseHP + 3 * HPPerBonus);
+		check(MaxHPFor(R) == Classes[0].BaseHP + 3 * HPPerBonus);
 
 		//강화 수치가 전투용 스냅샷으로 옮겨지는지
 		R.DamageBonus = 2;
 		R.CritChanceBonus = 1;
 		FBattlePlayer P;
 		ApplyRecordToPlayer(R, P);
-		check(P.MaxHP == PlayerBaseHP + 3 * HPPerBonus);
+		check(P.MaxHP == Classes[0].BaseHP + 3 * HPPerBonus);
 		check(P.DamageBonus == 2 * DamagePerBonus);
 		check(FMath::IsNearlyEqual(P.CritChanceBonus, CritChancePerBonus));
 	}

@@ -49,6 +49,9 @@ struct FPlayerRecord
 	UPROPERTY() FString UserId;
 	UPROPERTY() FString DisplayName;
 
+	//고른 직업군. abilities.json 의 characters[].id 와 같은 값이고 저장 파일에 남는다
+	UPROPERTY() FString CharacterId;
+
 	//신전에서 사는 '강화' 능력치들. 게임 오버 시 일정 비율을 잃는다
 	UPROPERTY() int32 MaxHPBonus = 0;
 	UPROPERTY() int32 DamageBonus = 0;
@@ -86,6 +89,9 @@ struct FBattlePlayer
 	//참가할 때 기록에서 계산해 넣는 값들. 매 판정마다 다시 조회하지 않으려고 들고 있는다
 	UPROPERTY() int32 MaxHP = 0;
 	UPROPERTY() int32 DamageBonus = 0;
+	//Classes 배열에서의 위치. 매 판정마다 문자열을 찾지 않으려고 들고 있는다
+	UPROPERTY() int32 ClassIndex = 0;
+
 	//신전 강화로 얻은 치명타. 공격별 기본 치명타에 더해진다
 	UPROPERTY() float CritChanceBonus = 0.f;
 	UPROPERTY() float CritDamageBonus = 0.f;
@@ -167,11 +173,12 @@ public:
 
 	// ---- 유닛 ----
 
-	//플레이어와 보스로 쓸 블루프린트. 메시·크기·이름표 위치·이름표 위젯이
-	//전부 이 블루프린트 안에 있으므로 코드를 고칠 일이 없다.
-	//비워두면 C++ 기본 클래스를 쓰는데, 메시가 없어 보이지 않는다
+	//직업군 id별로 쓸 블루프린트. 메시·크기·이름표 위치·이름표 위젯이
+	//전부 그 블루프린트 안에 있으므로 코드를 고칠 일이 없다.
+	//예: "gladius" → BP_BattleUnitG, "sera" → BP_BattleUnitS.
+	//없는 id로 참가하면 C++ 기본 클래스를 쓰는데, 메시가 없어 보이지 않는다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
-	TSubclassOf<ABattleUnit> PlayerUnitClass;
+	TMap<FString, TSubclassOf<ABattleUnit>> UnitClassByCharacter;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
 	TSubclassOf<ABattleUnit> BossUnitClass;
@@ -230,9 +237,14 @@ public:
 	//.json 값으로 교체된다. 여기서 고쳐도 반영되지 않으므로 수치는 그 파일에서 고칠 것.
 	//파일을 읽지 못했을 때만 아래 값이 쓰인다
 
-	//강화 없는 플레이어의 기본 체력
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	int32 PlayerBaseHP = 5;
+	//직업군별 체력·방어·공격. 배열 순서가 자리 배치의 앞뒤를 뜻한다 (0번이 보스 쪽).
+	//생성자에서 파일이 없을 때 쓸 기본값 두 개를 채운다
+	UPROPERTY(EditAnywhere, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+	TArray<FCharacterDef> Classes;
+
+	//새로 참가하는 유저에게 줄 직업군
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	FString DefaultCharacterId = TEXT("gladius");
 
 	//강화 한 단계당 오르는 양
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
@@ -283,20 +295,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	bool bAllowStayEvade = true;
 
-	//방어 시 받는 피해 비율. 올림해서 적용한다 (파일의 defenseDamageRatio)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	float DefenseDamageRatio = 0.5f;
-
 	//치명타 확률 상한 (파일의 critChanceCap)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float CritChanceCap = 1.f;
-
-	// ponytail: 원래 직업군별로 갖는 값이다. 직업군이 붙으면 그쪽으로 옮긴다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	FAttackDef Attack1;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	FAttackDef Attack2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 EnemyMaxHP = 100;
@@ -350,8 +351,11 @@ public:
 		const FString& Text, const FDateTime& SentAt);
 
 	//이미 파싱된 행동을 넣을 때. SubmitChat이 최종적으로 이걸 호출한다
+	//CharacterId를 비워두면 새 참가자는 DefaultCharacterId로 들어간다.
+	//이미 참가했거나 기록이 있는 유저는 자기 직업군을 유지한다
 	UFUNCTION(BlueprintCallable, Category = "Battle")
-	bool SubmitAction(const FString& UserId, const FString& DisplayName, EBattleAction Action);
+	bool SubmitAction(const FString& UserId, const FString& DisplayName, EBattleAction Action,
+		const FString& CharacterId = TEXT(""));
 
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void StartBattle();
@@ -395,6 +399,16 @@ public:
 	//자리가 인원보다 적으면 앞에서부터 다시 쓴다(겹침)
 	static void ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 Count,
 		const FVector& Anchor, TArray<int32>& OutIndices);
+
+	//직업군별 인원을 받아 자리를 앞뒤로 나눠 고른다.
+	//후보를 Anchor(보스)에서 가까운 순으로 정렬한 뒤 인원 비율로 구간을 쪼개고,
+	//앞 직업군은 자기 구간의 앞에서부터, 맨 뒤 직업군은 뒤에서부터 채운다.
+	//결과는 Candidates의 인덱스이며 직업군끼리 자리가 섞이지 않는다
+	static void ChooseClassSpots(const TArray<FVector>& Candidates, const TArray<int32>& CountsByClass,
+		const FVector& Anchor, TArray<TArray<int32>>& OutIndicesByClass);
+
+	//직업군 id를 Classes 배열의 위치로. 모르는 id면 0번
+	int32 ClassIndexFor(const FString& CharacterId) const;
 
 	float ResistanceMultiplier(EResistance Resistance) const;
 
@@ -453,7 +467,8 @@ private:
 	void DrawArenaGuides() const;
 
 	//더미 유저 한 명을 무작위 행동으로 참가시킨다
-	void AddTestPlayer();
+	//CharacterId를 비워두면 DefaultCharacterId로 들어간다
+	void AddTestPlayer(const FString& CharacterId = TEXT(""));
 
 	// ponytail: 성장 규칙이 미정이라 디버그 키로만 올린다.
 	// 실제 규칙이 정해지면 이 함수를 지우고 그 자리에 넣으면 된다

@@ -207,6 +207,11 @@ const FBossAction* FBattleBalance::FindAction(const FString& Id) const
 	return Actions.FindByPredicate([&Id](const FBossAction& A) { return A.Id == Id; });
 }
 
+int32 FBattleBalance::FindCharacterIndex(const FString& Id) const
+{
+	return Characters.IndexOfByPredicate([&Id](const FCharacterDef& C) { return C.Id == Id; });
+}
+
 const FBossPattern* FBattleBalance::FindPattern(const FString& Id) const
 {
 	return Patterns.FindByPredicate([&Id](const FBossPattern& P) { return P.Id == Id; });
@@ -228,8 +233,15 @@ bool FBattleBalance::LoadFromFolder(const FString& FolderPath)
 
 	bLoaded = true;
 
-	UE_LOG(LogTemp, Log, TEXT("[Balance] 불러옴 — 보스 '%s' HP %d / %d턴 / 행동 %d개 / 패턴 %d개 / 캐릭터 '%s' HP %d"),
-		*BossName, BossMaxHP, Turns, Actions.Num(), Patterns.Num(), *CharacterName, BaseHP);
+	FString CharacterList;
+	for (const FCharacterDef& Def : Characters)
+	{
+		CharacterList += FString::Printf(TEXT(" %s(HP %d, 공격 %d·%d)"),
+			*Def.Id, Def.BaseHP, Def.Attacks[0].BaseDamage, Def.Attacks[1].BaseDamage);
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Balance] 불러옴 — 보스 '%s' HP %d / %d턴 / 행동 %d개 / 패턴 %d개 / 직업군%s"),
+		*BossName, BossMaxHP, Turns, Actions.Num(), Patterns.Num(), *CharacterList);
 
 	//어떤 개정판으로 돌았는지 남겨야 나중에 통계를 그때 수치와 맞춰볼 수 있다
 	UE_LOG(LogTemp, Log, TEXT("[Balance] revision — abilities %d / enhancements %d / bosses %d"),
@@ -345,59 +357,75 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		return false;
 	}
 
-	//직업군이 아직 없어 첫 번째 캐릭터를 쓴다.
-	// ponytail: 직업군이 붙으면 유저가 고른 캐릭터를 찾아 쓰도록 바꾼다
-	const TArray<TSharedPtr<FJsonValue>>* Characters = nullptr;
-	if (!Abilities->TryGetArrayField(TEXT("characters"), Characters) || Characters->Num() == 0)
+	//파일에 적힌 모든 직업군을 순서대로 읽는다.
+	//이 순서가 자리 배치의 앞뒤가 된다 — 0번이 보스에 가장 가까운 쪽
+	const TArray<TSharedPtr<FJsonValue>>* CharacterArray = nullptr;
+	if (!Abilities->TryGetArrayField(TEXT("characters"), CharacterArray) || CharacterArray->Num() == 0)
 	{
 		Fail(AbilitiesPath, TEXT("'characters' 가 비어 있습니다"));
 		return false;
 	}
 
-	const TSharedPtr<FJsonObject> Character = (*Characters)[0]->AsObject();
-	if (!Character.IsValid())
+	Characters.Reset();
+	for (const TSharedPtr<FJsonValue>& Value : *CharacterArray)
 	{
-		Fail(AbilitiesPath, TEXT("characters[0] 을 읽을 수 없습니다"));
-		return false;
-	}
-
-	//이름은 표시용이라 없어도 진행한다
-	Character->TryGetStringField(TEXT("name"), CharacterName);
-	if (!GetInt(Character, TEXT("baseHp"), AbilitiesPath, BaseHP, 1, 1000)
-		|| !GetFloat(Character, TEXT("defenseDamageRatio"), AbilitiesPath, DefenseDamageRatio, 0, 1))
-	{
-		return false;
-	}
-
-	const TArray<TSharedPtr<FJsonValue>>* Skills = nullptr;
-	if (!Character->TryGetArrayField(TEXT("skills"), Skills) || Skills->Num() != 2)
-	{
-		Fail(AbilitiesPath, TEXT("캐릭터마다 공격이 정확히 2개여야 합니다"));
-		return false;
-	}
-
-	for (int32 i = 0; i < 2; ++i)
-	{
-		const TSharedPtr<FJsonObject> Skill = (*Skills)[i]->AsObject();
-		if (!Skill.IsValid())
+		const TSharedPtr<FJsonObject> Character = Value->AsObject();
+		if (!Character.IsValid())
 		{
-			Fail(AbilitiesPath, TEXT("skills 항목을 읽을 수 없습니다"));
+			Fail(AbilitiesPath, TEXT("characters 항목을 읽을 수 없습니다"));
 			return false;
 		}
 
-		Skill->TryGetStringField(TEXT("name"), Attacks[i].Name);
-		if (!GetInt(Skill, TEXT("baseDamage"), AbilitiesPath, Attacks[i].BaseDamage, 0, 10000)
-			|| !GetFloat(Skill, TEXT("critChance"), AbilitiesPath, Attacks[i].CritChance, 0, 1)
-			|| !GetFloat(Skill, TEXT("critBonus"), AbilitiesPath, Attacks[i].CritDamage, 0, 10))
+		FCharacterDef Def;
+		if (!GetString(Character, TEXT("id"), AbilitiesPath, Def.Id)) { return false; }
+
+		if (FindCharacterIndex(Def.Id) != INDEX_NONE)
+		{
+			Fail(AbilitiesPath, FString::Printf(TEXT("캐릭터 ID '%s' 가 중복입니다"), *Def.Id));
+			return false;
+		}
+
+		//이름은 표시용이라 없어도 진행한다
+		Character->TryGetStringField(TEXT("name"), Def.Name);
+		if (!GetInt(Character, TEXT("baseHp"), AbilitiesPath, Def.BaseHP, 1, 1000)
+			|| !GetFloat(Character, TEXT("defenseDamageRatio"), AbilitiesPath, Def.DefenseDamageRatio, 0, 1))
 		{
 			return false;
 		}
 
-		if (!GetString(Skill, TEXT("attribute"), AbilitiesPath, Text)
-			|| !ParseAttribute(Text, AbilitiesPath, Attacks[i].Type))
+		const TArray<TSharedPtr<FJsonValue>>* Skills = nullptr;
+		if (!Character->TryGetArrayField(TEXT("skills"), Skills) || Skills->Num() != 2)
 		{
+			Fail(AbilitiesPath, FString::Printf(
+				TEXT("'%s' 의 공격이 정확히 2개여야 합니다"), *Def.Id));
 			return false;
 		}
+
+		for (int32 i = 0; i < 2; ++i)
+		{
+			const TSharedPtr<FJsonObject> Skill = (*Skills)[i]->AsObject();
+			if (!Skill.IsValid())
+			{
+				Fail(AbilitiesPath, TEXT("skills 항목을 읽을 수 없습니다"));
+				return false;
+			}
+
+			Skill->TryGetStringField(TEXT("name"), Def.Attacks[i].Name);
+			if (!GetInt(Skill, TEXT("baseDamage"), AbilitiesPath, Def.Attacks[i].BaseDamage, 0, 10000)
+				|| !GetFloat(Skill, TEXT("critChance"), AbilitiesPath, Def.Attacks[i].CritChance, 0, 1)
+				|| !GetFloat(Skill, TEXT("critBonus"), AbilitiesPath, Def.Attacks[i].CritDamage, 0, 10))
+			{
+				return false;
+			}
+
+			if (!GetString(Skill, TEXT("attribute"), AbilitiesPath, Text)
+				|| !ParseAttribute(Text, AbilitiesPath, Def.Attacks[i].Type))
+			{
+				return false;
+			}
+		}
+
+		Characters.Add(MoveTemp(Def));
 	}
 
 	return true;

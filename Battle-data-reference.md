@@ -41,17 +41,17 @@
 
 | 기획서 / 파일 | 게임 |
 |---|---|
-| H (체력) `baseHp` | `PlayerBaseHP` + `MaxHPBonus × HPPerBonus` |
-| A (공격력) `baseDamage` | `Attack1.BaseDamage` / `Attack2.BaseDamage` |
+| H (체력) `baseHp` | `Classes[].BaseHP` + `MaxHPBonus × HPPerBonus` |
+| A (공격력) `baseDamage` | `Classes[].Attacks[0·1].BaseDamage` |
 | F (피버) | `FBattlePlayer::Fever` (실수) |
 | `attackFeverGain` | `FeverIncrement` |
 | G_D `defenseFeverGain` | `DefenseFeverGain` |
 | `feverDamageCoefficient` | `FeverDamageCoefficient` |
 | N `evadeThreshold` | `EvadeStreakN` |
 | `evadeReduction` (0~1) | `EvadeFeverReduction` |
-| `defenseDamageRatio` | `DefenseDamageRatio` |
+| `defenseDamageRatio` | `Classes[].DefenseDamageRatio` |
 | R (위치·속성 배율) `resistanceByZone` | `FBossAction::ResistanceByZone[3]` |
-| K (치명타 배율) `critChance`/`critBonus` | `Attack1/2.CritChance`·`CritDamage` + 신전 강화분 |
+| K (치명타 배율) `critChance`/`critBonus` | `Classes[].Attacks[].CritChance`·`CritDamage` + 신전 강화분 |
 | `resistanceMultipliers` | `ResistanceMultiplier()` |
 | Pa / Pd / Pe, `simulationDefaults`, `preset` | 시뮬레이터 전용, 읽지 않음 |
 
@@ -79,15 +79,24 @@
 
 ### 3.2 플레이어·공격 — `abilities.json` 의 `characters`
 
-직업군이 아직 없어 **첫 번째 캐릭터**를 씁니다.
+**`characters[]` 를 전부 읽습니다.** 배열 순서가 자리 배치의 앞뒤를 뜻합니다 — 0번이 보스에 가장 가까운 쪽입니다.
+
+| 직업군 | id | 유닛 블루프린트 | 자리 |
+|---|---|---|---|
+| 글라디우스 (전사) | `gladius` | `BP_BattleUnitG` | 앞 |
+| 세라 (마법사) | `sera` | `BP_BattleUnitS` | 뒤 |
+
+현재 두 직업군의 수치가 완전히 같습니다. `abilities.json`에서 한쪽만 고치면 바로 갈라집니다.
+
+유저의 직업군은 `PlayerData.json`의 `characterId`에 저장되어 다시 참가해도 유지됩니다.
 
 | 게임 변수 | 파일 필드 | 현재 파일값 |
 |---|---|---:|
-| `PlayerBaseHP` | `baseHp` | 7 |
+| `Classes[].BaseHP` | `baseHp` | 7 |
 | 시작 구역 | `initial.zone` | `left` |
 | 시작 피버 | `initial.fever` | 0 |
 
-| 필드 | `Attack1` (기본 베기) | `Attack2` (집중 타격) |
+| 필드 | 공격 1 (기본 베기) | 공격 2 (집중 타격) |
 |---|---:|---:|
 | `BaseDamage` | 10 | 7 |
 | `Type` | 물리 | 물리 |
@@ -108,6 +117,7 @@
 | `GameOverLoss` | 0.5 | 부활 시 잃는 강화 능력치 비율 |
 | `TelegraphSeconds` | 5 | 예고 시간 |
 | `MoveSeconds` | 1.5 | 회피 이동 연출 시간 |
+| `DefaultCharacterId` | `gladius` | 새 유저에게 줄 직업군 |
 | `BossActionSeconds` | 1.5 | 공격 모션 시간 |
 | `PlayerSelectCountdown` | 90 | 행동 선택 시간 |
 | `CollectSeconds` | 6 | 늦게 도착하는 채팅 수집 시간 |
@@ -278,7 +288,7 @@ bool SubmitChat(UserId, DisplayName, Text, SentAt);
 1. **보스 체력 100 대 시청자 30명** — 위 ⑧ 참고. 인원수가 반영된 값이 필요합니다.
 2. **`hitCount`** — 현재 전부 1입니다. 게임은 "구역 피해를 그 횟수만큼 반복해서 준다"로 해석했습니다(시뮬레이터와 동일). 방어 올림도 타격마다 따로 적용됩니다.
 3. **`attributeByZone`** — 보스 공격의 속성입니다. 플레이어 쪽에 속성 저항이 없어 지금은 읽어만 두고 쓰지 않습니다.
-4. **직업군** — `characters`에 글라디우스·세라 둘이 있지만 수치가 같고, 게임은 첫 번째만 씁니다. 유저가 고르는 방식이 정해지면 붙입니다.
+4. **직업군** — 둘 다 읽어서 쓰고 있습니다(전사 앞 / 마법사 뒤). 다만 **수치가 아직 완전히 같고**, 유저가 고를 수단이 없어 디버그 키로만 넣습니다. 채팅 명령어는 연동 때 붙입니다.
 5. **`initialLevels`** — 새 유저의 시작 강화 단계입니다. 아직 반영하지 않았습니다.
 
 ## 9. 요약

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "BattleBalance.generated.h"
@@ -64,6 +64,25 @@ struct FAttackDef
 	//이 공격의 기본 치명타. 신전 강화분이 여기에 더해진다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) float CritChance = 0.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) float CritDamage = 0.f;
+};
+
+//플레이어가 고를 수 있는 직업군 하나. abilities.json 의 characters 항목에 대응한다.
+//자리 배치에서 배열 순서가 앞뒤를 뜻한다 — 0번이 가장 앞(보스 쪽), 마지막이 가장 뒤
+USTRUCT(BlueprintType)
+struct FCharacterDef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString Id;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString Name;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 BaseHP = 7;
+
+	//방어 시 받는 피해 비율. 올림해서 적용한다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float DefenseDamageRatio = 0.5f;
+
+	//공격 1 / 공격 2. 고정 크기 배열이라 블루프린트에 노출할 수 없다
+	UPROPERTY(EditAnywhere) FAttackDef Attacks[2];
 };
 
 //한 구역에서의 보스 내성 한 쌍
@@ -145,11 +164,8 @@ struct FBattleBalance
 	EBattleLane InitialZone = EBattleLane::Mid;
 	float InitialFever = 0.f;
 	int32 InitialEvadeStreak = 0;
-	FString CharacterName;
-	int32 BaseHP = 7;
-	//방어 시 받는 피해 비율. 올림해서 적용한다
-	float DefenseDamageRatio = 0.5f;
-	FAttackDef Attacks[2];
+	//파일에 적힌 순서 그대로. 앞에 있는 직업군이 보스에 가까운 자리를 쓴다
+	TArray<FCharacterDef> Characters;
 
 	// ---- enhancements.json ----
 	int32 HPPerLevel = 1;
@@ -183,6 +199,8 @@ struct FBattleBalance
 	bool LoadFromFolder(const FString& FolderPath);
 
 	const FBossAction* FindAction(const FString& Id) const;
+	//없으면 INDEX_NONE
+	int32 FindCharacterIndex(const FString& Id) const;
 	const FBossPattern* FindPattern(const FString& Id) const;
 
 private:
