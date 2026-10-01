@@ -31,7 +31,11 @@ enum class EBattlePhase : uint8
 	Input,
 	//카운트다운은 끝났지만 늦게 도착하는 채팅을 계속 받는 대기 시간
 	Collect,
-	//유저 행동 및 보스 모션. 입력을 받지 않는다
+	//회피 이동 연출. 여기부터는 입력을 받지 않는다
+	Move,
+	//플레이어 공격과 보스 공격 모션
+	BossAction,
+	//결과 표시
 	Resolve
 };
 
@@ -88,8 +92,8 @@ struct FBattlePlayer
 
 	UPROPERTY() EBattleLane Lane = EBattleLane::Mid;
 
-	//참가할 때 한 번 받는 고정 자리 번호. 레인을 옮겨도 같은 번호를 쓴다
-	UPROPERTY() int32 SlotIndex = 0;
+	//이번 턴에 서야 할 자리. 매 턴 구역 인원에 맞춰 다시 배분된다
+	UPROPERTY() FVector TargetLocation = FVector::ZeroVector;
 
 	UPROPERTY() EBattleAction PendingAction = EBattleAction::Idle;
 
@@ -207,6 +211,14 @@ public:
 	//방송 지연 + API 폴링 간격보다 길어야 한다. 로그의 실측 지연을 보고 맞출 것
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float CollectSeconds = 6.f;
+
+	//회피 이동에 쓰는 시간. 이동 모션 길이에 맞춘다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float MoveSeconds = 1.5f;
+
+	//플레이어 공격과 보스 공격 모션에 쓰는 시간
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float BossActionSeconds = 1.5f;
 
 	//판정 결과를 보여주는 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -377,8 +389,12 @@ public:
 	//세 회피 중 하나인지. 연속 회피 판정과 제자리 회피 금지에 쓴다
 	static bool IsEvade(EBattleAction Action);
 
-	//비어 있는 가장 앞 자리 번호. 만석이면 INDEX_NONE
-	static int32 AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots);
+	//후보 자리 중 Count개를 서로 최대한 멀리 떨어지게 고른다.
+	//첫 자리는 Anchor(보스)에 가장 가까운 곳이고, 그다음부터는
+	//이미 고른 자리들에서 가장 먼 곳을 하나씩 더한다.
+	//자리가 인원보다 적으면 앞에서부터 다시 쓴다(겹침)
+	static void ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 Count,
+		const FVector& Anchor, TArray<int32>& OutIndices);
 
 	float ResistanceMultiplier(EResistance Resistance) const;
 
@@ -408,18 +424,23 @@ public:
 
 	FVector BossLocation() const;
 
-	//레벨에 BattleSpot이 있으면 그 좌표를, 없으면 격자 계산을 쓴다
-	FVector SlotLocation(EBattleLane Lane, int32 SlotIndex) const;
-
 	//스팟과 무관한 순수 격자 계산. 스팟을 만들어 줄 때와 미리보기에 쓴다
 	FVector GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const;
 
 private:
-	//Telegraph → Input → Collect → Resolve 순으로 타이머가 이어진다
+	//Telegraph → Input → Collect → Move → BossAction → Resolve 순으로 타이머가 이어진다
 	void StartTurn();
 	void BeginInput();
 	void BeginCollect();
+	//회피 이동을 반영하고 유닛을 새 자리로 보낸다
+	void BeginMove();
+	//피해를 계산하고 공격 모션을 띄운다
 	void ResolveTurn();
+	//결과를 반영해 이름표를 갱신하고 종료 조건을 본다
+	void EndTurn();
+
+	//구역별 인원에 맞춰 설 자리를 다시 배분한다
+	void AssignSlots();
 
 	//전장에서 빼되 기록은 남긴다
 	void RemovePlayer(const FString& UserId);

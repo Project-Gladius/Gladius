@@ -79,8 +79,10 @@ void ABattleManager::StopBattle()
 
 bool ABattleManager::IsAcceptingInput() const
 {
-	//예고 시간의 선택도 유효하다. 판정 중에만 받지 않는다
-	return Phase != EBattlePhase::Resolve;
+	//예고 시간의 선택도 유효하다. 이동이 시작되면 이번 턴 행동은 확정된다
+	return Phase == EBattlePhase::Telegraph
+		|| Phase == EBattlePhase::Input
+		|| Phase == EBattlePhase::Collect;
 }
 
 // ---------------- 좌표 ----------------
@@ -177,17 +179,6 @@ void ABattleManager::GenerateSpotsFromGrid()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개를 격자 위치에 만들었습니다"), Created);
-}
-
-FVector ABattleManager::SlotLocation(EBattleLane Lane, int32 SlotIndex) const
-{
-	//레벨에 스팟을 놓았으면 그쪽이 우선
-	const TArray<FVector>& LaneSpots = Spots[(int32)Lane];
-	if (LaneSpots.Num() > 0)
-	{
-		return LaneSpots[SlotIndex % LaneSpots.Num()];
-	}
-	return GridSlotLocation(Lane, SlotIndex);
 }
 
 FVector ABattleManager::GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const
@@ -361,16 +352,61 @@ void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePla
 	Player.CritDamageBonus = Record.CritDamageBonus * CritDamagePerBonus;
 }
 
-int32 ABattleManager::AllocateSlotIndex(const TSet<int32>& Used, int32 MaxSlots)
+void ABattleManager::ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 Count,
+	const FVector& Anchor, TArray<int32>& OutIndices)
 {
-	for (int32 i = 0; i < MaxSlots; ++i)
+	OutIndices.Reset();
+	if (Candidates.Num() == 0 || Count <= 0)
 	{
-		if (!Used.Contains(i))
+		return;
+	}
+
+	//첫 자리는 보스에 가장 가까운 곳. 인원이 적어도 앞줄이 비지 않는다
+	int32 First = 0;
+	for (int32 i = 1; i < Candidates.Num(); ++i)
+	{
+		if (FVector::DistSquared(Candidates[i], Anchor) < FVector::DistSquared(Candidates[First], Anchor))
 		{
-			return i;
+			First = i;
 		}
 	}
-	return INDEX_NONE;
+	OutIndices.Add(First);
+
+	while (OutIndices.Num() < Count)
+	{
+		//자리가 인원보다 적으면 앞에서부터 다시 쓴다. 겹치지만 아무도 빠지지는 않는다
+		if (OutIndices.Num() >= Candidates.Num())
+		{
+			OutIndices.Add(OutIndices[OutIndices.Num() - Candidates.Num()]);
+			continue;
+		}
+
+		//이미 고른 자리들에서 가장 멀리 떨어진 후보를 하나씩 더한다
+		int32 Best = INDEX_NONE;
+		float BestDistance = -1.f;
+
+		for (int32 i = 0; i < Candidates.Num(); ++i)
+		{
+			if (OutIndices.Contains(i))
+			{
+				continue;
+			}
+
+			float Nearest = TNumericLimits<float>::Max();
+			for (const int32 Taken : OutIndices)
+			{
+				Nearest = FMath::Min(Nearest, FVector::DistSquared(Candidates[i], Candidates[Taken]));
+			}
+
+			if (Nearest > BestDistance)
+			{
+				BestDistance = Nearest;
+				Best = i;
+			}
+		}
+
+		OutIndices.Add(Best);
+	}
 }
 
 bool ABattleManager::SubmitChat(const FString& UserId, const FString& DisplayName,
@@ -416,18 +452,6 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 			return false;
 		}
 
-		TSet<int32> Used;
-		for (const TPair<FString, FBattlePlayer>& Pair : Players)
-		{
-			Used.Add(Pair.Value.SlotIndex);
-		}
-
-		const int32 Slot = AllocateSlotIndex(Used, MaxPlayers);
-		if (Slot == INDEX_NONE)
-		{
-			return false;
-		}
-
 		//저장된 기록이 있으면 능력치를 이어받고, 없으면 새로 만든다
 		const bool bNewRecord = !Records.Contains(UserId);
 		FPlayerRecord& Record = Records.FindOrAdd(UserId);
@@ -450,10 +474,9 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.EvadeStreak = Balance.InitialEvadeStreak;
 		ApplyRecordToPlayer(Record, NewPlayer);
 		NewPlayer.HP = NewPlayer.MaxHP;
-		NewPlayer.SlotIndex = Slot;
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
 			PlayerUnitClass ? PlayerUnitClass.Get() : ABattleUnit::StaticClass(),
-			SlotLocation(NewPlayer.Lane, Slot), FRotator::ZeroRotator);
+			BossLocation(), FRotator::ZeroRotator);
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
 #if WITH_EDITOR
@@ -462,8 +485,16 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 		Player = &Players.Add(UserId, NewPlayer);
 
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (자리 %d, HP %d, 피해+%d, 치명+%.0f%%/+%.0f%%) — 현재 %d/%d명"),
-			*UserId, Slot, NewPlayer.MaxHP, NewPlayer.DamageBonus,
+		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분하고, 본인은 바로 세운다.
+		//나머지는 다음 이동 단계에 미끄러져 옮겨간다
+		AssignSlots();
+		if (Player->Unit)
+		{
+			Player->Unit->SetActorLocation(Player->TargetLocation);
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s (HP %d, 피해+%d, 치명+%.0f%%/+%.0f%%) — 현재 %d/%d명"),
+			*UserId, NewPlayer.MaxHP, NewPlayer.DamageBonus,
 			NewPlayer.CritChanceBonus * 100.f, NewPlayer.CritDamageBonus * 100.f, Players.Num(), MaxPlayers);
 	}
 
@@ -545,12 +576,107 @@ void ABattleManager::BeginCollect()
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 수집 — %.1f초"), TurnIndex, CollectSeconds);
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, CollectSeconds, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginMove, CollectSeconds, false);
+}
+
+void ABattleManager::BeginMove()
+{
+	Phase = EBattlePhase::Move;
+
+	//회피 이동을 먼저 반영한다. 피해 계산은 이동이 끝난 뒤 ResolveTurn에서
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (P.ReviveCountdown == 0)
+		{
+			P.Lane = ApplyMove(P.PendingAction, P.Lane);
+		}
+	}
+
+	//구역 인원이 바뀌었으니 자리를 다시 배분한다
+	AssignSlots();
+
+	for (const TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		const FBattlePlayer& P = Pair.Value;
+		if (P.Unit && P.ReviveCountdown == 0)
+		{
+			P.Unit->MoveTo(P.TargetLocation, MoveSeconds);
+		}
+	}
+
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, MoveSeconds, false);
+}
+
+void ABattleManager::AssignSlots()
+{
+	const FVector Boss = BossLocation();
+
+	for (int32 LaneIndex = 0; LaneIndex < 3; ++LaneIndex)
+	{
+		//이 구역에 서 있는 참가자. 배치가 매번 같도록 순서를 고정한다
+		TArray<FString> Ids;
+		for (const TPair<FString, FBattlePlayer>& Pair : Players)
+		{
+			if ((int32)Pair.Value.Lane == LaneIndex)
+			{
+				Ids.Add(Pair.Key);
+			}
+		}
+
+		if (Ids.Num() == 0)
+		{
+			continue;
+		}
+		Ids.Sort();
+
+		//레벨에 스팟이 있으면 그것이 후보고, 없으면 격자 좌표를 후보로 쓴다
+		TArray<FVector> Candidates = Spots[LaneIndex];
+		if (Candidates.Num() == 0)
+		{
+			for (int32 i = 0; i < MaxPlayers; ++i)
+			{
+				Candidates.Add(GridSlotLocation((EBattleLane)LaneIndex, i));
+			}
+		}
+
+		TArray<int32> Chosen;
+		ChooseSpreadSpots(Candidates, Ids.Num(), Boss, Chosen);
+
+		TArray<FVector> Targets;
+		for (const int32 Index : Chosen)
+		{
+			Targets.Add(Candidates[Index]);
+		}
+
+		//덜 움직이도록, 지금 서 있는 곳에서 가장 가까운 자리부터 가져간다
+		for (const FString& Id : Ids)
+		{
+			FBattlePlayer& P = Players[Id];
+			const FVector From = P.Unit ? P.Unit->GetActorLocation() : Targets[0];
+
+			int32 Best = 0;
+			float BestDist = TNumericLimits<float>::Max();
+			for (int32 i = 0; i < Targets.Num(); ++i)
+			{
+				const float Dist = FVector::DistSquared(From, Targets[i]);
+				if (Dist < BestDist)
+				{
+					BestDist = Dist;
+					Best = i;
+				}
+			}
+
+			P.TargetLocation = Targets[Best];
+			Targets.RemoveAt(Best);
+		}
+	}
 }
 
 void ABattleManager::ResolveTurn()
 {
-	Phase = EBattlePhase::Resolve;
+	//이동이 끝났고 이제 공격 모션이 도는 구간이다
+	Phase = EBattlePhase::BossAction;
 
 	//턴 시작 때 예고한 그대로 친다
 	const FBossAction& Boss = TelegraphedAction;
@@ -594,11 +720,14 @@ void ABattleManager::ResolveTurn()
 				P.Fever = Balance.InitialFever;
 				P.EvadeStreak = Balance.InitialEvadeStreak;
 				++Revived;
+
+				if (P.Unit)
+				{
+					P.Unit->OnRevived();
+				}
 			}
 			continue;
 		}
-
-		P.Lane = ApplyMove(P.PendingAction, P.Lane);
 
 		const bool bAttack1 = P.PendingAction == EBattleAction::Attack1;
 		const bool bAttack2 = P.PendingAction == EBattleAction::Attack2;
@@ -620,6 +749,11 @@ void ABattleManager::ResolveTurn()
 
 			TotalDealt += Dealt;
 			Crits += bCrit ? 1 : 0;
+
+			if (P.Unit)
+			{
+				P.Unit->OnAttack(bAttack1 ? 1 : 2, bCrit);
+			}
 			if (Record)
 			{
 				Record->TotalDamageDealt += Dealt;
@@ -631,6 +765,18 @@ void ABattleManager::ResolveTurn()
 		const int32 Taken = DamageToPlayer(P.PendingAction,
 			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, DefenseDamageRatio);
 		P.HP = FMath::Max(0, P.HP - Taken);
+
+		if (P.Unit)
+		{
+			if (P.PendingAction == EBattleAction::Defense)
+			{
+				P.Unit->OnDefend();
+			}
+			if (Taken > 0)
+			{
+				P.Unit->OnHit(Taken);
+			}
+		}
 
 		//연속 회피 횟수는 회피가 아닌 행동(무입력 포함)에서 끊긴다
 		P.EvadeStreak = bEvade ? P.EvadeStreak + 1 : 0;
@@ -653,13 +799,22 @@ void ABattleManager::ResolveTurn()
 
 		if (P.HP <= 0)
 		{
-			//자리는 반납하지 않고 들고 있는다
 			P.ReviveCountdown = ReviveTurns;
 			++Died;
+
+			if (P.Unit)
+			{
+				P.Unit->OnDied();
+			}
 		}
 	}
 
 	EnemyHP = FMath::Max(0, EnemyHP - TotalDealt);
+
+	if (BossUnit)
+	{
+		BossUnit->OnAttack(1, false);
+	}
 
 	//무입력이 이어진 유저를 전장에서 뺀다. 순회 중에는 지울 수 없어 모아뒀다가 처리한다
 	TArray<FString> Leaving;
@@ -675,8 +830,6 @@ void ABattleManager::ResolveTurn()
 		RemovePlayer(UserId);
 	}
 
-	UpdateVisuals();
-
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d타) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → Boss %d"),
 		TurnIndex, *ZonesLabel(Boss), Boss.HitCount, TotalDealt, Crits, Died, Revived, EnemyHP);
 
@@ -686,6 +839,17 @@ void ABattleManager::ResolveTurn()
 	//기록이 바뀌는 건 참가와 강화뿐이고 둘 다 턴 안에서 끝난다.
 	//주기 저장 대신 턴 경계에서만 쓰면 조절할 값도 없고 저장 시점도 분명해진다
 	SaveRecords();
+
+	//공격 모션이 도는 동안 기다렸다가 결과를 반영한다
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn, BossActionSeconds, false);
+}
+
+void ABattleManager::EndTurn()
+{
+	Phase = EBattlePhase::Resolve;
+
+	//체력 변화와 사망 숨김은 모션이 끝난 지금 반영한다
+	UpdateVisuals();
 
 	if (EnemyHP <= 0)
 	{
@@ -905,8 +1069,7 @@ void ABattleManager::UpdateVisuals()
 		//사망 중에는 자리만 잡아두고 숨긴다
 		P.Unit->SetActorHiddenInGame(P.ReviveCountdown > 0);
 
-		//이동 보간 없이 순간이동
-		P.Unit->SetActorLocation(SlotLocation(P.Lane, P.SlotIndex));
+		//위치는 이동 단계가 옮긴다. 여기서는 이름표만 갱신한다
 		P.Unit->SetLabel(P.DisplayName, P.HP, P.MaxHP);
 	}
 }
@@ -1235,9 +1398,41 @@ void ABattleManager::RunSelfTest()
 	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 2.f);
 	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Round) == 3.f);
 
-	check(AllocateSlotIndex({}, 30) == 0);
-	check(AllocateSlotIndex({ 0, 1, 3 }, 30) == 2);
-	check(AllocateSlotIndex({ 0, 1, 2 }, 3) == INDEX_NONE);
+	//자리 배분 — 일직선으로 늘어선 후보 10개에서 고른다 (0번이 기준점에 가장 가까움)
+	{
+		TArray<FVector> Line;
+		for (int32 i = 0; i < 10; ++i)
+		{
+			Line.Add(FVector(i * 100.f, 0.f, 0.f));
+		}
+
+		TArray<int32> Picked;
+
+		//하나면 기준점에 가장 가까운 자리
+		ChooseSpreadSpots(Line, 1, FVector::ZeroVector, Picked);
+		check(Picked.Num() == 1 && Picked[0] == 0);
+
+		//둘이면 양 끝
+		ChooseSpreadSpots(Line, 2, FVector::ZeroVector, Picked);
+		check(Picked.Num() == 2 && Picked.Contains(0) && Picked.Contains(9));
+
+		//셋이면 양 끝과 가운데
+		ChooseSpreadSpots(Line, 3, FVector::ZeroVector, Picked);
+		check(Picked.Num() == 3 && Picked.Contains(0) && Picked.Contains(9));
+		check(Picked.Contains(4) || Picked.Contains(5));
+
+		//자리를 다 쓰면 중복 없이 전부 고른다
+		ChooseSpreadSpots(Line, 10, FVector::ZeroVector, Picked);
+		check(Picked.Num() == 10 && TSet<int32>(Picked).Num() == 10);
+
+		//인원이 자리보다 많으면 겹치되 아무도 빠지지 않는다
+		ChooseSpreadSpots(Line, 12, FVector::ZeroVector, Picked);
+		check(Picked.Num() == 12);
+
+		//후보가 없으면 빈 결과
+		ChooseSpreadSpots({}, 3, FVector::ZeroVector, Picked);
+		check(Picked.Num() == 0);
+	}
 
 	EBattleAction A;
 	check(ParseCommand(TEXT("  공격 "), A) && A == EBattleAction::Attack1);

@@ -107,6 +107,8 @@
 | `ReviveTurns` | 3 | 게임 오버 후 부활까지 대기 턴 |
 | `GameOverLoss` | 0.5 | 부활 시 잃는 강화 능력치 비율 |
 | `TelegraphSeconds` | 5 | 예고 시간 |
+| `MoveSeconds` | 1.5 | 회피 이동 연출 시간 |
+| `BossActionSeconds` | 1.5 | 공격 모션 시간 |
 | `PlayerSelectCountdown` | 90 | 행동 선택 시간 |
 | `CollectSeconds` | 6 | 늦게 도착하는 채팅 수집 시간 |
 | `ResolveSeconds` | 4 | 결과 표시 시간 |
@@ -171,7 +173,7 @@ Telegraph → Input → Collect → Resolve → (다음 턴)
 
 `Resolve` 단계의 처리 순서입니다.
 
-1. 회피 행동을 반영해 구역 이동
+1. 회피 행동을 반영해 구역 이동 (이동 연출 `MoveSeconds`)
 2. 플레이어 공격 피해 계산 및 누적
 3. 보스 공격 피격 판정 및 체력 차감
 4. 연속 회피 횟수 갱신 → 피버 갱신 → 상한 적용
