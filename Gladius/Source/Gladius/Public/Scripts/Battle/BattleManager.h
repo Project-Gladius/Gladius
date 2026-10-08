@@ -8,19 +8,6 @@
 class ABattleUnit;
 class UTextRenderComponent;
 
-//플레이어가 한 턴에 고를 수 있는 행동
-UENUM(BlueprintType)
-enum class EBattleAction : uint8
-{
-	Idle,
-	Attack1,
-	Attack2,
-	AvoidL,
-	AvoidM,
-	AvoidR,
-	Defense
-};
-
 //턴의 진행 단계. 기획서의 4단계와 그대로 대응한다
 UENUM(BlueprintType)
 enum class EBattlePhase : uint8
@@ -113,6 +100,15 @@ struct FBattlePlayer
 
 	//0보다 크면 게임 오버 상태. 매 턴 줄어들고 0이 되면 부활한다
 	UPROPERTY() int32 ReviveCountdown = 0;
+};
+
+//판정이 끝난 공격 하나를 '나중에 보여주려고' 적어 둔 것.
+//기획서는 전원이 동시에 때리지 않고 랜덤 순서로 조금씩 끊어 치게 한다
+struct FAttackCue
+{
+	FString UserId;
+	int32 AttackIndex = 1;
+	bool bCrit = false;
 };
 
 UCLASS()
@@ -219,9 +215,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float CollectSeconds = 6.f;
 
-	//회피 이동에 쓰는 시간. 이동 모션 길이에 맞춘다
+	//자리 이동과 돌진에 쓰는 시간. 이 시간이 지나면 판정 단계로 넘어간다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float MoveSeconds = 1.5f;
+
+	//회피 이동만 따로 더 길게 끈다. 기획서가 '보스 공격은 회피한 캐릭터들이
+	//이동한 도중에' 일어나게 하라고 해서, 판정 단계가 시작된 뒤에도 계속 미끄러진다.
+	//MoveSeconds보다 짧으면 겹치지 않고 그냥 먼저 도착해 버린다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float EvadeMoveSeconds = 2.5f;
+
+	//회피가 끝나기 몇 초 전에 보스가 치는지. 클수록 아슬아슬해 보인다.
+	//회피한 사람이 없으면 쓰이지 않는다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float EvadeStrikeLead = 0.4f;
+
+	//공격이 한 번에 쏟아지면 누가 때렸는지 안 보인다. 몇 명씩 끊어서 보여준다 (기획서 AttackCount)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	int32 AttackCount = 3;
+
+	//그 묶음 사이의 간격 (기획서 AttackTerm). 전원이 공격해도 턴이 길어지지 않을 만큼 짧게
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float AttackTerm = 0.12f;
+
+	//돌진했을 때 보스와 남길 거리. 구역 각도는 그대로 두고 거리만 좁힌다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float ChargeDistance = 350.f;
+
+	//공격 뒤 자기 자리로 돌아가는 시간 (기획서 M2의 '원위치 이동')
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float ReturnSeconds = 0.8f;
 
 	//플레이어 공격과 보스 공격 모션에 쓰는 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -450,6 +473,24 @@ private:
 	void BeginMove();
 	//피해를 계산하고 공격 모션을 띄운다
 	void ResolveTurn();
+
+	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
+	void FlushAttackCues();
+
+	//플레이어 공격이 다 끝나고 보스가 치는 순간 (기획서 M2의 BossAttack 단계)
+	void BossAttackBeat();
+
+	//판정 단계 시작부터 보스가 칠 때까지의 시간.
+	//회피가 아직 진행 중일 때 치되, 플레이어 공격 연출보다는 늦어야 한다
+	static float BossStrikeDelay(float FlurrySeconds, float EvadeRemaining,
+		float StrikeLead, bool bAnyEvader);
+
+	//그 자리에서 보스 쪽으로 ChargeDistance까지 당긴 좌표.
+	//보스에서 본 각도를 유지하므로 구역을 벗어나지 않는다
+	FVector ChargeLocation(const FVector& SlotLocation) const;
+
+	//Classes 배열 순서가 곧 앞뒤다. 맨 뒤 직업군만 원거리로 보고 돌진시키지 않는다
+	bool IsRangedClass(int32 ClassIndex) const;
 	//결과를 반영해 이름표를 갱신하고 종료 조건을 본다
 	void EndTurn();
 
@@ -514,6 +555,14 @@ private:
 
 	//한 번에 한 단계만 도므로 타이머 하나를 돌려 쓴다
 	FTimerHandle PhaseTimerHandle;
+
+	//공격 연출을 끊어 보여주는 타이머. 단계 타이머와 동시에 돌기 때문에 따로 둔다
+	FTimerHandle AttackCueHandle;
+
+	//이번 턴에 재생할 공격 연출. 피해 계산은 ResolveTurn에서 이미 끝났고 보여주기만 남았다.
+	//UObject를 들지 않으므로 UPROPERTY가 필요 없다
+	TArray<FAttackCue> AttackCues;
+	int32 AttackCueIndex = 0;
 
 	//Resolve 단계에 띄울 직전 턴 요약. 디버그 표시용이라 문자열로 들고 있는다
 	FString LastTurnSummary;

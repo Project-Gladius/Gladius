@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Scripts/Battle/BattleBalance.h"
 #include "BattleUnit.generated.h"
 
 class USkeletalMeshComponent;
@@ -23,9 +24,10 @@ public:
 	void SetLabel(const FString& Name, int32 Current, int32 Max);
 
 	//Duration 동안 Target으로 미끄러져 간다. 0 이하면 즉시 이동한다.
-	//이동하는 동안만 Tick이 돌고 도착하면 다시 꺼진다
+	//이동하는 동안만 Tick이 돌고 도착하면 다시 꺼진다.
+	//bRollThrough는 OnMoveStarted로 그대로 넘어간다
 	UFUNCTION(BlueprintCallable, Category = "Battle")
-	void MoveTo(const FVector& Target, float Duration);
+	void MoveTo(const FVector& Target, float Duration, bool bRollThrough = false);
 
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsMoving() const { return bMoving; }
@@ -35,9 +37,16 @@ public:
 	//모션이 준비되면 블루프린트에서 이 이벤트들에 애니메이션을 연결한다.
 	//C++은 '언제'만 알려주고 '무엇을 재생할지'는 관여하지 않는다
 
-	//이동 시작. Duration에 맞춰 걷기/달리기 길이를 맞추면 된다
+	//행동을 고른 순간. Idle에서 그 행동의 준비 자세로 바꾸는 자리다.
+	//기획서는 선택 즉시 BattleReady로 가고, 실제 행동은 행동 턴에 일괄 재생하라고 한다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
-	void OnMoveStarted(float Duration);
+	void OnActionSelected(EBattleAction Action);
+
+	//이동 시작.
+	//Distance가 짧으면 걷고 길면 뛴다 — 기준 거리는 블루프린트가 정한다(기획서: '구역이 아닌 거리로').
+	//bRollThrough면 이동 경로의 가운데가 이번 턴 피격 범위다. 구르기로 빠져나가는 연출용
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnMoveStarted(float Duration, float Distance, bool bRollThrough);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnArrived();
@@ -57,6 +66,30 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnRevived();
+
+	// ---- 보스 전용 훅 ----
+	//
+	//MotionId는 밸런스 파일(bosses.json)의 행동마다 적힌 값이 그대로 넘어온다.
+	//어떤 애니메이션을 틀지는 블루프린트가 그 id로 고른다.
+	//**비어 있으면 지금 자세를 유지하라는 뜻이다** — 기획서가 모션이 없는 행동
+	//(기 모으기, 단단해지기, 그로기)을 그렇게 처리하라고 한다
+
+	//플레이어가 행동을 고르는 동안의 대기 자세
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnBossWait();
+
+	//다음 공격 예고. 플레이어가 피격 범위를 자세만 보고 짐작할 수 있어야 하므로
+	//공격마다 다른 자세를 연결한다
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnBossTelegraph(const FString& MotionId, const FString& TelegraphText);
+
+	//플레이어들이 때리는 동안의 피격 상태. 때린 사람이 아무도 없으면 호출되지 않는다
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnBossHit(int32 TotalDamage, int32 AttackerCount);
+
+	//예고한 그 공격을 실제로 휘두르는 순간
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnBossAttack(const FString& MotionId, int32 HitCount);
 
 	//스폰 시 스케일이 1로 덮이므로, 크기는 Mesh 컴포넌트 쪽에서 준다.
 	//그래서 액터 루트는 빈 SceneComponent로 두고 Mesh를 그 아래 붙인다

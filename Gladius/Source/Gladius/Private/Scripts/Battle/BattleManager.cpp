@@ -112,6 +112,11 @@ void ABattleManager::StopBattle()
 {
 	Phase = EBattlePhase::Resolve;
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
+
+	//공격 연출 타이머는 반복이라 따로 끄지 않으면 전투가 끝나도 계속 돈다
+	GetWorldTimerManager().ClearTimer(AttackCueHandle);
+	AttackCues.Reset();
+	AttackCueIndex = 0;
 }
 
 bool ABattleManager::IsAcceptingInput() const
@@ -123,6 +128,40 @@ bool ABattleManager::IsAcceptingInput() const
 }
 
 // ---------------- 좌표 ----------------
+
+float ABattleManager::BossStrikeDelay(float FlurrySeconds, float EvadeRemaining,
+	float StrikeLead, bool bAnyEvader)
+{
+	//회피한 사람이 아직 미끄러지고 있을 때 쳐야 아슬아슬해 보인다.
+	//도착하기 StrikeLead만큼 전을 노린다
+	const float WhileMoving = bAnyEvader ? EvadeRemaining - StrikeLead : 0.f;
+
+	//그래도 플레이어 공격 연출보다 먼저 치면 안 된다.
+	//기획서의 PlayerAttack → BossAttack 순서가 뒤집힌다
+	return FMath::Max(FlurrySeconds, WhileMoving);
+}
+
+bool ABattleManager::IsRangedClass(int32 ClassIndex) const
+{
+	//자리 배치와 같은 규칙 — Classes 배열 순서가 앞뒤다. 직업군이 하나뿐이면 전부 근접
+	return Classes.Num() > 1 && ClassIndex == Classes.Num() - 1;
+}
+
+FVector ABattleManager::ChargeLocation(const FVector& SlotLocation) const
+{
+	const FVector Boss = BossLocation();
+	const FVector Outward = SlotLocation - Boss;
+	const float Distance = Outward.Size();
+
+	//보스에서 본 각도를 그대로 두고 거리만 줄인다. 구역은 보스를 꼭짓점으로 하는
+	//부채꼴이므로, 각도가 그대로면 아무리 당겨도 자기 구역을 벗어나지 않는다
+	if (Distance <= ChargeDistance || Distance <= KINDA_SMALL_NUMBER)
+	{
+		return SlotLocation;
+	}
+
+	return Boss + Outward / Distance * ChargeDistance;
+}
 
 FVector ABattleManager::BossLocation() const
 {
@@ -672,6 +711,14 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 	//마지막에 들어온 입력이 이김
 	Player->PendingAction = Action;
 	Player->bActedThisTurn = true;
+
+	//고른 즉시 준비 자세로 바꾼다. 실제 행동은 행동 턴에 일괄 재생되므로
+	//여기서 공격 모션을 틀면 중복으로 때리는 것처럼 보인다
+	if (Player->Unit && Player->ReviveCountdown == 0)
+	{
+		Player->Unit->OnActionSelected(Action);
+	}
+
 	return true;
 }
 
@@ -705,6 +752,12 @@ void ABattleManager::StartTurn()
 		}
 	}
 
+	//예고 자세. 플레이어가 자세만 보고도 피격 범위를 짐작할 수 있어야 한다
+	if (BossUnit)
+	{
+		BossUnit->OnBossTelegraph(TelegraphedAction.TelegraphMotionId, TelegraphedAction.TelegraphText);
+	}
+
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / Boss %d / '%s' → %s"),
 		TurnIndex, Turns, TelegraphSeconds, Players.Num(), EnemyHP,
 		*TelegraphedAction.Name, *ZonesLabel(TelegraphedAction));
@@ -715,6 +768,12 @@ void ABattleManager::StartTurn()
 void ABattleManager::BeginInput()
 {
 	Phase = EBattlePhase::Input;
+
+	//예고 모션이 끝나고 플레이어가 고르는 동안의 대기 자세
+	if (BossUnit)
+	{
+		BossUnit->OnBossWait();
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 선택 — %.1f초"), TurnIndex, PlayerSelectCountdown);
 
@@ -735,13 +794,28 @@ void ABattleManager::BeginMove()
 {
 	Phase = EBattlePhase::Move;
 
+	//가운데를 가로질러 반대편으로 넘어가는 사람은 이동 도중에 피격 범위를 지난다.
+	//기획서는 이때 구르기로 빠져나가게 한다. 이동 전 구역을 알아야 판단할 수 있다
+	const bool bMidIsHit = TelegraphedAction.DamageByZone[(int32)EBattleLane::Mid] > 0;
+	TSet<FString> RollThrough;
+
 	//회피 이동을 먼저 반영한다. 피해 계산은 이동이 끝난 뒤 ResolveTurn에서
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
 		if (P.ReviveCountdown == 0)
 		{
+			const EBattleLane From = P.Lane;
 			P.Lane = ApplyMove(P.PendingAction, P.Lane);
+
+			const bool bCrossesMid =
+				(From == EBattleLane::Left && P.Lane == EBattleLane::Right) ||
+				(From == EBattleLane::Right && P.Lane == EBattleLane::Left);
+
+			if (bCrossesMid && bMidIsHit)
+			{
+				RollThrough.Add(Pair.Key);
+			}
 		}
 	}
 
@@ -751,10 +825,22 @@ void ABattleManager::BeginMove()
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		const FBattlePlayer& P = Pair.Value;
-		if (P.Unit && P.ReviveCountdown == 0)
+		if (!P.Unit || P.ReviveCountdown > 0)
 		{
-			P.Unit->MoveTo(P.TargetLocation, MoveSeconds);
+			continue;
 		}
+
+		//근접 직업군은 공격할 때 자리를 벗어나 보스에게 붙는다 (기획서 '최대한 보스에게 붙음').
+		//원거리와 그 외 행동은 배분받은 자리로 간다
+		const bool bCharging = (P.PendingAction == EBattleAction::Attack1 || P.PendingAction == EBattleAction::Attack2)
+			&& !IsRangedClass(P.ClassIndex);
+
+		//회피만 느리게 간다. 돌진은 공격 연출 전에 도착해야 하므로 그대로 둔다 —
+		//보스를 때리는 순간에 아직 달려오는 중이면 허공을 치는 것처럼 보인다
+		const float Duration = IsEvade(P.PendingAction) ? EvadeMoveSeconds : MoveSeconds;
+
+		P.Unit->MoveTo(bCharging ? ChargeLocation(P.TargetLocation) : P.TargetLocation,
+			Duration, RollThrough.Contains(Pair.Key));
 	}
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, MoveSeconds, false);
@@ -854,6 +940,9 @@ void ABattleManager::ResolveTurn()
 	int32 Died = 0;
 	int32 Revived = 0;
 
+	//회피한 사람이 하나라도 있으면 보스 공격을 그 이동에 맞춰 늦춘다
+	bool bAnyEvader = false;
+
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
@@ -900,6 +989,7 @@ void ABattleManager::ResolveTurn()
 		const bool bAttack1 = P.PendingAction == EBattleAction::Attack1;
 		const bool bAttack2 = P.PendingAction == EBattleAction::Attack2;
 		const bool bEvade = IsEvade(P.PendingAction);
+		bAnyEvader |= bEvade;
 
 		//기획서 5절 순서 — 플레이어 공격을 먼저 계산한다.
 		//피버는 이번 턴 공격 피해에 반영된 뒤에 갱신된다
@@ -918,10 +1008,10 @@ void ABattleManager::ResolveTurn()
 			TotalDealt += Dealt;
 			Crits += bCrit ? 1 : 0;
 
-			if (P.Unit)
-			{
-				P.Unit->OnAttack(bAttack1 ? 1 : 2, bCrit);
-			}
+			//모션은 지금 재생하지 않는다. 전원이 한 프레임에 때리면 누가 쳤는지 보이지 않아,
+			//아래에서 랜덤 순서로 조금씩 끊어 재생한다. 피해는 이미 여기서 확정됐다
+			AttackCues.Add({ Pair.Key, bAttack1 ? 1 : 2, bCrit });
+
 			if (Record)
 			{
 				Record->TotalDamageDealt += Dealt;
@@ -979,11 +1069,6 @@ void ABattleManager::ResolveTurn()
 
 	EnemyHP = FMath::Max(0, EnemyHP - TotalDealt);
 
-	if (BossUnit)
-	{
-		BossUnit->OnAttack(1, false);
-	}
-
 	//무입력이 이어진 유저를 전장에서 뺀다. 순회 중에는 지울 수 없어 모아뒀다가 처리한다
 	TArray<FString> Leaving;
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
@@ -1008,13 +1093,87 @@ void ABattleManager::ResolveTurn()
 	//주기 저장 대신 턴 경계에서만 쓰면 조절할 값도 없고 저장 시점도 분명해진다
 	SaveRecords();
 
-	//공격 모션이 도는 동안 기다렸다가 결과를 반영한다
+	//기획서는 '랜덤 순서대로' 치라고 한다. 자리 순서대로 치면 줄 세운 것처럼 보인다
+	for (int32 i = AttackCues.Num() - 1; i > 0; --i)
+	{
+		AttackCues.Swap(i, FMath::RandRange(0, i));
+	}
+	AttackCueIndex = 0;
+
+	//한 묶음에 AttackCount명씩, AttackTerm 간격으로 나간다
+	const int32 Groups = FMath::DivideAndRoundUp(AttackCues.Num(), FMath::Max(1, AttackCount));
+	const float FlurrySeconds = Groups * FMath::Max(0.f, AttackTerm);
+
+	if (Groups > 0)
+	{
+		//때리는 사람이 있을 때만 피격 상태로 둔다.
+		//아무도 안 때리면 기획서대로 예고 자세를 그대로 유지한다
+		if (BossUnit)
+		{
+			BossUnit->OnBossHit(TotalDealt, AttackCues.Num());
+		}
+
+		GetWorldTimerManager().SetTimer(AttackCueHandle, this, &ABattleManager::FlushAttackCues,
+			FMath::Max(KINDA_SMALL_NUMBER, AttackTerm), true, 0.f);
+	}
+
+	//회피는 BeginMove에서 출발했으므로 여기 기준으로는 EvadeMoveSeconds - MoveSeconds가 남아 있다
+	const float BossDelay = BossStrikeDelay(FlurrySeconds, EvadeMoveSeconds - MoveSeconds,
+		EvadeStrikeLead, bAnyEvader);
+
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BossAttackBeat,
+		FMath::Max(KINDA_SMALL_NUMBER, BossDelay), false);
+}
+
+void ABattleManager::FlushAttackCues()
+{
+	for (int32 n = 0; n < FMath::Max(1, AttackCount) && AttackCueIndex < AttackCues.Num(); ++n, ++AttackCueIndex)
+	{
+		const FAttackCue& Cue = AttackCues[AttackCueIndex];
+
+		//연출이 도는 사이에 이탈한 유저가 있을 수 있다
+		if (const FBattlePlayer* P = Players.Find(Cue.UserId))
+		{
+			if (P->Unit)
+			{
+				P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit);
+			}
+		}
+	}
+
+	if (AttackCueIndex >= AttackCues.Num())
+	{
+		GetWorldTimerManager().ClearTimer(AttackCueHandle);
+		AttackCues.Reset();
+	}
+}
+
+void ABattleManager::BossAttackBeat()
+{
+	//맞은 연출이 끝났으니 이제 보스가 친다. 피해는 ResolveTurn에서 이미 반영됐다.
+	//예고한 것과 같은 행동이므로 MotionId도 그때 보여준 것과 짝이 맞는다
+	if (BossUnit)
+	{
+		BossUnit->OnBossAttack(TelegraphedAction.AttackMotionId, TelegraphedAction.HitCount);
+	}
+
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn, BossActionSeconds, false);
 }
 
 void ABattleManager::EndTurn()
 {
 	Phase = EBattlePhase::Resolve;
+
+	//기획서 M2의 마지막 단계 — 돌진했던 캐릭터가 자기 자리로 돌아간다.
+	//이미 제자리면 MoveTo가 알아서 넘어가므로 전원에게 그냥 걸어도 된다
+	for (const TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		const FBattlePlayer& P = Pair.Value;
+		if (P.Unit && P.ReviveCountdown == 0)
+		{
+			P.Unit->MoveTo(P.TargetLocation, ReturnSeconds);
+		}
+	}
 
 	//체력 변화와 사망 숨김은 모션이 끝난 지금 반영한다
 	UpdateVisuals();
@@ -1703,6 +1862,59 @@ void ABattleManager::RunSelfTest()
 	//스팟 유무에 좌우되지 않도록 격자 계산을 직접 검사한다
 	check(!GridSlotLocation(EBattleLane::Left, 0).Equals(GridSlotLocation(EBattleLane::Right, 0)));
 	check(!GridSlotLocation(EBattleLane::Mid, 0).Equals(GridSlotLocation(EBattleLane::Mid, 1)));
+
+	// --- 보스 공격 시점 ---
+	{
+		//회피가 없으면 플레이어 공격이 끝나자마자 친다
+		check(FMath::IsNearlyEqual(BossStrikeDelay(1.2f, 5.f, 0.4f, false), 1.2f));
+
+		//회피가 있으면 이동이 끝나기 StrikeLead 전에 친다
+		check(FMath::IsNearlyEqual(BossStrikeDelay(0.5f, 2.f, 0.4f, true), 1.6f));
+
+		//어떤 값을 넣어도 플레이어 공격 연출보다 빨라지지 않는다 (기획서 순서)
+		for (const float Flurry : { 0.f, 0.5f, 1.2f, 3.f })
+		{
+			for (const float Remaining : { -1.f, 0.f, 0.3f, 2.f, 10.f })
+			{
+				for (const float Lead : { 0.f, 0.4f, 5.f })
+				{
+					check(BossStrikeDelay(Flurry, Remaining, Lead, true) >= Flurry);
+					check(BossStrikeDelay(Flurry, Remaining, Lead, false) >= Flurry);
+				}
+			}
+		}
+	}
+
+	// --- 돌진 좌표 ---
+	{
+		const FVector Boss = BossLocation();
+
+		//구역을 벗어나면 안 되므로, 보스에서 본 방향이 그대로여야 한다.
+		//거리는 ChargeDistance로 줄어들어야 한다
+		for (const EBattleLane Lane : { EBattleLane::Left, EBattleLane::Mid, EBattleLane::Right })
+		{
+			const FVector Slot = GridSlotLocation(Lane, 0);
+			const FVector Charged = ChargeLocation(Slot);
+
+			const FVector SlotDir = (Slot - Boss).GetSafeNormal();
+			const FVector ChargedDir = (Charged - Boss).GetSafeNormal();
+			check(FVector::DotProduct(SlotDir, ChargedDir) > 0.999f);
+
+			//원래 자리가 더 가까웠다면 그대로 둬야 한다
+			if ((Slot - Boss).Size() > ChargeDistance)
+			{
+				check(FMath::IsNearlyEqual((Charged - Boss).Size(), ChargeDistance, 1.f));
+				check((Charged - Boss).Size() < (Slot - Boss).Size());
+			}
+			else
+			{
+				check(Charged.Equals(Slot));
+			}
+		}
+
+		//보스 자리에 겹쳐 선 경우에도 0으로 나누지 않아야 한다
+		check(ChargeLocation(Boss).Equals(Boss));
+	}
 
 	//패턴이 정확히 Turns에 맞춰 끝나는지. 난수가 끼어 있어 한 번으로는 못 잡는다.
 	//밸런스 파일을 읽지 못했으면 검사할 패턴이 없으므로 건너뛴다

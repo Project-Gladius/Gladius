@@ -6,6 +6,19 @@
 //밸런스 팀이 만드는 Balancing/Data 의 .json 세 개를 그대로 담는 자료형들.
 //수치의 기준은 그 파일이고 게임은 읽기만 한다
 
+//플레이어가 한 턴에 고를 수 있는 행동
+UENUM(BlueprintType)
+enum class EBattleAction : uint8
+{
+	Idle,
+	Attack1,
+	Attack2,
+	AvoidL,
+	AvoidM,
+	AvoidR,
+	Defense
+};
+
 //필드 영역 — 좌 / 중 / 우. 파일의 left / center / right 에 대응한다
 UENUM(BlueprintType)
 enum class EBattleLane : uint8
