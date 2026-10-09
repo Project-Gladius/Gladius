@@ -32,6 +32,18 @@
 		{
 			"Name": "TempleAIClient",
 			"Enabled": true
+		},
+		{
+			"Name": "ChaosClothAsset",
+			"Enabled": true
+		},
+		{
+			"Name": "ChaosClothAssetEditorCore",
+			"Enabled": true
+		},
+		{
+			"Name": "ChaosClothAssetUsdDataflowNodes",
+			"Enabled": true
 		}
 	]
 }
