@@ -2,7 +2,7 @@ import hashlib
 from dataclasses import dataclass
 
 from app.moderation import normalize_for_policy_check
-from app.schemas import Emotion, ModelReply, TempleRequest
+from app.schemas import Emotion, ModelReply, TempleBatchRequest, TempleRequest
 
 
 @dataclass(frozen=True)
@@ -199,3 +199,16 @@ def build_fallback_reply(request: TempleRequest) -> ModelReply:
         responseText=_choose(message, DEFAULT_RESPONSES),
         emotion=Emotion.NEUTRAL,
     )
+
+
+def build_batch_fallback_replies(request: TempleBatchRequest) -> list[ModelReply]:
+    return [
+        build_fallback_reply(
+            TempleRequest(
+                uid=item.uid,
+                username=item.username,
+                message=item.message,
+            )
+        )
+        for item in request.messages
+    ]

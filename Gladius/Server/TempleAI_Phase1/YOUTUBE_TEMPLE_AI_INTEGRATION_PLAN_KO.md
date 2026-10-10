@@ -1,179 +1,175 @@
-# YouTube Live Chat - Temple AI 연동 설계
+# YouTube Live Chat - Temple AI 개별 응답 배치 계약
 
-## 1. 문서 목적
+## 1. 확정 동작
 
-현재 프로젝트에는 다음 두 기능이 각각 구현되어 있다.
+YouTube의 `!대화 <내용>`을 게임 세션 기준 20초 동안 모은다. 구간이 끝나면 모든 유효 요청을 `messages` 배열로 서버에 한 번 전송한다.
 
-- Unreal의 `YouTubeChatManager`: YouTube 라이브 채팅 조회 및 게임 명령 처리
-- `TempleAIClient`와 Temple AI 서버: 질문을 전송하고 구조화된 여신 응답 수신
-
-그러나 두 기능을 연결하는 경로와 다중 사용자 응답 대기열은 아직 없다. 이 문서는 여러 사용자의 채팅이 동시에 들어오는 상황에서 댓글을 안전하게 수집하고, AI 응답을 Unreal 연출로 전달하기 위한 기준을 정의한다.
-
-## 2. 현재 상태
-
-### 구현되어 있는 부분
-
-- YouTube Data API로 `activeLiveChatId` 조회
-- 라이브 채팅의 `commentId`, `channelId`, `displayMessage` 수집
-- 댓글 중복 페이지 처리를 위한 `nextPageToken` 사용
-- 댓글 로그, 도배 검사 및 `!` 게임 명령 처리
-- Unreal에서 Temple AI 서버의 `/temple/respond` 호출
-- 다음 다섯 필드로 구성된 Temple AI 응답 수신
-
-```json
-{
-  "priority": 72,
-  "responseText": "승리는 정해진 운명이 아니니라. 그대의 의지로 길을 열어 보거라.",
-  "emotion": "neutral",
-  "uid": "youtube-comment-id",
-  "username": "별빛여행자"
-}
-```
-
-### 아직 구현되지 않은 부분
-
-- YouTube 일반 댓글을 `TempleAIClient`로 전달하는 연결 코드
-- `authorDetails.displayName`을 `username`으로 전달하는 코드
-- 동시에 들어온 댓글과 AI 응답을 관리하는 제한된 대기열
-- AI 응답 `priority`에 따른 재생 순서 결정
-- 처리 중복 방지, 시간 초과, 재시도 및 오래된 댓글 폐기 정책
-- AI 응답을 여신 UI, 음성 및 모션에 연결하는 최종 연출 코드
-- YouTube 라이브 채팅에 AI 답변을 다시 작성하는 OAuth 2.0 코드
-
-현재 `YouTubeChatManager`는 일반 댓글을 Temple AI로 보내지 않고, `!`로 시작하는 채팅만 게임 명령으로 처리한다.
-
-## 3. 출력 형식과 데이터 소유권
-
-### 요청
-
-YouTube 댓글 한 건을 다음처럼 변환한다.
-
-| Temple AI 필드 | YouTube 원본 | 설명 |
-|---|---|---|
-| `uid` | `message.id` | 댓글 단위 고유 식별자 |
-| `username` | `authorDetails.displayName` | 화면에 표시할 작성자명 |
-| `message` | `snippet.displayMessage` | 사용자가 작성한 질문 |
-
-`channelId`는 사용자별 도배 제한과 내부 추적에 사용한다. 공개 응답의 `uid`로는 댓글 단위 중복 방지가 가능한 `message.id`를 사용하는 것을 권장한다.
-
-### 응답
-
-- AI가 결정: `priority`, `responseText`, `emotion`
-- 서버가 원본 요청에서 복사: `uid`, `username`
-- AI가 `uid`와 `username`을 생성하거나 변경해서는 안 된다.
-
-JSON 필드 순서는 의미가 없다. 필드 이름, 형식, 값의 제한이 계약이다.
-
-## 4. 콘솔과 화면 출력
-
-현재 Unreal의 화면 메시지는 연출 확인을 위해 `emotion`과 `responseText`만 표시한다. 따라서 화면에 답변만 보이는 것은 JSON 필드가 사라진 것이 아니다.
-
-개발용 Output Log에서는 다음 형식으로 전체 처리 결과를 확인한다.
-
-```text
-Temple AI response: [별빛여행자] priority=72 emotion=neutral text=승리는 ...
-```
-
-최종 게임 화면에는 보통 다음 정보만 사용한다.
-
-- 작성자 표시: `username`
-- 여신 대사: `responseText`
-- 표정, 모션 및 후광: `emotion`
-- 재생 순서: `priority`
-
-`uid`는 중복 방지와 요청-응답 연결용 내부 값이므로 플레이어에게 표시할 필요가 없다.
-
-## 5. 권장 처리 구조
+서버와 Gemini도 배치 호출 한 번으로 처리하지만, 결과는 질문마다 독립된 `responses` 배열로 반환한다. 여러 질문을 하나의 답변으로 종합하지 않는다.
 
 ```text
 YouTube Live Chat
-  -> 댓글 수집 및 commentId 중복 제거
-  -> 명령어와 AI 질문 분리
-  -> 길이, 도배, 금칙어 및 입력 검열
-  -> 입력 대기열
-  -> 제한된 동시 요청으로 Temple AI 호출
-  -> 구조화된 응답 검증
-  -> priority 응답 대기열
-  -> Unreal 여신 대사, 감정 모션 및 음성 재생
+  -> !대화 명령 추출
+  -> 20초 동안 messages[] 수집
+  -> POST /temple/respond-batch 한 번 호출
+  -> 질문별 responses[] 수신
+  -> priority 순으로 자막, 음성 및 감정 모션 재생
 ```
 
-### 동시 입력 처리
+기존 `POST /temple/respond`는 Unreal 수동 입력 UI와 단건 점검용으로 유지한다.
 
-YouTube의 한 번의 조회 결과에는 여러 사용자 댓글이 함께 들어올 수 있다. 각 댓글을 즉시 무제한으로 Gemini에 보내면 API 사용량과 응답 순서를 제어하기 어렵다.
+## 2. 입력 및 수집 규칙
 
-권장 기본값:
+유효한 입력은 `!대화 다음 전투에서는 무엇을 조심해야 하나요?` 형식이다.
 
-- 입력 대기열 최대 100건
-- Temple AI 동시 요청 2건
-- 댓글 단위 제한 시간 10초
-- 실패 시 최대 1회 재시도
-- 60초 이상 지난 미처리 댓글 폐기
-- `commentId` 기준 중복 처리 방지
+- 수집 구간: 20초
+- 구간당 최대 메시지: 30건
+- 사용자당 구간당 첫 유효 요청 1건
+- 메시지당 길이: 1~200자
+- 배치 전체 메시지 길이: 최대 4,000자
+- 유효 메시지가 없는 구간은 서버를 호출하지 않음
+- 이전 배치 응답 대기 중에도 다음 구간을 계속 수집
+- YouTube 조회는 `pollingIntervalMillis`를 준수
+- 빈 입력, 중복 댓글 ID, 도배, 검열 위반 및 신전 외 상태의 입력은 제외
 
-`priority`는 AI 응답을 받은 후에 알 수 있으므로 처리 구조는 두 단계가 된다.
+## 3. 요청 형식
 
-1. 입력 단계에서는 도배, 길이, 질문 여부와 오래된 댓글을 기준으로 호출 대상을 줄인다.
-2. 응답 단계에서는 AI가 반환한 `priority`를 기준으로 여신이 말할 순서를 정한다.
+```http
+POST /temple/respond-batch
+Content-Type: application/json
+X-Temple-Client-Token: <설정된 경우>
+```
 
-같은 우선순위에서는 먼저 들어온 댓글을 먼저 처리한다. 낮은 우선순위가 영원히 밀리지 않도록 대기 시간이 길어질수록 점수를 조금 올리는 방식도 적용할 수 있다.
+```json
+{
+  "schemaVersion": 1,
+  "batchId": "temple-20261010T120000Z-0001",
+  "windowStartedAt": "2026-10-10T12:00:00Z",
+  "windowEndedAt": "2026-10-10T12:00:20Z",
+  "messages": [
+    {
+      "uid": "youtube-message-001",
+      "userId": "youtube-channel-A",
+      "username": "별빛여행자",
+      "message": "다음 전투에서 무엇을 조심해야 하나요?"
+    },
+    {
+      "uid": "youtube-message-002",
+      "userId": "youtube-channel-B",
+      "username": "푸른검투사",
+      "message": "지금 강화를 해도 괜찮을까요?"
+    }
+  ]
+}
+```
 
-## 6. YouTube API 주의사항
+| 필드 | 형식 | 의미 |
+|---|---|---|
+| `schemaVersion` | 정수 `1` | 요청·응답 계약 버전 |
+| `batchId` | 문자열 | 20초 배치 고유 ID. 재시도할 때 같은 값을 사용 |
+| `windowStartedAt` | UTC ISO 8601 | 수집 시작 시각 |
+| `windowEndedAt` | UTC ISO 8601 | 수집 종료 시각 |
+| `messages` | 배열 1~30건 | 수집된 유효 대화 요청 |
+| `messages[].uid` | 문자열 | YouTube 댓글 고유 ID. 답변 연결과 중복 방지에 사용 |
+| `messages[].userId` | 문자열 | YouTube 채널 ID. 사용자당 제한과 도배 검사에 사용 |
+| `messages[].username` | 문자열 | YouTube 표시 이름 |
+| `messages[].message` | 문자열 1~200자 | `!대화` 뒤 실제 질문 |
 
-### 채팅 읽기
+`uid`와 `userId`는 서로 다른 값이다. `uid`는 댓글 하나를 식별하고, `userId`는 댓글 작성자를 식별한다.
 
-공개 라이브 채팅 조회는 제한된 YouTube Data API 키로 가능하다. Gemini API 키와 YouTube API 키는 서로 다른 키이며 용도도 다르다.
+## 4. 응답 형식
 
-현재 코드는 YouTube 응답의 `pollingIntervalMillis`를 무시하고 신전 40초, 전투 5초의 고정 주기를 사용한다. 안정적인 연동을 위해 YouTube가 반환한 최소 폴링 간격 이상으로 요청하고, `403` 및 할당량 오류에 지수 백오프를 적용해야 한다.
+```json
+{
+  "schemaVersion": 1,
+  "batchId": "temple-20261010T120000Z-0001",
+  "responses": [
+    {
+      "uid": "youtube-message-001",
+      "username": "별빛여행자",
+      "priority": 85,
+      "responseText": "앞만 보지 말고 퇴로와 동료의 움직임을 먼저 살피거라.",
+      "emotion": "neutral"
+    },
+    {
+      "uid": "youtube-message-002",
+      "username": "푸른검투사",
+      "priority": 72,
+      "responseText": "그대가 자주 무너지는 순간을 돌아본 뒤 힘을 선택하거라.",
+      "emotion": "pleased"
+    }
+  ],
+  "acceptedCount": 2,
+  "rejectedCount": 0
+}
+```
 
-### 채팅 쓰기
+| 필드 | 형식 | 의미 |
+|---|---|---|
+| `schemaVersion` | 정수 `1` | 응답 계약 버전 |
+| `batchId` | 문자열 | 요청에서 받은 배치 ID |
+| `responses` | 배열 | 검열을 통과한 질문별 개별 답변 |
+| `responses[].uid` | 문자열 | 원본 질문과 답변을 연결하는 댓글 ID |
+| `responses[].username` | 문자열 | 원본 요청에서 서버가 복사한 표시 이름 |
+| `responses[].priority` | 정수 0~100 | 개별 답변 재생 우선순위 |
+| `responses[].responseText` | 1~70자, 최대 2문장 | 개별 질문에 대한 여신 답변 |
+| `responses[].emotion` | enum | 개별 답변의 표정·모션 값 |
+| `acceptedCount` | 정수 | 정상 처리되어 `responses`에 포함된 수 |
+| `rejectedCount` | 정수 | 검열, 중복 또는 제한으로 제외된 수 |
 
-AI 답변을 YouTube 라이브 채팅에 직접 올리려면 API 키만으로는 부족하다. 채널 소유자의 OAuth 2.0 인증과 쓰기 권한, 토큰 갱신 및 `liveChatMessages.insert` 구현이 필요하다.
+허용 감정은 `neutral`, `sorrowful`, `bestow`, `pleased`, `upset`이다.
 
-첫 연동 단계에서는 YouTube 채팅을 읽고 여신이 게임 안에서 말하게 하는 단방향 구성을 권장한다. YouTube 채팅 쓰기는 별도 단계로 분리한다.
+AI는 `uid`, `username`, `batchId` 또는 건수를 생성하지 않는다. 서버가 검증된 원본 요청에서 복사하고, AI는 각 항목의 `priority`, `responseText`, `emotion`만 결정한다.
 
-## 7. 구현 순서
+## 5. 순서와 실패 처리
 
-### 1단계: 단일 댓글 연결
+- AI 출력은 입력 메시지와 같은 순서, 같은 개수여야 한다.
+- 서버는 순서대로 원본 식별 정보와 AI 응답을 결합한다.
+- 서버 검열에서 제외된 입력은 AI에 전달하지 않는다.
+- 네트워크 실패 또는 `5xx`는 동일 `batchId`로 한 번 재시도한다.
+- `4xx`는 자동 재시도하지 않는다.
+- 같은 `batchId`와 같은 본문은 기존 결과를 반환해 중복 호출을 막는다.
+- 같은 `batchId`에 다른 본문을 보내면 `409`를 반환한다.
+- 유효 메시지가 하나도 없으면 `422 No acceptable messages`를 반환한다.
+- Unreal 응답 큐는 `priority`가 높은 개별 답변부터 꺼낸다.
+- 같은 우선순위는 먼저 받은 답변이 먼저이며 60초가 지난 답변은 폐기한다.
 
-- `Gladius.Build.cs`에 `TempleAIClient` 모듈 의존성 추가
-- `YouTubeChatManager`에 `UTempleAIClientComponent` 연결
-- `displayName` 추출
-- 일반 질문 한 건을 `SendTempleMessage`로 전송
-- `OnResponse`와 `OnError` 처리
+## 6. Unreal 설정값
 
-### 2단계: 다중 댓글 안정화
+| 속성 | 권장값 | 의미 |
+|---|---|---|
+| `ApiKey` | YouTube Data API v3 키 | YouTube 채팅 조회용 키. Gemini 키와 다름 |
+| `VideoId` | 방송 영상 ID | 대상 YouTube 라이브 방송 |
+| `TempleAIBatchEndpointUrl` | `http://127.0.0.1:8765/temple/respond-batch` | Temple AI 배치 주소 |
+| `TempleAIClientToken` | 서버 값과 동일 | `.env`의 `TEMPLE_CLIENT_TOKEN`과 비교하는 공유 토큰 |
+| `TalkBatchWindowSeconds` | `20.0` | 대화를 모으는 시간 |
+| `MaxTalkMessagesPerBatch` | `30` | 구간당 최대 대화 수 |
 
-- 입력 및 응답 대기열 추가
-- 동시 요청 수 제한
-- `commentId` 중복 방지
-- 시간 초과, 재시도 및 폐기 정책 추가
-- `priority` 순서 재생
+블루프린트 연결 지점:
 
-### 3단계: 게임 연출 연결
+- `OnTempleTalkBatchResult`: 배치의 모든 개별 응답이 도착했을 때 호출
+- `DequeueNextTempleResponse`: 우선순위가 가장 높은 개별 응답 하나를 반환
+- `ResponseText`: 자막 및 TTS에 사용
+- `Emotion`: 표정, 모션 및 후광에 사용
+- `OnTempleTalkBatchError`: 서버 연결 또는 응답 형식 오류 처리
 
-- `emotion`을 표정, 모션 및 후광에 매핑
-- `responseText`를 자막과 음성 출력에 연결
-- 말하는 동안 다음 응답을 대기열에 유지
-- 응답 완료 후 다음 항목 재생
+## 7. 서버 환경 변수
 
-### 4단계: 운영 안정화
+| 변수 | 의미 |
+|---|---|
+| `GEMINI_API_KEY` | 서버에서만 사용하는 Gemini API 키 |
+| `GEMINI_MODEL` | 우선 호출할 Gemini 모델 |
+| `GEMINI_FALLBACK_MODELS` | 실패 시 사용할 예비 모델 목록 |
+| `TEMPLE_CLIENT_TOKEN` | Unreal 요청 인증용 공유 토큰. Gemini API 키가 아님 |
 
-- YouTube 폴링 간격 준수
-- API 오류와 할당량 모니터링
-- API 키 제한 및 비밀값 분리
-- 개인정보를 최소화한 로그 정책 적용
-- 필요할 때만 OAuth 기반 YouTube 답변 전송 추가
+## 8. 구현 상태
 
-## 8. 완료 조건
-
-1. 라이브 댓글 한 건이 동일한 `uid`, `username`으로 Temple AI에 전달된다.
-2. 동시에 여러 댓글이 들어와도 누락, 중복 및 무제한 요청이 발생하지 않는다.
-3. 응답은 다섯 필드 계약을 항상 만족한다.
-4. 높은 `priority` 응답이 먼저 재생되고 같은 값에서는 먼저 도착한 응답이 먼저 재생된다.
-5. `emotion`에 맞는 Unreal 연출이 실행된다.
-6. 서버 또는 Gemini 장애 시 게임이 멈추지 않고 오류나 안전 대사로 복구한다.
-7. YouTube API 할당량 또는 네트워크 오류 시 폴링이 과도하게 반복되지 않는다.
-
-## 9. 현재 판단
-
-현재 구조는 단일 테스트 메시지와 구조화된 AI 응답 검증에는 적합하다. 실제 YouTube 연동을 위해서는 기존 코드를 교체할 필요는 없고, `YouTubeChatManager`와 `TempleAIClient` 사이의 연결 계층과 제한된 대기열을 추가하면 된다.
+- 20초 `messages[]` 수집 구현 완료
+- 빈 `!대화`, 중복 ID, 사용자당 1회 및 길이 제한 구현 완료
+- `authorDetails.displayName` 수집 구현 완료
+- `POST /temple/respond-batch` 구현 완료
+- 한 번의 Gemini 배치 호출에서 질문별 개별 응답 생성 구현 완료
+- 서버의 `uid`·`username` 원본 복사 구현 완료
+- `responses[]` Unreal 파싱 및 개별 우선순위 큐 구현 완료
+- 동일 `batchId` 멱등 처리 및 1회 재시도 구현 완료
+- `pollingIntervalMillis` 준수 구현 완료
+- 자막, TTS 및 모션의 실제 블루프린트 연출 연결은 별도 작업

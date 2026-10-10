@@ -11,6 +11,7 @@
 #include "Interfaces/IHttpResponse.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
@@ -41,6 +42,15 @@ void AYouTubeChatManager::BeginPlay()
 	CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
 	CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
 
+	CurrentTalkWindowStartedAt = FDateTime::UtcNow();
+	GetWorldTimerManager().SetTimer(
+		TalkBatchTimerHandle,
+		this,
+		&AYouTubeChatManager::FlushTalkBatch,
+		TalkBatchWindowSeconds,
+		true
+	);
+
 	StartFetchingChat();
 }
 
@@ -69,6 +79,11 @@ void AYouTubeChatManager::StopFetchingChat() {
 
 
 void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content)
+{
+	OnReceiveYouTubeCommentWithUsername(CommentId, UserId, UserId, Content);
+}
+
+void AYouTubeChatManager::OnReceiveYouTubeCommentWithUsername(FString CommentId, FString UserId, FString Username, FString Content)
 {
 	FDateTime Now = FDateTime::UtcNow();
 
@@ -110,7 +125,7 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 	FCommentLog Log{ CommentId, UserId, Now, CleanContent };
 	CommentLogs.Add(Log);
 
-	ExecuteGameCommand(UserId, CleanContent);
+	ExecuteGameCommand(CommentId, UserId, Username, CleanContent);
 }
 
 FString AYouTubeChatManager::PreprocessCommand(const FString& Input) 
@@ -239,8 +254,10 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
 		}
 
-		//유튜브가 알려주는 pollingIntervalMillis는 무시하고, 신전(40초)/전투(5초) 상태별 고정 주기만 사용
-		const float NextPollDelay = GetPollIntervalForCurrentState();
+		double PollingIntervalMillis = 0.0;
+		const float NextPollDelay = JsonObject->TryGetNumberField(TEXT("pollingIntervalMillis"), PollingIntervalMillis)
+			? FMath::Max(1.0f, static_cast<float>(PollingIntervalMillis / 1000.0))
+			: GetPollIntervalForCurrentState();
 
 		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
 
@@ -255,8 +272,9 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 
 			TSharedPtr<FJsonObject> AuthorObj = MessageObj->GetObjectField(TEXT("authorDetails"));
 			FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //채팅을 친 id를 가져오기
+			FString Username = AuthorObj->GetStringField(TEXT("displayName"));
 
-			OnReceiveYouTubeComment(CommentId, UserId, Content);
+			OnReceiveYouTubeCommentWithUsername(CommentId, UserId, Username, Content);
 		}
 
 		//UE_LOG(LogTemp, Log, TEXT(">>> [%.1f초] 뒤에 다음 채팅을 요청합니다. (NextPageToken: %s)"), NextPollDelay, *NextPageToken); //디버깅용
@@ -281,13 +299,22 @@ void AYouTubeChatManager::HandleSpamPenalty(FUserInfo& User, const FDateTime& No
 	UE_LOG(LogTemp, Error, TEXT("%s 유저가 %d분간 블랙리스트로 등록되었습니다."), *User.UserId, BanMinutes);
 }
 
-void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FString& Command)
+void AYouTubeChatManager::ExecuteGameCommand(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Command)
 {
 	FParsedCommand ParsedCommand;
 
 	//"!"로 시작하는 명령어 형식이 아니거나 알 수 없는 명령어는 전부 무시
 	if (!FChatCommandParser::TryParse(UserId, Command, ParsedCommand))
 	{
+		return;
+	}
+
+	if (ParsedCommand.CommandType == ECommandType::Talk)
+	{
+		if (GetCurrentGameState() == EGameState::Temple)
+		{
+			AddTalkToCurrentBatch(CommentId, UserId, Username, ParsedCommand.Argument);
+		}
 		return;
 	}
 
@@ -318,6 +345,242 @@ void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)
 {
 	//TODO: DB에서 UserId에 해당하는 플레이어 데이터를 조회하고, 없으면 새로 생성한 뒤 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
 	UE_LOG(LogTemp, Log, TEXT("[로그인] 유저 %s 의 전투 참가 로그인 처리 필요"), *UserId);
+}
+
+void AYouTubeChatManager::AddTalkToCurrentBatch(
+	const FString& CommentId,
+	const FString& UserId,
+	const FString& Username,
+	const FString& Message)
+{
+	const FString CleanMessage = Message.TrimStartAndEnd();
+	if (CleanMessage.IsEmpty() || CleanMessage.Len() > 200)
+	{
+		return;
+	}
+	if (ProcessedTalkUids.Contains(CommentId) || CurrentTalkUserIds.Contains(UserId))
+	{
+		return;
+	}
+
+	ProcessedTalkUids.Add(CommentId);
+	if (CurrentTalkMessages.Num() >= FMath::Clamp(MaxTalkMessagesPerBatch, 1, 30)
+		|| CurrentTalkCharacterCount + CleanMessage.Len() > 4000)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Temple AI 배치 제한으로 대화를 제외했습니다: %s"), *CommentId);
+		return;
+	}
+
+	FTempleTalkBatchMessage BatchMessage;
+	BatchMessage.Uid = CommentId;
+	BatchMessage.UserId = UserId;
+	BatchMessage.Username = Username.IsEmpty() ? UserId : Username;
+	BatchMessage.Message = CleanMessage;
+	CurrentTalkMessages.Add(MoveTemp(BatchMessage));
+	CurrentTalkUserIds.Add(UserId);
+	CurrentTalkCharacterCount += CleanMessage.Len();
+}
+
+void AYouTubeChatManager::FlushTalkBatch()
+{
+	const FDateTime WindowEndedAt = FDateTime::UtcNow();
+	if (!CurrentTalkMessages.IsEmpty())
+	{
+		FPendingTempleTalkBatch Batch;
+		Batch.WindowStartedAt = CurrentTalkWindowStartedAt;
+		Batch.WindowEndedAt = WindowEndedAt;
+		Batch.Messages = MoveTemp(CurrentTalkMessages);
+		Batch.BatchId = FString::Printf(
+			TEXT("temple-%s-%04lld"),
+			*WindowEndedAt.ToString(TEXT("%Y%m%dT%H%M%SZ")),
+			++TalkBatchSequence
+		);
+		PendingTalkBatches.Add(MoveTemp(Batch));
+	}
+
+	CurrentTalkMessages.Reset();
+	CurrentTalkUserIds.Reset();
+	CurrentTalkCharacterCount = 0;
+	CurrentTalkWindowStartedAt = WindowEndedAt;
+	TrySendNextTalkBatch();
+}
+
+void AYouTubeChatManager::TrySendNextTalkBatch()
+{
+	if (bTempleBatchRequestInFlight || PendingTalkBatches.IsEmpty())
+	{
+		return;
+	}
+
+	ActiveTalkBatch = MoveTemp(PendingTalkBatches[0]);
+	PendingTalkBatches.RemoveAt(0);
+	bTempleBatchRequestInFlight = true;
+	ActiveBatchRetryCount = 0;
+	SendActiveTalkBatchRequest();
+}
+
+void AYouTubeChatManager::SendActiveTalkBatchRequest()
+{
+	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetNumberField(TEXT("schemaVersion"), 1);
+	Root->SetStringField(TEXT("batchId"), ActiveTalkBatch.BatchId);
+	Root->SetStringField(TEXT("windowStartedAt"), ActiveTalkBatch.WindowStartedAt.ToIso8601());
+	Root->SetStringField(TEXT("windowEndedAt"), ActiveTalkBatch.WindowEndedAt.ToIso8601());
+
+	TArray<TSharedPtr<FJsonValue>> JsonMessages;
+	for (const FTempleTalkBatchMessage& Message : ActiveTalkBatch.Messages)
+	{
+		TSharedRef<FJsonObject> JsonMessage = MakeShared<FJsonObject>();
+		JsonMessage->SetStringField(TEXT("uid"), Message.Uid);
+		JsonMessage->SetStringField(TEXT("userId"), Message.UserId);
+		JsonMessage->SetStringField(TEXT("username"), Message.Username);
+		JsonMessage->SetStringField(TEXT("message"), Message.Message);
+		JsonMessages.Add(MakeShared<FJsonValueObject>(JsonMessage));
+	}
+	Root->SetArrayField(TEXT("messages"), JsonMessages);
+
+	FString Body;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	FJsonSerializer::Serialize(Root, Writer);
+
+	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = FHttpModule::Get().CreateRequest();
+	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnTempleBatchHttpResponse);
+	Request->SetURL(TempleAIBatchEndpointUrl);
+	Request->SetVerb(TEXT("POST"));
+	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+	if (!TempleAIClientToken.IsEmpty())
+	{
+		Request->SetHeader(TEXT("X-Temple-Client-Token"), TempleAIClientToken);
+	}
+	Request->SetContentAsString(Body);
+	Request->SetTimeout(12.0f);
+	Request->ProcessRequest();
+}
+
+void AYouTubeChatManager::OnTempleBatchHttpResponse(
+	FHttpRequestPtr Request,
+	FHttpResponsePtr Response,
+	bool bWasSuccessful)
+{
+	const int32 ResponseCode = Response.IsValid() ? Response->GetResponseCode() : 0;
+	const bool bRetryable = !bWasSuccessful || !Response.IsValid() || ResponseCode >= 500;
+	if (bRetryable && ActiveBatchRetryCount < 1)
+	{
+		++ActiveBatchRetryCount;
+		SendActiveTalkBatchRequest();
+		return;
+	}
+
+	if (!bWasSuccessful || !Response.IsValid() || ResponseCode < 200 || ResponseCode >= 300)
+	{
+		const FString Error = FString::Printf(
+			TEXT("Temple AI 배치 요청 실패: batchId=%s, HTTP=%d"),
+			*ActiveTalkBatch.BatchId,
+			ResponseCode
+		);
+		UE_LOG(LogTemp, Error, TEXT("%s"), *Error);
+		OnTempleTalkBatchError.Broadcast(Error);
+		FinishActiveTalkBatch();
+		return;
+	}
+
+	TSharedPtr<FJsonObject> JsonObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+	if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid()
+		|| !JsonObject->HasTypedField<EJson::Number>(TEXT("schemaVersion"))
+		|| !JsonObject->HasTypedField<EJson::String>(TEXT("batchId"))
+		|| !JsonObject->HasTypedField<EJson::Array>(TEXT("responses"))
+		|| !JsonObject->HasTypedField<EJson::Number>(TEXT("acceptedCount"))
+		|| !JsonObject->HasTypedField<EJson::Number>(TEXT("rejectedCount")))
+	{
+		OnTempleTalkBatchError.Broadcast(TEXT("Temple AI 응답 JSON을 읽을 수 없습니다."));
+		FinishActiveTalkBatch();
+		return;
+	}
+
+	FTempleTalkBatchResult Result;
+	Result.SchemaVersion = static_cast<int32>(JsonObject->GetIntegerField(TEXT("schemaVersion")));
+	Result.BatchId = JsonObject->GetStringField(TEXT("batchId"));
+	Result.AcceptedCount = static_cast<int32>(JsonObject->GetIntegerField(TEXT("acceptedCount")));
+	Result.RejectedCount = static_cast<int32>(JsonObject->GetIntegerField(TEXT("rejectedCount")));
+
+	for (const TSharedPtr<FJsonValue>& Value : JsonObject->GetArrayField(TEXT("responses")))
+	{
+		const TSharedPtr<FJsonObject> Item = Value->AsObject();
+		if (!Item.IsValid()
+			|| !Item->HasTypedField<EJson::String>(TEXT("uid"))
+			|| !Item->HasTypedField<EJson::String>(TEXT("username"))
+			|| !Item->HasTypedField<EJson::Number>(TEXT("priority"))
+			|| !Item->HasTypedField<EJson::String>(TEXT("responseText"))
+			|| !Item->HasTypedField<EJson::String>(TEXT("emotion")))
+		{
+			continue;
+		}
+
+		FTempleIndividualResponse Parsed;
+		Parsed.Uid = Item->GetStringField(TEXT("uid"));
+		Parsed.Username = Item->GetStringField(TEXT("username"));
+		Parsed.Priority = static_cast<int32>(Item->GetIntegerField(TEXT("priority")));
+		Parsed.ResponseText = Item->GetStringField(TEXT("responseText"));
+		Parsed.Emotion = Item->GetStringField(TEXT("emotion"));
+		if (!Parsed.Uid.IsEmpty() && !Parsed.ResponseText.IsEmpty())
+		{
+			Result.Responses.Add(MoveTemp(Parsed));
+		}
+	}
+
+	if (Result.SchemaVersion != 1
+		|| Result.BatchId != ActiveTalkBatch.BatchId
+		|| Result.AcceptedCount != Result.Responses.Num())
+	{
+		OnTempleTalkBatchError.Broadcast(TEXT("Temple AI 응답 계약 또는 batchId가 일치하지 않습니다."));
+		FinishActiveTalkBatch();
+		return;
+	}
+
+	const FDateTime ReceivedAt = FDateTime::UtcNow();
+	for (const FTempleIndividualResponse& Individual : Result.Responses)
+	{
+		TempleResponseQueue.Add({Individual, ReceivedAt});
+		UE_LOG(LogTemp, Log, TEXT("Temple AI 개별 응답 [%s]: %s"), *Individual.Uid, *Individual.ResponseText);
+	}
+	OnTempleTalkBatchResult.Broadcast(Result);
+	FinishActiveTalkBatch();
+}
+
+void AYouTubeChatManager::FinishActiveTalkBatch()
+{
+	bTempleBatchRequestInFlight = false;
+	ActiveBatchRetryCount = 0;
+	ActiveTalkBatch = FPendingTempleTalkBatch();
+	TrySendNextTalkBatch();
+}
+
+bool AYouTubeChatManager::DequeueNextTempleResponse(FTempleIndividualResponse& OutResponse)
+{
+	const FDateTime Now = FDateTime::UtcNow();
+	TempleResponseQueue.RemoveAll(
+		[&Now](const FQueuedTempleResponse& Item)
+		{
+			return (Now - Item.ReceivedAt).GetTotalSeconds() > 60.0;
+		}
+	);
+	if (TempleResponseQueue.IsEmpty())
+	{
+		return false;
+	}
+
+	int32 BestIndex = 0;
+	for (int32 Index = 1; Index < TempleResponseQueue.Num(); ++Index)
+	{
+		if (TempleResponseQueue[Index].Response.Priority > TempleResponseQueue[BestIndex].Response.Priority)
+		{
+			BestIndex = Index;
+		}
+	}
+	OutResponse = TempleResponseQueue[BestIndex].Response;
+	TempleResponseQueue.RemoveAt(BestIndex);
+	return true;
 }
 
 //받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장

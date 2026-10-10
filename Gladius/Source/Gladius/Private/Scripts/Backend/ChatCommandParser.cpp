@@ -91,6 +91,7 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	if (Keyword == TEXT("대화"))
 	{
+		if (Remainder.IsEmpty()) return false;
 		//대화는 뒤에 남은 문자열 전체를 인자로 사용 (Argument는 TryParse에서 이미 채워둠)
 		OutCommand.CommandType = ECommandType::Talk;
 		return true;

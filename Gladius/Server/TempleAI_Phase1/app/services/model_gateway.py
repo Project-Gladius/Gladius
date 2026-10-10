@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from app.schemas import ModelReply, TempleRequest
+from app.schemas import ModelReply, TempleBatchRequest, TempleRequest
 
 
 class ModelGatewayError(RuntimeError):
@@ -15,4 +15,19 @@ class ModelGateway(ABC):
     @abstractmethod
     def generate_reply(self, request: TempleRequest) -> ModelReply:
         raise NotImplementedError
+
+    def generate_batch_replies(
+        self,
+        request: TempleBatchRequest,
+    ) -> list[ModelReply]:
+        return [
+            self.generate_reply(
+                TempleRequest(
+                    uid=item.uid,
+                    username=item.username,
+                    message=item.message,
+                )
+            )
+            for item in request.messages
+        ]
 

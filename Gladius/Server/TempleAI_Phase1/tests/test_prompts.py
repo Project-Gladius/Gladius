@@ -1,7 +1,7 @@
 import json
 
-from app.prompts import build_temple_prompt
-from app.schemas import TempleRequest
+from app.prompts import build_temple_batch_prompt, build_temple_prompt
+from app.schemas import TempleBatchRequest, TempleRequest
 
 
 def test_untrusted_message_is_json_encoded_inside_explicit_boundary() -> None:
@@ -45,3 +45,39 @@ def test_prompt_contains_canonical_memory_vignettes() -> None:
     assert "황제가 마신에게 정확히 무엇을 말했는지는" in prompt
     assert "neutral" in prompt
     assert "bestow" in prompt
+
+
+def test_batch_prompt_requires_one_ordered_reply_per_input() -> None:
+    request = TempleBatchRequest.model_validate(
+        {
+            "schemaVersion": 1,
+            "batchId": "batch-1",
+            "windowStartedAt": "2026-10-10T12:00:00Z",
+            "windowEndedAt": "2026-10-10T12:00:20Z",
+            "messages": [
+                {
+                    "uid": "m-1",
+                    "userId": "u-1",
+                    "username": "첫째",
+                    "message": "무엇을 조심할까요?",
+                },
+                {
+                    "uid": "m-2",
+                    "userId": "u-2",
+                    "username": "둘째",
+                    "message": "강화해도 될까요?",
+                },
+            ],
+        }
+    )
+
+    prompt = build_temple_batch_prompt(request)
+    payload_text = prompt.split("<UNTRUSTED_USER_DATA>\n", 1)[1].split(
+        "\n</UNTRUSTED_USER_DATA>", 1
+    )[0]
+    payload = json.loads(payload_text)
+
+    assert len(payload) == 2
+    assert "Return exactly 2 responses" in prompt
+    assert "same order" in prompt
+    assert "username" not in payload[0]

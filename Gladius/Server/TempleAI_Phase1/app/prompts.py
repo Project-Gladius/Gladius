@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from app.schemas import TempleRequest
+from app.schemas import TempleBatchRequest, TempleRequest
 
 
 BASE_INSTRUCTIONS = """
@@ -61,6 +61,44 @@ def build_temple_prompt(request: TempleRequest) -> str:
 
     return (
         f"{BASE_INSTRUCTIONS}"
+        f"{profile_block}\n\n"
+        "<UNTRUSTED_USER_DATA>\n"
+        f"{user_data}\n"
+        "</UNTRUSTED_USER_DATA>"
+    )
+
+
+def build_temple_batch_prompt(request: TempleBatchRequest) -> str:
+    """Request one ordered reply for every validated input message."""
+
+    user_data = json.dumps(
+        [
+            {"position": index, "message": item.message}
+            for index, item in enumerate(request.messages)
+        ],
+        ensure_ascii=False,
+    )
+    goddess_profile = load_goddess_profile()
+    profile_block = ""
+    if goddess_profile:
+        profile_block = (
+            "\n\n<GODDESS_PROFILE>\n"
+            f"{goddess_profile}\n"
+            "</GODDESS_PROFILE>"
+        )
+
+    batch_rules = f"""
+Batch response rules:
+- Return exactly {len(request.messages)} responses, one for each input item.
+- Keep responses in exactly the same order as the input array.
+- Answer every item independently; do not merge different questions.
+- Treat each response as a conversation with one player and address them as "그대".
+- Do not output positions, usernames, user IDs, message IDs, or any other identity.
+- Each response must independently follow all character, safety, length, and schema rules.
+""".strip()
+
+    return (
+        f"{BASE_INSTRUCTIONS}\n\n{batch_rules}"
         f"{profile_block}\n\n"
         "<UNTRUSTED_USER_DATA>\n"
         f"{user_data}\n"

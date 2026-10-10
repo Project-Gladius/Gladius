@@ -1,10 +1,17 @@
 import logging
 import os
 import time
+from collections.abc import Callable
+from typing import TypeVar
 
-from app.prompts import build_temple_prompt
-from app.schemas import ModelReply, TempleRequest
-from app.services.fallback_reply import build_fallback_reply
+from pydantic import BaseModel
+
+from app.prompts import build_temple_batch_prompt, build_temple_prompt
+from app.schemas import ModelBatchReply, ModelReply, TempleBatchRequest, TempleRequest
+from app.services.fallback_reply import (
+    build_batch_fallback_replies,
+    build_fallback_reply,
+)
 from app.services.model_gateway import (
     ModelGateway,
     ModelGatewayConfigurationError,
@@ -13,6 +20,7 @@ from app.services.model_gateway import (
 
 
 LOGGER = logging.getLogger("temple_ai.gemini")
+ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
 
 
 class GeminiGateway(ModelGateway):
@@ -76,7 +84,37 @@ class GeminiGateway(ModelGateway):
         )
 
     def generate_reply(self, request: TempleRequest) -> ModelReply:
-        prompt = build_temple_prompt(request)
+        return self._generate_structured(
+            prompt=build_temple_prompt(request),
+            response_type=ModelReply,
+            max_output_tokens=256,
+            fallback=lambda: build_fallback_reply(request),
+        )
+
+    def generate_batch_replies(
+        self,
+        request: TempleBatchRequest,
+    ) -> list[ModelReply]:
+        batch_reply = self._generate_structured(
+            prompt=build_temple_batch_prompt(request),
+            response_type=ModelBatchReply,
+            max_output_tokens=4096,
+            expected_count=len(request.messages),
+            fallback=lambda: ModelBatchReply(
+                responses=build_batch_fallback_replies(request)
+            ),
+        )
+        return batch_reply.responses
+
+    def _generate_structured(
+        self,
+        *,
+        prompt: str,
+        response_type: type[ResponseModel],
+        max_output_tokens: int,
+        fallback: Callable[[], ResponseModel],
+        expected_count: int | None = None,
+    ) -> ResponseModel:
         last_error: Exception | None = None
         now = time.monotonic()
 
@@ -89,8 +127,8 @@ class GeminiGateway(ModelGateway):
                     contents=prompt,
                     config=self._types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        response_json_schema=ModelReply.model_json_schema(),
-                        max_output_tokens=256,
+                        response_json_schema=response_type.model_json_schema(),
+                        max_output_tokens=max_output_tokens,
                         thinking_config=self._types.ThinkingConfig(
                             thinking_level="low"
                         ),
@@ -106,7 +144,15 @@ class GeminiGateway(ModelGateway):
                 if not response.text:
                     raise ModelGatewayError("Gemini returned an empty response")
 
-                reply = ModelReply.model_validate_json(response.text)
+                reply = response_type.model_validate_json(response.text)
+                if (
+                    expected_count is not None
+                    and isinstance(reply, ModelBatchReply)
+                    and len(reply.responses) != expected_count
+                ):
+                    raise ModelGatewayError(
+                        "Gemini returned a different number of batch responses"
+                    )
                 self._model_retry_after.pop(model, None)
                 LOGGER.info("Gemini response generated with model %s", model)
                 return reply
@@ -121,4 +167,4 @@ class GeminiGateway(ModelGateway):
             LOGGER.error("All Gemini models failed; using local safe fallback")
         else:
             LOGGER.warning("Gemini models are cooling down; using local safe fallback")
-        return build_fallback_reply(request)
+        return fallback()
