@@ -70,6 +70,14 @@ struct FParsedCommand
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
 	FString UserId;
 
+	// 명령이 담긴 채팅의 고유 Id (유튜브 message.id). AI 쿼리의 uid로 사용됨
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	FString CommentId;
+
+	// 화면에 표시할 작성자명 (유튜브 authorDetails.displayName). AI 쿼리의 username으로 사용됨
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
+	FString Username;
+
 	// !대화 처럼 뒤에 붙는 문자열 인자가 필요한 명령어에만 사용됨
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Command")
 	FString Argument;

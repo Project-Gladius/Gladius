@@ -135,14 +135,14 @@ void UCommandDispatcher::HandleLogout(const FParsedCommand& Command)
 
 // ===== 신전상태 명령 처리 함수 =====
 
-//!강화 1~4 공통 진입점. Argument("1"~"4")와 UserId를 그대로 OnEnhanceCommand에 전달
+//!강화 1~4 공통 진입점. Argument("1"~"4"), UserId, Username을 그대로 OnEnhanceCommand에 전달
 void UCommandDispatcher::BroadcastEnhance(const FParsedCommand& Command)
 {
-	OnEnhanceCommand.Broadcast(Command.UserId, Command.Argument);
+	OnEnhanceCommand.Broadcast(Command.UserId, Command.Username, Command.Argument);
 }
 
-//!대화 진입점. Argument(대화 내용 전체)와 UserId를 그대로 OnTalkCommand에 전달
+//!대화 진입점. AI 쿼리에 필요한 CommentId(uid), Username(username), Argument(message)를 UserId와 함께 OnTalkCommand에 전달
 void UCommandDispatcher::BroadcastTalk(const FParsedCommand& Command)
 {
-	OnTalkCommand.Broadcast(Command.UserId, Command.Argument);
+	OnTalkCommand.Broadcast(Command.UserId, Command.CommentId, Command.Username, Command.Argument);
 }

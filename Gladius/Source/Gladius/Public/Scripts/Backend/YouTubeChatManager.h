@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -8,6 +8,9 @@
 
 class UCommandDispatcher;
 class AGameManager;
+
+// 채팅 조회 한 번이 끝났을 때(모든 채팅을 파싱/디스패치한 뒤) 브로드캐스트. bSuccess: 조회 성공 여부
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatFetchFinished, bool /*bSuccess*/);
 
 USTRUCT(BlueprintType)
 struct FCommentLog
@@ -27,50 +30,14 @@ struct FCommentLog
 	FString Content;
 };
 
-USTRUCT(BlueprintType)
-struct FTempleTalkBatchMessage
-{
-	GENERATED_BODY()
-
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString Uid;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString UserId;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString Username;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString Message;
-};
-
-USTRUCT(BlueprintType)
-struct FTempleIndividualResponse
-{
-	GENERATED_BODY()
-
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString Uid;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString Username;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") int32 Priority = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString ResponseText;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString Emotion;
-};
-
-USTRUCT(BlueprintType)
-struct FTempleTalkBatchResult
-{
-	GENERATED_BODY()
-
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") int32 SchemaVersion = 1;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") FString BatchId;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") TArray<FTempleIndividualResponse> Responses;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") int32 AcceptedCount = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Temple AI") int32 RejectedCount = 0;
-};
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTempleTalkBatchResult, const FTempleTalkBatchResult&, Result);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTempleTalkBatchError, const FString&, ErrorMessage);
-
+// 유튜브 라이브 채팅을 조회해 도배/블랙리스트 필터를 거친 뒤 명령어로 파싱해 CommandDispatcher로 넘기는 클래스
+// 전투상태: 스스로 주기적으로 조회 / 신전상태: ATempleCycleController가 사이클마다 RequestChatFetch()를 호출
 UCLASS()
 class GLADIUS_API AYouTubeChatManager : public AActor
 {
 	GENERATED_BODY()
-	
-public:	
+
+public:
 	AYouTubeChatManager();
 
 protected:
@@ -85,13 +52,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
 	FString VideoId;
 
-	//채팅 수신 시작 함수
+	//채팅 수신 시작 함수 (LiveChatId 조회. 전투상태면 이후 자동으로 주기 조회)
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
-	void StartFetchingChat(); 
+	void StartFetchingChat();
 
 	//채팅 수신 중지 함수
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void StopFetchingChat();
+
+	//채팅을 한 번 조회. 끝나면 OnChatFetchFinished가 브로드캐스트됨 (신전 사이클용)
+	UFUNCTION(BlueprintCallable, Category = "YouTube API")
+	void RequestChatFetch();
+
+	FOnChatFetchFinished OnChatFetchFinished;
+
+	//명령어 디스패처. 처음 호출될 때 생성되므로 다른 액터의 BeginPlay 순서와 무관하게 구독 가능
+	UCommandDispatcher* GetCommandDispatcher();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Database")
 	TMap<FString, FUserInfo> UserDatabase;
@@ -106,37 +82,13 @@ public:
 	int32 MaxAllowedComments = 3;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-	float TemplePollIntervalSeconds = 40.0f; //신전상태일 때 채팅을 긁어오는 주기(초)
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Settings")
-	float CombatPollIntervalSeconds = 5.0f; //전투상태일 때 채팅을 긁어오는 주기(초)
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI|Batch")
-	FString TempleAIBatchEndpointUrl = TEXT("http://127.0.0.1:8765/temple/respond-batch");
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI|Batch")
-	FString TempleAIClientToken;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI|Batch", meta = (ClampMin = "1.0"))
-	float TalkBatchWindowSeconds = 20.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI|Batch", meta = (ClampMin = "1", ClampMax = "30"))
-	int32 MaxTalkMessagesPerBatch = 30;
-
-	UPROPERTY(BlueprintAssignable, Category = "Temple AI|Batch")
-	FOnTempleTalkBatchResult OnTempleTalkBatchResult;
-
-	UPROPERTY(BlueprintAssignable, Category = "Temple AI|Batch")
-	FOnTempleTalkBatchError OnTempleTalkBatchError;
+	float CombatPollIntervalSeconds = 5.0f; //전투상태일 때 채팅을 긁어오는 주기(초). 유튜브가 pollingIntervalMillis를 주면 그 값을 사용
 
 	UFUNCTION(BlueprintCallable, Category = "YouTube")
 	void OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content);
 
 	UFUNCTION(BlueprintCallable, Category = "YouTube")
 	void OnReceiveYouTubeCommentWithUsername(FString CommentId, FString UserId, FString Username, FString Content);
-
-	UFUNCTION(BlueprintCallable, Category = "Temple AI|Batch")
-	bool DequeueNextTempleResponse(FTempleIndividualResponse& OutResponse);
 
 private:
 	//현재 전투/신전 상태를 들고 있는 GameManager 참조. 에디터에서 직접 지정하지 않으면 BeginPlay에서 월드를 검색해 채움
@@ -146,9 +98,6 @@ private:
 	//CommandDispatcher의 GetGameStateDelegate에 바인딩되는 함수. GameManagerRef가 없으면 기본값(신전상태) 반환
 	EGameState GetCurrentGameState() const;
 
-	//현재 게임 상태(신전/전투)에 맞는 채팅 폴링 주기를 반환
-	float GetPollIntervalForCurrentState() const;
-
 	//CommandDispatcher의 OnUserLoginRequired 구독 함수
 	//TODO: DB에서 플레이어 데이터를 조회하고 없으면 새로 생성한 뒤, 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
 	void HandleUserLoginRequired(const FString& UserId);
@@ -157,7 +106,10 @@ private:
 	FString LiveChatId;
 	FString NextPageToken;
 	FTimerHandle ChatFetchTimerHandle;
-	FTimerHandle TalkBatchTimerHandle;
+	bool bFetchInFlight = false;
+
+	//이 시각 이전에 올라온 채팅은 무시 (첫 조회 시 유튜브가 돌려주는 과거 채팅 제외)
+	FDateTime IgnoreMessagesBefore;
 
 	//Http 요청 응답 및 콜백 함수
 	void RequestLiveChatId();
@@ -165,6 +117,10 @@ private:
 
 	void RequestMessages();
 	void OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+	void FinishFetch(bool bSuccess, float NextPollDelay);
+
+	//채팅 한 건 처리. PostedAt: 채팅이 올라온 시각 (도배 판정 기준)
+	void ProcessComment(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Content, const FDateTime& PostedAt);
 
 	FString PreprocessCommand(const FString& Input);
 	bool IsSpamming(const FString& UserId, const FString& Content, const FDateTime& CurrentTime);
@@ -178,37 +134,4 @@ private:
 
 	//채팅을 그날그날 txt 파일로 저장하는 함수
 	void SaveCommentLogToFile(const FString& UserId, const FString& Content, const FDateTime& Now);
-
-	struct FPendingTempleTalkBatch
-	{
-		FString BatchId;
-		FDateTime WindowStartedAt;
-		FDateTime WindowEndedAt;
-		TArray<FTempleTalkBatchMessage> Messages;
-	};
-
-	struct FQueuedTempleResponse
-	{
-		FTempleIndividualResponse Response;
-		FDateTime ReceivedAt;
-	};
-
-	FDateTime CurrentTalkWindowStartedAt;
-	TArray<FTempleTalkBatchMessage> CurrentTalkMessages;
-	TSet<FString> CurrentTalkUserIds;
-	TSet<FString> ProcessedTalkUids;
-	int32 CurrentTalkCharacterCount = 0;
-	int64 TalkBatchSequence = 0;
-	TArray<FPendingTempleTalkBatch> PendingTalkBatches;
-	FPendingTempleTalkBatch ActiveTalkBatch;
-	bool bTempleBatchRequestInFlight = false;
-	int32 ActiveBatchRetryCount = 0;
-	TArray<FQueuedTempleResponse> TempleResponseQueue;
-
-	void AddTalkToCurrentBatch(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Message);
-	void FlushTalkBatch();
-	void TrySendNextTalkBatch();
-	void SendActiveTalkBatchRequest();
-	void OnTempleBatchHttpResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
-	void FinishActiveTalkBatch();
 };

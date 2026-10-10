@@ -28,11 +28,12 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnDefendCommand, const FString& /*UserId*/)
 // !회피 좌/우/중 실행 시 브로드캐스트. Argument: 방향("좌"/"우"/"중")
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnDodgeCommand, const FString& /*UserId*/, const FString& /*Argument*/);
 
-// !강화 1~4 실행 시 브로드캐스트. Argument: 강화 번호("1"~"4")
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnEnhanceCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+// !강화 1~4 실행 시 브로드캐스트. Username: 작성자 표시명, Argument: 강화 번호("1"~"4")
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnEnhanceCommand, const FString& /*UserId*/, const FString& /*Username*/, const FString& /*Argument*/);
 
-// !대화 ... 실행 시 브로드캐스트. Argument: 대화 내용 전체
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTalkCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+// !대화 ... 실행 시 브로드캐스트. AI 쿼리(uid/username/message)에 필요한 정보를 함께 넘김
+// CommentId: 채팅 고유 Id(uid), Username: 작성자 표시명(username), Argument: 대화 내용 전체(message)
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnTalkCommand, const FString& /*UserId*/, const FString& /*CommentId*/, const FString& /*Username*/, const FString& /*Argument*/);
 
 // 파싱된 명령어(ECommandType)와 이를 처리할 함수를 map으로 연결해 실행시키는 클래스
 UCLASS()
@@ -62,10 +63,10 @@ public:
 	//외부(전투 로직 등)에서 구독해 회피 처리를 연결. Argument: "좌"/"우"/"중"
 	FOnDodgeCommand OnDodgeCommand;
 
-	//외부(신전 로직 등)에서 구독해 강화 처리를 연결. Argument: "1"~"4"
+	//외부(신전 로직 등)에서 구독해 강화 처리를 연결. Username: 작성자 표시명, Argument: "1"~"4"
 	FOnEnhanceCommand OnEnhanceCommand;
 
-	//외부(신전 로직 등)에서 구독해 대화 처리를 연결. Argument: 대화 내용 전체
+	//외부(신전 로직 등)에서 구독해 대화(AI 쿼리) 처리를 연결. CommentId, Username, Argument(대화 내용 전체)를 받음
 	FOnTalkCommand OnTalkCommand;
 
 private:
