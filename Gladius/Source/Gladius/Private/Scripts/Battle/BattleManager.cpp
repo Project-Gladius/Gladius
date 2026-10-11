@@ -100,6 +100,11 @@ void ABattleManager::StartBattle()
 	EnemyHP = EnemyMaxHP;
 	TurnIndex = 0;
 
+	//패턴 진행도는 한 판에 속한 값이다. 안 지우면 다음 판이 중간부터 시작한다
+	CurrentPatternId.Reset();
+	PatternStep = 0;
+	PresetPatternIndex = 0;
+
 	// ponytail: 플레이어 체력·피버는 아직 초기화하지 않는다 (다음 판 흐름이 정해지면 같이)
 	CurrentPatternId.Reset();
 	PatternStep = 0;
@@ -1262,10 +1267,17 @@ void ABattleManager::ApplyBalanceFiles()
 	EnemyMaxHP = Balance.BossMaxHP;
 	Turns = Balance.Turns;
 
+	//보스가 추첨으로 도는지 고정 순서로 도는지는 로그만 보고도 알아야 한다.
+	//둘을 헷갈리면 시뮬레이터 결과와 왜 다른지 추적하기 어렵다
+	const TCHAR* ModeText =
+		Balance.PresetMode == EBossPresetMode::Direct ? TEXT("direct (고정 공격 순서)") :
+		Balance.PresetMode == EBossPresetMode::Custom ? TEXT("custom (고정 패턴 순서)") :
+		TEXT("random (가중치 추첨)");
+
 	//에디터에서 고친 값이 조용히 사라지는 일이 없도록, 덮어쓴 결과를 남긴다
 	UE_LOG(LogTemp, Log, TEXT("[Balance] 에디터 값을 파일 값으로 덮어썼습니다 — ")
-		TEXT("직업군 %d종 / 피버 +%.0f·%.0f×%.0f / 보스 HP %d / %d턴"),
-		Classes.Num(), FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns);
+		TEXT("직업군 %d종 / 피버 +%.0f·%.0f×%.0f / 보스 HP %d / %d턴 / 보스 진행 %s"),
+		Classes.Num(), FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns, ModeText);
 }
 
 const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft, const FString& PreviousId) const
@@ -1327,16 +1339,47 @@ FBossAction ABattleManager::NextBossAction()
 		return Action;
 	}
 
+	//고정 순서 모드는 패턴을 거치지 않는다. 적힌 공격을 턴 번호대로 꺼내면 끝이다.
+	//로딩 때 개수가 Turns와 같은지 확인했으므로 범위를 벗어나지 않는다
+	if (Balance.PresetMode == EBossPresetMode::Direct)
+	{
+		const int32 Index = TurnIndex - 1;
+		if (!Balance.PresetDirectActions.IsValidIndex(Index))
+		{
+			UE_LOG(LogTemp, Error, TEXT("[Battle] preset.directActions에 %d번째 턴이 없습니다"), TurnIndex);
+			return FBossAction();
+		}
+
+		const FBossAction* Direct = Balance.FindAction(Balance.PresetDirectActions[Index]);
+		return Direct ? *Direct : FBossAction();
+	}
+
 	const FBossPattern* Pattern = Balance.FindPattern(CurrentPatternId);
 
-	//패턴이 없거나 끝났으면 새로 뽑는다. 실행 중에는 다시 뽑지 않는다
+	//패턴이 없거나 끝났으면 다음 패턴으로 넘어간다. 실행 중에는 바꾸지 않는다
 	if (!Pattern || PatternStep >= Pattern->Steps.Num())
 	{
 		//이번 턴을 포함해 남은 턴. 여기에 딱 맞게 끝나야 한다 (기획서 5절)
 		const int32 TurnsLeft = Turns - TurnIndex + 1;
 
-		//직전에 끝난 패턴은 지금 CurrentPatternId에 들어 있다
-		Pattern = ChoosePattern(TurnsLeft, CurrentPatternId);
+		if (Balance.PresetMode == EBossPresetMode::Custom)
+		{
+			//적힌 순서 그대로. 추첨하지 않는다
+			if (!Balance.PresetCustomPatterns.IsValidIndex(PresetPatternIndex))
+			{
+				UE_LOG(LogTemp, Error, TEXT("[Battle] preset.customPatterns를 다 썼습니다 (남은 %d턴)"), TurnsLeft);
+				return FBossAction();
+			}
+
+			Pattern = Balance.FindPattern(Balance.PresetCustomPatterns[PresetPatternIndex]);
+			++PresetPatternIndex;
+		}
+		else
+		{
+			//직전에 끝난 패턴은 지금 CurrentPatternId에 들어 있다
+			Pattern = ChoosePattern(TurnsLeft, CurrentPatternId);
+		}
+
 		if (!Pattern)
 		{
 			UE_LOG(LogTemp, Error, TEXT("[Battle] 남은 %d턴에 들어가는 패턴이 없습니다"), TurnsLeft);
@@ -1346,7 +1389,7 @@ FBossAction ABattleManager::NextBossAction()
 		CurrentPatternId = Pattern->Id;
 		PatternStep = 0;
 
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 패턴 '%s' 선택 (%d턴, 남은 %d턴)"),
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 패턴 '%s' (%d턴, 남은 %d턴)"),
 			*Pattern->Name, Pattern->Steps.Num(), TurnsLeft);
 	}
 
@@ -1925,7 +1968,8 @@ void ABattleManager::RunSelfTest()
 		Balance.LoadFromFolder(BalanceFolderPath());
 	}
 
-	if (Balance.bLoaded)
+	//추첨 모드일 때만 반복 시행이 의미가 있다
+	if (Balance.bLoaded && Balance.PresetMode == EBossPresetMode::Random)
 	{
 		//에디터의 Turns는 아직 파일 값으로 덮이기 전일 수 있으므로 파일 쪽을 본다
 		const int32 TotalTurns = Balance.Turns;
@@ -1952,6 +1996,13 @@ void ABattleManager::RunSelfTest()
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 패턴 검사 통과 — %d턴을 200회 모두 정확히 채움"), TotalTurns);
+	}
+	else if (Balance.bLoaded)
+	{
+		//고정 순서 모드는 난수가 없어 반복 시행이 의미가 없다.
+		//턴 수가 맞는지는 로딩 때 이미 막았으므로 여기서는 어떤 모드로 도는지만 남긴다
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 보스는 고정 순서(%s)로 돕니다 — 추첨 검사 생략"),
+			Balance.PresetMode == EBossPresetMode::Direct ? TEXT("direct") : TEXT("custom"));
 	}
 	else
 	{

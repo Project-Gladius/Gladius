@@ -717,6 +717,103 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		Pool.Add(MoveTemp(Weight));
 	}
 
+	// ---- preset ----
+	//턴을 어떻게 채울지. 이걸 안 읽으면 파일이 '고정 순서'라고 적어둬도
+	//게임은 혼자 추첨을 돌려, 시뮬레이터와 다른 전투가 된다
+	const TSharedPtr<FJsonObject>* PresetPtr = nullptr;
+	if (!Bosses->TryGetObjectField(TEXT("preset"), PresetPtr))
+	{
+		Fail(BossesPath, TEXT("'preset' 항목이 없습니다"));
+		return false;
+	}
+
+	FString ModeText;
+	if (!(*PresetPtr)->TryGetStringField(TEXT("mode"), ModeText))
+	{
+		Fail(BossesPath, TEXT("'preset.mode' 값이 없습니다"));
+		return false;
+	}
+
+	if (ModeText == TEXT("direct"))      { PresetMode = EBossPresetMode::Direct; }
+	else if (ModeText == TEXT("custom")) { PresetMode = EBossPresetMode::Custom; }
+	else if (ModeText == TEXT("random")) { PresetMode = EBossPresetMode::Random; }
+	else
+	{
+		Fail(BossesPath, FString::Printf(
+			TEXT("'preset.mode' 가 '%s' 입니다 — direct / custom / random 중 하나여야 합니다"), *ModeText));
+		return false;
+	}
+
+	if (PresetMode == EBossPresetMode::Direct)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* DirectArray = nullptr;
+		if (!(*PresetPtr)->TryGetArrayField(TEXT("directActions"), DirectArray) || DirectArray->Num() == 0)
+		{
+			Fail(BossesPath, TEXT("preset.mode가 direct인데 'directActions' 가 비어 있습니다"));
+			return false;
+		}
+
+		for (const TSharedPtr<FJsonValue>& Value : *DirectArray)
+		{
+			const FString ActionId = Value->AsString();
+			if (!FindAction(ActionId))
+			{
+				Fail(BossesPath, FString::Printf(TEXT("preset.directActions의 없는 공격 ID: %s"), *ActionId));
+				return false;
+			}
+			PresetDirectActions.Add(ActionId);
+		}
+
+		//자르지도 늘이지도 않으므로 개수가 곧 턴 수다
+		if (PresetDirectActions.Num() != Turns)
+		{
+			Fail(BossesPath, FString::Printf(
+				TEXT("preset.directActions가 %d개인데 encounter.turns는 %d입니다 — 정확히 맞아야 합니다"),
+				PresetDirectActions.Num(), Turns));
+			return false;
+		}
+	}
+	else if (PresetMode == EBossPresetMode::Custom)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* CustomArray = nullptr;
+		if (!(*PresetPtr)->TryGetArrayField(TEXT("customPatterns"), CustomArray) || CustomArray->Num() == 0)
+		{
+			Fail(BossesPath, TEXT("preset.mode가 custom인데 'customPatterns' 가 비어 있습니다"));
+			return false;
+		}
+
+		int32 TotalSteps = 0;
+		for (const TSharedPtr<FJsonValue>& Value : *CustomArray)
+		{
+			const FString PatternId = Value->AsString();
+			const FBossPattern* Pattern = FindPattern(PatternId);
+			if (!Pattern)
+			{
+				Fail(BossesPath, FString::Printf(TEXT("preset.customPatterns의 없는 패턴 ID: %s"), *PatternId));
+				return false;
+			}
+
+			TotalSteps += Pattern->Steps.Num();
+			PresetCustomPatterns.Add(PatternId);
+		}
+
+		//패턴을 중간에 자르지 않으므로 합이 정확히 맞아야 한다
+		if (TotalSteps != Turns)
+		{
+			Fail(BossesPath, FString::Printf(
+				TEXT("preset.customPatterns의 총 턴이 %d인데 encounter.turns는 %d입니다 — 패턴은 중간에 잘리지 않습니다"),
+				TotalSteps, Turns));
+			return false;
+		}
+	}
+
+	//아래 두 검사는 추첨할 때만 의미가 있다.
+	//고정 순서로 돌리는 판에서 1턴 패턴이 없다고 막으면 엉뚱하게 실패한다
+	if (PresetMode != EBossPresetMode::Random)
+	{
+		return true;
+	}
+
 	//정확히 Turns턴에 맞춰 끝내려면 1턴 패턴이 반드시 있어야 한다.
 	//남은 턴이 1일 때 쓸 수 있는 패턴은 그것뿐이고, 1턴 패턴이 있으면 남은 턴이
 	//얼마든 후보가 생기므로 이 검사 하나로 모든 남은 턴을 덮는다.

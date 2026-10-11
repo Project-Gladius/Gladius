@@ -147,6 +147,19 @@ struct FBossPattern
 	TArray<FString> Steps;
 };
 
+//보스가 10턴을 어떻게 채울지 고르는 방식 (bosses.json의 preset.mode).
+//시뮬레이터 engine.js의 schedule()과 같은 세 갈래여야 한다
+UENUM(BlueprintType)
+enum class EBossPresetMode : uint8
+{
+	//selection.pool에서 가중치로 뽑는다. 매 판 달라진다
+	Random,
+	//customPatterns에 적힌 패턴을 그 순서대로
+	Custom,
+	//directActions에 적힌 공격을 그 순서대로. 난수가 끼지 않는다
+	Direct
+};
+
 //패턴 추첨 가중치
 struct FPatternWeight
 {
@@ -206,6 +219,13 @@ struct FBattleBalance
 	TArray<FBossAction> Actions;
 	TArray<FBossPattern> Patterns;
 	TArray<FPatternWeight> Pool;
+
+	//preset — 턴을 채우는 방식. Random이 아니면 Pool은 쓰이지 않는다.
+	//preset.seed는 읽지 않는다. 시뮬레이터는 재현성이 필요해 시드를 쓰지만,
+	//방송은 매번 달라야 하므로 게임에서 고정 시드를 쓰면 안 된다
+	EBossPresetMode PresetMode = EBossPresetMode::Random;
+	TArray<FString> PresetCustomPatterns;
+	TArray<FString> PresetDirectActions;
 
 	//폴더 안의 abilities / enhancements / bosses .json 세 개를 읽는다.
 	//실패하면 이유를 Error 로그로 남기고 false. 조용히 기본값으로 때우지 않는다

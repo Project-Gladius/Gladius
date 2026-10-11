@@ -538,6 +538,9 @@ private:
 	FString CurrentPatternId;
 	int32 PatternStep = 0;
 
+	//custom 모드에서 몇 번째 패턴까지 썼는지. 추첨이 없으므로 순서만 들고 있으면 된다
+	int32 PresetPatternIndex = 0;
+
 	//레벨에 놓인 BattleSpot을 전부 찾아 구역별로 모으고 보스에서 가까운 순으로 정렬한다
 	void GatherSpots();
 
