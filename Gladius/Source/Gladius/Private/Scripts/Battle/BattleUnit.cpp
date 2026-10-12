@@ -62,16 +62,77 @@ void ABattleUnit::MoveTo(const FVector& Target, float Duration, bool bRollThroug
 
 	SetActorTickEnabled(true);
 
+	const float Distance = FVector::Dist(MoveStart, MoveTarget);
+
+	//진행 방향을 보고 달린다. 짧은 자리 조정까지 방향을 틀면 제자리에서 도는 것처럼 보인다
+	if (Distance >= TurnMinDistance)
+	{
+		TurnToward(MoveTarget);
+	}
+
 	//걷기와 달리기는 거리로 갈린다. 기준 거리는 블루프린트가 정하므로 값만 넘긴다
-	OnMoveStarted(Duration, FVector::Dist(MoveStart, MoveTarget), bRollThrough);
+	OnMoveStarted(Duration, Distance, bRollThrough);
+}
+
+void ABattleUnit::SetFacingTarget(const FVector& WorldLocation)
+{
+	bHasFaceTarget = true;
+	FaceTarget = WorldLocation;
+
+	//처음 지정할 때는 돌리는 연출 없이 바로 그쪽을 보게 한다
+	if (!bMoving)
+	{
+		const FVector Delta = FaceTarget - GetActorLocation();
+		if (!Delta.IsNearlyZero())
+		{
+			SetActorRotation(FRotator(0.f, Delta.Rotation().Yaw, 0.f));
+		}
+		bTurning = false;
+	}
+}
+
+void ABattleUnit::TurnToward(const FVector& WorldLocation)
+{
+	const FVector Delta = WorldLocation - GetActorLocation();
+	if (Delta.IsNearlyZero())
+	{
+		return;
+	}
+
+	DesiredYaw = Delta.Rotation().Yaw;
+
+	//이미 그 방향이면 Tick을 깨우지 않는다
+	if (FMath::IsNearlyZero(FMath::FindDeltaAngleDegrees(GetActorRotation().Yaw, DesiredYaw), 0.5f))
+	{
+		return;
+	}
+
+	bTurning = true;
+	SetActorTickEnabled(true);
 }
 
 void ABattleUnit::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	//회전은 이동과 따로 끝난다. 둘 다 끝나야 Tick을 끈다
+	if (bTurning)
+	{
+		const float NewYaw = FMath::FixedTurn(GetActorRotation().Yaw, DesiredYaw, TurnSpeed * DeltaSeconds);
+		SetActorRotation(FRotator(0.f, NewYaw, 0.f));
+
+		if (FMath::IsNearlyZero(FMath::FindDeltaAngleDegrees(NewYaw, DesiredYaw), 0.5f))
+		{
+			bTurning = false;
+		}
+	}
+
 	if (!bMoving)
 	{
+		if (!bTurning)
+		{
+			SetActorTickEnabled(false);
+		}
 		return;
 	}
 
@@ -87,7 +148,18 @@ void ABattleUnit::Tick(float DeltaSeconds)
 		//곡선이 1에서 끝나지 않더라도 목적지에 정확히 세운다
 		SetActorLocation(MoveTarget);
 		bMoving = false;
-		SetActorTickEnabled(false);
+
+		//도착했으면 다시 보스를 본다. 돌아가는 동안에는 Tick이 더 돌아야 한다
+		if (bHasFaceTarget)
+		{
+			TurnToward(FaceTarget);
+		}
+
+		if (!bTurning)
+		{
+			SetActorTickEnabled(false);
+		}
+
 		OnArrived();
 	}
 }

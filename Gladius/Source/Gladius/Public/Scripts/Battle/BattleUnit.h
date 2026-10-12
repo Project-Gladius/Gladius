@@ -32,6 +32,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsMoving() const { return bMoving; }
 
+	//멈춰 있을 때 바라볼 곳. 플레이어는 보스를 본다.
+	//지정하지 않으면 이동이 끝나도 방향을 되돌리지 않는다 (보스 유닛이 그렇다)
+	UFUNCTION(BlueprintCallable, Category = "Battle")
+	void SetFacingTarget(const FVector& WorldLocation);
+
 	// ---- 블루프린트 훅 ----
 	//
 	//모션이 준비되면 블루프린트에서 이 이벤트들에 애니메이션을 연결한다.
@@ -108,6 +113,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
 	TObjectPtr<UCurveFloat> MoveCurve;
 
+	//방향을 트는 속도(초당 각도). 달리기 모션이 옆으로 미끄러져 보이지 않으려면
+	//이동이 끝나기 전에 다 돌아야 한다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
+	float TurnSpeed = 540.f;
+
+	//이보다 짧게 움직일 때는 방향을 틀지 않는다.
+	//매 턴 자리를 조금씩 다시 잡는데 그때마다 돌면 제자리에서 빙빙 도는 것처럼 보인다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
+	float TurnMinDistance = 150.f;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -124,4 +139,14 @@ private:
 	FVector MoveTarget = FVector::ZeroVector;
 	float MoveElapsed = 0.f;
 	float MoveDuration = 0.f;
+
+	// ---- 회전 상태 ----
+	//이동과 따로 끝난다. 도착한 뒤에도 보스 쪽으로 마저 도는 동안 Tick이 살아 있어야 한다
+	bool bTurning = false;
+	float DesiredYaw = 0.f;
+	bool bHasFaceTarget = false;
+	FVector FaceTarget = FVector::ZeroVector;
+
+	//지금 그쪽을 보도록 목표 각도를 잡는다. 이미 거의 같은 방향이면 아무것도 하지 않는다
+	void TurnToward(const FVector& WorldLocation);
 };

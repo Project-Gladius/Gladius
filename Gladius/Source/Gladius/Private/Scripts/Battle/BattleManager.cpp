@@ -661,6 +661,10 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 			BossLocation(), FRotator::ZeroRotator);
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
+
+		//플레이어는 평소에 보스를 본다. 이동 중에만 진행 방향을 보고 도착하면 되돌아온다.
+		//보스에게는 지정하지 않는다 — 스폰할 때 준 각도를 그대로 유지해야 한다
+		NewPlayer.Unit->SetFacingTarget(BossLocation());
 #if WITH_EDITOR
 		NewPlayer.Unit->SetActorLabel(UserId);
 #endif
