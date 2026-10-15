@@ -129,7 +129,9 @@ void UCommandDispatcher::BroadcastDodge(const FParsedCommand& Command)
 
 void UCommandDispatcher::HandleLogout(const FParsedCommand& Command)
 {
-	//TODO: 로그아웃 로직 연결
+	LoggedInUsers.Remove(Command.UserId);
+	MissedTurnCounts.Remove(Command.UserId);
+	OnUserLoggedOut.Broadcast(Command.UserId);
 	UE_LOG(LogTemp, Log, TEXT("[로그아웃] 유저: %s"), *Command.UserId);
 }
 

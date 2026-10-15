@@ -5,6 +5,7 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/PlayerDataManager.h"
 #include "GameFramework/Actor.h" 
 #include "Kismet/GameplayStatics.h"
 #include "HttpModule.h"
@@ -51,6 +52,7 @@ UCommandDispatcher* AYouTubeChatManager::GetCommandDispatcher()
 		//전투/신전 상태 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
 		CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
 		CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
+		CommandDispatcher->OnUserLoggedOut.AddUObject(this, &AYouTubeChatManager::HandleUserLoggedOut);
 	}
 	return CommandDispatcher;
 }
@@ -76,6 +78,29 @@ void AYouTubeChatManager::StartFetchingChat()
 void AYouTubeChatManager::StopFetchingChat() {
 	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
 	UE_LOG(LogTemp, Log, TEXT("유튜브 채팅 수신 중지"));
+}
+
+void AYouTubeChatManager::SetCombatAutoPollingEnabled(bool bEnabled)
+{
+	bCombatAutoPollingEnabled = bEnabled;
+	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
+	if (bEnabled && !bFetchInFlight && !LiveChatId.IsEmpty() && !ApiKey.IsEmpty()
+		&& GetCurrentGameState() == EGameState::Combat)
+	{
+		RequestChatFetch();
+	}
+}
+
+void AYouTubeChatManager::CancelPendingChatFetch()
+{
+	if (ActiveChatRequest.IsValid())
+	{
+		FHttpRequestPtr Cancelled = ActiveChatRequest;
+		ActiveChatRequest.Reset();
+		Cancelled->OnProcessRequestComplete().Unbind();
+		Cancelled->CancelRequest();
+	}
+	bFetchInFlight = false;
 }
 
 void AYouTubeChatManager::RequestChatFetch()
@@ -128,6 +153,13 @@ void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString
 
 		UserDatabase.Add(UserId, NewUser);
 		User = UserDatabase.Find(UserId);
+	}
+
+	// Player records use exactly the same identifier as the chat user database.
+	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	{
+		FPlayerData Player;
+		Players->GetOrCreatePlayer(User->UserId, Player);
 	}
 
 	if (User->UnbanTime > Now) //블랙리스트 진행중
@@ -224,7 +256,7 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 				UE_LOG(LogTemp, Log, TEXT("LiveChatID 획득 성공 %s"), *LiveChatId); //LivechatID 가져오기
 
 				//전투상태는 바로 주기 조회 시작. 신전상태는 ATempleCycleController가 사이클마다 RequestChatFetch()로 조회
-				if (GetCurrentGameState() == EGameState::Combat)
+				if (bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
 				{
 					RequestMessages();
 				}
@@ -237,7 +269,7 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 void AYouTubeChatManager::RequestMessages()
 {
-	if (LiveChatId.IsEmpty() || ApiKey.IsEmpty()) return;
+	if (bFetchInFlight || LiveChatId.IsEmpty() || ApiKey.IsEmpty()) return;
 	FString Url = FString::Printf(
 		TEXT("https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=%s&part=snippet,authorDetails&key=%s"),
 		*LiveChatId,
@@ -257,11 +289,13 @@ void AYouTubeChatManager::RequestMessages()
 	Request->SetVerb("GET");
 
 	bFetchInFlight = true;
-	Request->ProcessRequest();
+	ActiveChatRequest = Request;
+	if (!Request->ProcessRequest()) { FinishFetch(false, CombatPollIntervalSeconds); }
 }
 
 void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
+	if (Request != ActiveChatRequest) { return; }
 	if (!bWasSuccessful || !Response.IsValid()) 
 	{
 		int32 ResponseCode = Response.IsValid() ? Response->GetResponseCode() : 0;
@@ -332,10 +366,11 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 
 void AYouTubeChatManager::FinishFetch(bool bSuccess, float NextPollDelay)
 {
+	ActiveChatRequest.Reset();
 	bFetchInFlight = false;
 
 	//전투상태에서만 스스로 다음 조회를 예약. 신전상태는 ATempleCycleController가 사이클마다 조회
-	if (bSuccess && GetCurrentGameState() == EGameState::Combat)
+	if (bSuccess && bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
 	{
 		GetWorldTimerManager().SetTimer(
 			ChatFetchTimerHandle,
@@ -391,8 +426,21 @@ EGameState AYouTubeChatManager::GetCurrentGameState() const
 
 void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)
 {
-	//TODO: DB에서 UserId에 해당하는 플레이어 데이터를 조회하고, 없으면 새로 생성한 뒤 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
+	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	{
+		Players->SetLoginState(UserId, true);
+		Players->BeginPlayerCombat(UserId);
+	}
+	//TODO: 저장된 플레이어 정보를 이용해 필드에 캐릭터를 스폰하는 로직 연결
 	UE_LOG(LogTemp, Log, TEXT("[로그인] 유저 %s 의 전투 참가 로그인 처리 필요"), *UserId);
+}
+
+void AYouTubeChatManager::HandleUserLoggedOut(const FString& UserId)
+{
+	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	{
+		Players->SetLoginState(UserId, false);
+	}
 }
 
 //받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장

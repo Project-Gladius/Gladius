@@ -13,6 +13,7 @@ DECLARE_DELEGATE_RetVal(EGameState, FGetGameStateDelegate);
 // 전투 관련 명령어가 특정 유저에 의해 처음 입력되어 자동 로그인이 필요할 때 브로드캐스트되는 델리게이트
 // 구독한 곳(예: 플레이어 매니저)에서 DB 조회/신규 생성 및 필드에 플레이어 스폰 로직을 실행하면 됨
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnUserLoginRequired, const FString& /*UserId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnUserLoggedOut, const FString& /*UserId*/);
 
 // ===== 명령어별 실행 델리게이트 =====
 // 외부(전투 로직, 캐릭터 스크립트 등)에서 구독해 실제 게임 동작을 처리하는 델리게이트.
@@ -53,6 +54,7 @@ public:
 
 	//외부(플레이어 매니저 등)에서 구독해 로그인 시 DB 조회/신규 생성/필드 스폰 로직을 연결
 	FOnUserLoginRequired OnUserLoginRequired;
+	FOnUserLoggedOut OnUserLoggedOut;
 
 	//외부(전투 로직 등)에서 구독해 공격 처리를 연결. Argument: "1" 또는 "2"
 	FOnAttackCommand OnAttackCommand;

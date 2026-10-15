@@ -64,6 +64,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void RequestChatFetch();
 
+	/** TurnManager pauses recurring polls while draining the final request. */
+	UFUNCTION(BlueprintCallable, Category = "YouTube API")
+	void SetCombatAutoPollingEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category = "YouTube API")
+	bool IsChatFetchInFlight() const { return bFetchInFlight; }
+
+	/** Discards an abandoned final poll so it cannot affect a later turn. */
+	UFUNCTION(BlueprintCallable, Category = "YouTube API")
+	void CancelPendingChatFetch();
+
 	FOnChatFetchFinished OnChatFetchFinished;
 
 	//명령어 디스패처. 처음 호출될 때 생성되므로 다른 액터의 BeginPlay 순서와 무관하게 구독 가능
@@ -99,14 +110,17 @@ private:
 	EGameState GetCurrentGameState() const;
 
 	//CommandDispatcher의 OnUserLoginRequired 구독 함수
-	//TODO: DB에서 플레이어 데이터를 조회하고 없으면 새로 생성한 뒤, 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
+	//플레이어 로그인 상태를 저장. 필드 캐릭터 스폰은 추후 연결
 	void HandleUserLoginRequired(const FString& UserId);
+	void HandleUserLoggedOut(const FString& UserId);
 
 	//API 상태 저장용 변수
 	FString LiveChatId;
 	FString NextPageToken;
 	FTimerHandle ChatFetchTimerHandle;
 	bool bFetchInFlight = false;
+	bool bCombatAutoPollingEnabled = true;
+	FHttpRequestPtr ActiveChatRequest;
 
 	//이 시각 이전에 올라온 채팅은 무시 (첫 조회 시 유튜브가 돌려주는 과거 채팅 제외)
 	FDateTime IgnoreMessagesBefore;
