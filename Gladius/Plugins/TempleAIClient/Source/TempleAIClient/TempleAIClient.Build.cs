@@ -13,7 +13,10 @@ public class TempleAIClient : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "HTTP",
-                "Json"
+                "Json",
+                "Slate",
+                "SlateCore",
+                "UMG"
             }
         );
     }

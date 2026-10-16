@@ -13,6 +13,7 @@ DECLARE_DELEGATE_RetVal(EGameState, FGetGameStateDelegate);
 // 전투 관련 명령어가 특정 유저에 의해 처음 입력되어 자동 로그인이 필요할 때 브로드캐스트되는 델리게이트
 // 구독한 곳(예: 플레이어 매니저)에서 DB 조회/신규 생성 및 필드에 플레이어 스폰 로직을 실행하면 됨
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnUserLoginRequired, const FString& /*UserId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnUserLoggedOut, const FString& /*UserId*/);
 
 // ===== 명령어별 실행 델리게이트 =====
 // 외부(전투 로직, 캐릭터 스크립트 등)에서 구독해 실제 게임 동작을 처리하는 델리게이트.
@@ -28,11 +29,12 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnDefendCommand, const FString& /*UserId*/)
 // !회피 좌/우/중 실행 시 브로드캐스트. Argument: 방향("좌"/"우"/"중")
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnDodgeCommand, const FString& /*UserId*/, const FString& /*Argument*/);
 
-// !강화 1~4 실행 시 브로드캐스트. Argument: 강화 번호("1"~"4")
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnEnhanceCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+// !강화 1~4 실행 시 브로드캐스트. Username: 작성자 표시명, Argument: 강화 번호("1"~"4")
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnEnhanceCommand, const FString& /*UserId*/, const FString& /*Username*/, const FString& /*Argument*/);
 
-// !대화 ... 실행 시 브로드캐스트. Argument: 대화 내용 전체
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTalkCommand, const FString& /*UserId*/, const FString& /*Argument*/);
+// !대화 ... 실행 시 브로드캐스트. AI 쿼리(uid/username/message)에 필요한 정보를 함께 넘김
+// CommentId: 채팅 고유 Id(uid), Username: 작성자 표시명(username), Argument: 대화 내용 전체(message)
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnTalkCommand, const FString& /*UserId*/, const FString& /*CommentId*/, const FString& /*Username*/, const FString& /*Argument*/);
 
 // 파싱된 명령어(ECommandType)와 이를 처리할 함수를 map으로 연결해 실행시키는 클래스
 UCLASS()
@@ -52,6 +54,7 @@ public:
 
 	//외부(플레이어 매니저 등)에서 구독해 로그인 시 DB 조회/신규 생성/필드 스폰 로직을 연결
 	FOnUserLoginRequired OnUserLoginRequired;
+	FOnUserLoggedOut OnUserLoggedOut;
 
 	//외부(전투 로직 등)에서 구독해 공격 처리를 연결. Argument: "1" 또는 "2"
 	FOnAttackCommand OnAttackCommand;
@@ -62,10 +65,10 @@ public:
 	//외부(전투 로직 등)에서 구독해 회피 처리를 연결. Argument: "좌"/"우"/"중"
 	FOnDodgeCommand OnDodgeCommand;
 
-	//외부(신전 로직 등)에서 구독해 강화 처리를 연결. Argument: "1"~"4"
+	//외부(신전 로직 등)에서 구독해 강화 처리를 연결. Username: 작성자 표시명, Argument: "1"~"4"
 	FOnEnhanceCommand OnEnhanceCommand;
 
-	//외부(신전 로직 등)에서 구독해 대화 처리를 연결. Argument: 대화 내용 전체
+	//외부(신전 로직 등)에서 구독해 대화(AI 쿼리) 처리를 연결. CommentId, Username, Argument(대화 내용 전체)를 받음
 	FOnTalkCommand OnTalkCommand;
 
 private:

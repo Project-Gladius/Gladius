@@ -5,6 +5,7 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/PlayerDataManager.h"
 #include "GameFramework/Actor.h" 
 #include "Kismet/GameplayStatics.h"
 #include "HttpModule.h"
@@ -34,14 +35,26 @@ void AYouTubeChatManager::BeginPlay()
 		GameManagerRef = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(GetWorld(), AGameManager::StaticClass()));
 	}
 
-	CommandDispatcher = NewObject<UCommandDispatcher>(this);
-	CommandDispatcher->Initialize();
+	GetCommandDispatcher();
 
-	//전투/신전 상태 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
-	CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
-	CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
+	IgnoreMessagesBefore = FDateTime::UtcNow();
 
 	StartFetchingChat();
+}
+
+UCommandDispatcher* AYouTubeChatManager::GetCommandDispatcher()
+{
+	if (!CommandDispatcher)
+	{
+		CommandDispatcher = NewObject<UCommandDispatcher>(this);
+		CommandDispatcher->Initialize();
+
+		//전투/신전 상태 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
+		CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
+		CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
+		CommandDispatcher->OnUserLoggedOut.AddUObject(this, &AYouTubeChatManager::HandleUserLoggedOut);
+	}
+	return CommandDispatcher;
 }
 
 // Called every frame
@@ -67,10 +80,61 @@ void AYouTubeChatManager::StopFetchingChat() {
 	UE_LOG(LogTemp, Log, TEXT("유튜브 채팅 수신 중지"));
 }
 
+void AYouTubeChatManager::SetCombatAutoPollingEnabled(bool bEnabled)
+{
+	bCombatAutoPollingEnabled = bEnabled;
+	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
+	if (bEnabled && !bFetchInFlight && !LiveChatId.IsEmpty() && !ApiKey.IsEmpty()
+		&& GetCurrentGameState() == EGameState::Combat)
+	{
+		RequestChatFetch();
+	}
+}
+
+void AYouTubeChatManager::CancelPendingChatFetch()
+{
+	if (ActiveChatRequest.IsValid())
+	{
+		FHttpRequestPtr Cancelled = ActiveChatRequest;
+		ActiveChatRequest.Reset();
+		Cancelled->OnProcessRequestComplete().Unbind();
+		Cancelled->CancelRequest();
+	}
+	bFetchInFlight = false;
+}
+
+void AYouTubeChatManager::RequestChatFetch()
+{
+	if (bFetchInFlight)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("이전 채팅 조회가 아직 끝나지 않아 이번 조회를 건너뜁니다."));
+		return;
+	}
+
+	if (LiveChatId.IsEmpty() || ApiKey.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("LiveChatId가 없어 채팅을 조회하지 못했습니다."));
+		OnChatFetchFinished.Broadcast(false);
+		return;
+	}
+
+	RequestMessages();
+}
 
 void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString UserId, FString Content)
 {
-	FDateTime Now = FDateTime::UtcNow();
+	OnReceiveYouTubeCommentWithUsername(CommentId, UserId, UserId, Content);
+}
+
+void AYouTubeChatManager::OnReceiveYouTubeCommentWithUsername(FString CommentId, FString UserId, FString Username, FString Content)
+{
+	ProcessComment(CommentId, UserId, Username, Content, FDateTime::UtcNow());
+}
+
+void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Content, const FDateTime& PostedAt)
+{
+	//여러 채팅을 한 번에 처리해도 도배 판정이 실제 채팅 시각 기준으로 되도록 처리 시각 대신 채팅이 올라온 시각을 사용
+	const FDateTime Now = PostedAt;
 
 	//공백 제거 등 명령어 전처리
 	FString CleanContent = PreprocessCommand(Content);
@@ -89,6 +153,13 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 
 		UserDatabase.Add(UserId, NewUser);
 		User = UserDatabase.Find(UserId);
+	}
+
+	// Player records use exactly the same identifier as the chat user database.
+	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	{
+		FPlayerData Player;
+		Players->GetOrCreatePlayer(User->UserId, Player);
 	}
 
 	if (User->UnbanTime > Now) //블랙리스트 진행중
@@ -110,7 +181,7 @@ void AYouTubeChatManager::OnReceiveYouTubeComment(FString CommentId, FString Use
 	FCommentLog Log{ CommentId, UserId, Now, CleanContent };
 	CommentLogs.Add(Log);
 
-	ExecuteGameCommand(UserId, CleanContent);
+	ExecuteGameCommand(CommentId, UserId, Username, CleanContent);
 }
 
 FString AYouTubeChatManager::PreprocessCommand(const FString& Input) 
@@ -184,7 +255,11 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId"));
 				UE_LOG(LogTemp, Log, TEXT("LiveChatID 획득 성공 %s"), *LiveChatId); //LivechatID 가져오기
 
-				RequestMessages();
+				//전투상태는 바로 주기 조회 시작. 신전상태는 ATempleCycleController가 사이클마다 RequestChatFetch()로 조회
+				if (bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
+				{
+					RequestMessages();
+				}
 				return;
 			}
 		}
@@ -194,7 +269,7 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 void AYouTubeChatManager::RequestMessages()
 {
-	if (LiveChatId.IsEmpty() || ApiKey.IsEmpty()) return;
+	if (bFetchInFlight || LiveChatId.IsEmpty() || ApiKey.IsEmpty()) return;
 	FString Url = FString::Printf(
 		TEXT("https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=%s&part=snippet,authorDetails&key=%s"),
 		*LiveChatId,
@@ -212,11 +287,15 @@ void AYouTubeChatManager::RequestMessages()
 
 	Request->SetURL(Url);
 	Request->SetVerb("GET");
-	Request->ProcessRequest();
+
+	bFetchInFlight = true;
+	ActiveChatRequest = Request;
+	if (!Request->ProcessRequest()) { FinishFetch(false, CombatPollIntervalSeconds); }
 }
 
 void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
 {
+	if (Request != ActiveChatRequest) { return; }
 	if (!bWasSuccessful || !Response.IsValid()) 
 	{
 		int32 ResponseCode = Response.IsValid() ? Response->GetResponseCode() : 0;
@@ -227,40 +306,72 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			UE_LOG(LogTemp, Error, TEXT("API 일일 할당량을 모두 소모했거나 권한이 없습니다!"));
 		}
 
+		FinishFetch(false, CombatPollIntervalSeconds);
 		return;
 	}
 
 	TSharedPtr<FJsonObject> JsonObject;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
 
-	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid()) {
-		if (JsonObject->HasField(TEXT("nextPageToken")))
+	if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("채팅 응답 JSON을 읽을 수 없습니다."));
+		FinishFetch(false, CombatPollIntervalSeconds);
+		return;
+	}
+
+	if (JsonObject->HasField(TEXT("nextPageToken")))
+	{
+		NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
+	}
+
+	double PollingIntervalMillis = 0.0;
+	const float NextPollDelay = JsonObject->TryGetNumberField(TEXT("pollingIntervalMillis"), PollingIntervalMillis)
+		? FMath::Max(1.0f, static_cast<float>(PollingIntervalMillis / 1000.0))
+		: CombatPollIntervalSeconds;
+
+	TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
+
+	for (const TSharedPtr<FJsonValue>& Item : Items) {
+		TSharedPtr<FJsonObject> MessageObj = Item->AsObject();
+		if (!MessageObj.IsValid()) continue;
+
+		FString CommentId = MessageObj->GetStringField(TEXT("id")); //채팅 고유 id가져오기
+
+		TSharedPtr<FJsonObject> SnippetObj = MessageObj->GetObjectField(TEXT("snippet"));
+		FString Content = SnippetObj->GetStringField(TEXT("displayMessage")); //채팅 가져오기
+
+		//채팅이 올라온 시각. 파싱에 실패하면 지금 시각으로 대체
+		FDateTime PostedAt;
+		if (!FDateTime::ParseIso8601(*SnippetObj->GetStringField(TEXT("publishedAt")), PostedAt))
 		{
-			NextPageToken = JsonObject->GetStringField(TEXT("nextPageToken"));
+			PostedAt = FDateTime::UtcNow();
+		}
+		if (PostedAt < IgnoreMessagesBefore)
+		{
+			continue; //씬 진입 전에 올라온 채팅은 무시
 		}
 
-		//유튜브가 알려주는 pollingIntervalMillis는 무시하고, 신전(40초)/전투(5초) 상태별 고정 주기만 사용
-		const float NextPollDelay = GetPollIntervalForCurrentState();
+		TSharedPtr<FJsonObject> AuthorObj = MessageObj->GetObjectField(TEXT("authorDetails"));
+		FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //채팅을 친 id를 가져오기
+		FString Username = AuthorObj->GetStringField(TEXT("displayName")); //채팅을 친 유저의 표시명 가져오기 (AI 쿼리의 username)
 
-		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items"));
+		ProcessComment(CommentId, UserId, Username, Content, PostedAt);
+	}
 
-		for (const TSharedPtr<FJsonValue>& Item : Items) { 
-			TSharedPtr<FJsonObject> MessageObj = Item->AsObject();
-			if (!MessageObj.IsValid()) continue;
+	//UE_LOG(LogTemp, Log, TEXT(">>> [%.1f초] 뒤에 다음 채팅을 요청합니다. (NextPageToken: %s)"), NextPollDelay, *NextPageToken); //디버깅용
 
-			FString CommentId = MessageObj->GetStringField(TEXT("id")); //채팅 고유 id가져오기
+	FinishFetch(true, NextPollDelay);
+}
 
-			TSharedPtr<FJsonObject> SnippetObj = MessageObj->GetObjectField(TEXT("snippet"));
-			FString Content = SnippetObj->GetStringField(TEXT("displayMessage")); //채팅 가져오기
+void AYouTubeChatManager::FinishFetch(bool bSuccess, float NextPollDelay)
+{
+	ActiveChatRequest.Reset();
+	bFetchInFlight = false;
 
-			TSharedPtr<FJsonObject> AuthorObj = MessageObj->GetObjectField(TEXT("authorDetails"));
-			FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //채팅을 친 id를 가져오기
-
-			OnReceiveYouTubeComment(CommentId, UserId, Content);
-		}
-
-		//UE_LOG(LogTemp, Log, TEXT(">>> [%.1f초] 뒤에 다음 채팅을 요청합니다. (NextPageToken: %s)"), NextPollDelay, *NextPageToken); //디버깅용
-
+	//전투상태에서만 스스로 다음 조회를 예약. 신전상태는 ATempleCycleController가 사이클마다 조회
+	if (bSuccess && bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
+	{
 		GetWorldTimerManager().SetTimer(
 			ChatFetchTimerHandle,
 			this,
@@ -269,6 +380,8 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 			false
 		);
 	}
+
+	OnChatFetchFinished.Broadcast(bSuccess);
 }
 
 //도배 유저의 차단 시간 가중 함수 
@@ -281,7 +394,7 @@ void AYouTubeChatManager::HandleSpamPenalty(FUserInfo& User, const FDateTime& No
 	UE_LOG(LogTemp, Error, TEXT("%s 유저가 %d분간 블랙리스트로 등록되었습니다."), *User.UserId, BanMinutes);
 }
 
-void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FString& Command)
+void AYouTubeChatManager::ExecuteGameCommand(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Command)
 {
 	FParsedCommand ParsedCommand;
 
@@ -291,10 +404,12 @@ void AYouTubeChatManager::ExecuteGameCommand(const FString& UserId, const FStrin
 		return;
 	}
 
-	if (CommandDispatcher)
-	{
-		CommandDispatcher->Execute(ParsedCommand);
-	}
+	//!대화 등에서 AI 쿼리(uid/username)로 쓰일 채팅 정보 채우기
+	//신전상태의 !강화/!대화는 CommandDispatcher가 브로드캐스트하고 UTempleCommandQueue가 받아 큐잉함
+	ParsedCommand.CommentId = CommentId;
+	ParsedCommand.Username = Username;
+
+	GetCommandDispatcher()->Execute(ParsedCommand);
 }
 
 void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimespan Remaining)
@@ -309,15 +424,23 @@ EGameState AYouTubeChatManager::GetCurrentGameState() const
 	return GameManagerRef ? GameManagerRef->GetGameState() : EGameState::Temple;
 }
 
-float AYouTubeChatManager::GetPollIntervalForCurrentState() const
-{
-	return GetCurrentGameState() == EGameState::Combat ? CombatPollIntervalSeconds : TemplePollIntervalSeconds;
-}
-
 void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)
 {
-	//TODO: DB에서 UserId에 해당하는 플레이어 데이터를 조회하고, 없으면 새로 생성한 뒤 필드에 플레이어 캐릭터를 스폰하는 로직 연결 예정
+	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	{
+		Players->SetLoginState(UserId, true);
+		Players->BeginPlayerCombat(UserId);
+	}
+	//TODO: 저장된 플레이어 정보를 이용해 필드에 캐릭터를 스폰하는 로직 연결
 	UE_LOG(LogTemp, Log, TEXT("[로그인] 유저 %s 의 전투 참가 로그인 처리 필요"), *UserId);
+}
+
+void AYouTubeChatManager::HandleUserLoggedOut(const FString& UserId)
+{
+	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	{
+		Players->SetLoginState(UserId, false);
+	}
 }
 
 //받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장

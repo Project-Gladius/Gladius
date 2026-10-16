@@ -1,7 +1,9 @@
 import re
+from datetime import datetime, timedelta
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Emotion(str, Enum):
@@ -52,6 +54,70 @@ class TempleResponse(ModelReply):
 
     uid: str
     username: str
+
+
+class TempleBatchMessage(StrictModel):
+    uid: str = Field(min_length=1, max_length=128)
+    userId: str = Field(min_length=1, max_length=128)
+    username: str = Field(min_length=1, max_length=100)
+    message: str = Field(min_length=1, max_length=200)
+
+    @field_validator("uid", "userId", "username", "message")
+    @classmethod
+    def strip_batch_whitespace(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+
+class TempleBatchRequest(StrictModel):
+    schemaVersion: Literal[1]
+    batchId: str = Field(min_length=1, max_length=128)
+    windowStartedAt: datetime
+    windowEndedAt: datetime
+    messages: list[TempleBatchMessage] = Field(min_length=1, max_length=30)
+
+    @field_validator("batchId")
+    @classmethod
+    def strip_batch_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def validate_batch(self) -> "TempleBatchRequest":
+        if self.windowStartedAt.utcoffset() != timedelta(0):
+            raise ValueError("windowStartedAt must be UTC")
+        if self.windowEndedAt.utcoffset() != timedelta(0):
+            raise ValueError("windowEndedAt must be UTC")
+        if self.windowEndedAt <= self.windowStartedAt:
+            raise ValueError("windowEndedAt must be after windowStartedAt")
+        if sum(len(item.message) for item in self.messages) > 4_000:
+            raise ValueError("batch message text must not exceed 4000 characters")
+        return self
+
+
+class ModelBatchReply(StrictModel):
+    """Ordered model replies without user-controlled identity fields."""
+
+    responses: list[ModelReply] = Field(min_length=1, max_length=30)
+
+
+class TempleBatchItemResponse(ModelReply):
+    """One public reply. Identity is copied from its matching request item."""
+
+    uid: str
+    username: str
+
+
+class TempleBatchResponse(StrictModel):
+    schemaVersion: Literal[1]
+    batchId: str
+    responses: list[TempleBatchItemResponse] = Field(min_length=1, max_length=30)
+    acceptedCount: int = Field(ge=1, le=30)
+    rejectedCount: int = Field(ge=0)
 
 
 class HealthResponse(StrictModel):

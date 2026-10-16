@@ -5,6 +5,8 @@
 #include "TempleAIClientComponent.h"
 #include "TempleAIQuickTesterActor.generated.h"
 
+class UTempleAIChatWidget;
+
 UCLASS()
 class TEMPLEAICLIENT_API ATempleAIQuickTesterActor : public AActor
 {
@@ -26,15 +28,31 @@ public:
     FString TestMessage = TEXT("여신님, 제 목소리가 들리시나요?");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI")
-    bool bSendOnBeginPlay = true;
+    bool bSendOnBeginPlay = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI|UI")
+    bool bShowInputUI = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple AI|UI")
+    TSubclassOf<UTempleAIChatWidget> ChatWidgetClass;
 
     UFUNCTION(BlueprintCallable, Category = "Temple AI")
     void SendTestMessage();
+
+    UFUNCTION(BlueprintCallable, Category = "Temple AI")
+    void SubmitMessageFromUI(const FString& Message);
 
 protected:
     virtual void BeginPlay() override;
 
 private:
+    UPROPERTY(Transient)
+    TObjectPtr<UTempleAIChatWidget> ChatWidget;
+
+    bool bRequestInFlight = false;
+
+    void CreateInputUI();
+
     UFUNCTION()
     void HandleTempleAIResponse(const FTempleAIResponse& Response);
 
