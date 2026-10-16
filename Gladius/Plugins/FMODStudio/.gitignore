@@ -1,0 +1,11 @@
+# FMOD Win64 team dependencies
+!Binaries/
+Binaries/*
+!Binaries/Win64/
+Binaries/Win64/*
+!Binaries/Win64/fmod*.dll
+!Binaries/Win64/fmod*_vc.lib
+!Binaries/Win64/resonanceaudio.dll
+!Binaries/Win64/UnrealEditor-FMODStudio.dll
+!Binaries/Win64/UnrealEditor-FMODStudioEditor.dll
+!Binaries/Win64/UnrealEditor.modules
