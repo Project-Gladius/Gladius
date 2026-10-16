@@ -97,6 +97,13 @@ struct FBattlePlayer
 	//연속으로 입력이 없었던 턴 수
 	UPROPERTY() int32 IdleTurns = 0;
 
+	//이번 턴에 보스에게 맞은 피해. 계산은 ResolveTurn에서 끝나지만 피격 모션은
+	//보스가 실제로 휘두르는 순간에 재생해야 해서 여기 담아 둔다
+	UPROPERTY() int32 DamageTakenThisTurn = 0;
+
+	//이번 턴에 쓰러졌는지. 사망 모션도 피격과 같은 순간에 나가야 한다
+	UPROPERTY() bool bDiedThisTurn = false;
+
 	UPROPERTY() TObjectPtr<ABattleUnit> Unit;
 
 	//0보다 크면 게임 오버 상태. 매 턴 줄어들고 0이 되면 부활한다
@@ -110,6 +117,17 @@ struct FAttackCue
 	FString UserId;
 	int32 AttackIndex = 1;
 	bool bCrit = false;
+
+	//이번 공격에 실제로 실린 피버. 피버가 오르기 전 값이라 피해 계산에 쓴 것과 같다
+	float Fever = 0.f;
+	//직업군별로 한 명씩 고르므로 같이 들고 있는다
+	int32 ClassIndex = 0;
+	//이 공격으로 보스에게 들어간 피해. 피버가 같을 때 가르는 데 쓴다
+	int32 Damage = 0;
+
+	//직업군 안에서 피버가 가장 높아 특수 연출 대상으로 뽑힌 공격.
+	//블루프린트는 이게 켜지면 평소 공격 대신 전용 모션을 재생한다
+	bool bFeverHighlight = false;
 };
 
 UCLASS()
@@ -184,7 +202,7 @@ public:
 
 	//동시 참여 정원. 레인마다 이만큼의 자리가 준비된다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	int32 MaxPlayers = 30;
+	int32 MaxPlayers = 15;
 
 	//게임 오버 후 부활까지 기다리는 턴 수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -220,17 +238,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float MoveSeconds = 1.5f;
 
-	//회피 이동만 따로 더 길게 끈다. 기획서가 '보스 공격은 회피한 캐릭터들이
-	//이동한 도중에' 일어나게 하라고 해서, 판정 단계가 시작된 뒤에도 계속 미끄러진다.
-	//MoveSeconds보다 짧으면 겹치지 않고 그냥 먼저 도착해 버린다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float EvadeMoveSeconds = 2.5f;
-
-	//회피가 끝나기 몇 초 전에 보스가 치는지. 클수록 아슬아슬해 보인다.
-	//회피한 사람이 없으면 쓰이지 않는다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float EvadeStrikeLead = 0.4f;
-
 	//공격이 한 번에 쏟아지면 누가 때렸는지 안 보인다. 몇 명씩 끊어서 보여준다 (기획서 AttackCount)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	int32 AttackCount = 3;
@@ -246,6 +253,48 @@ public:
 	//공격 뒤 자기 자리로 돌아가는 시간 (기획서 M2의 '원위치 이동')
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float ReturnSeconds = 0.8f;
+
+	// ---- 전투 개시 ~ 보스 공격 구간 ----
+	//
+	//기획서: 모든 공격 모션이 '보스 공격' 순간에 끝나도록 오른쪽 정렬된다.
+	//그래서 출발 시각을 BattleTime에서 역산한다 — 피버가 높을수록 때릴 게 많아
+	//일찍 출발하고, 그만큼 빨리 움직인다
+
+	//전투 개시부터 보스가 휘두르기까지의 전체 시간
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float BattleTime = 4.f;
+
+	//모션 길이가 BattleTime을 다 먹어도 최소한 이만큼은 이동 시간을 남긴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float MinMoveSeconds = 0.4f;
+
+	//평타 한 번의 모션 길이. 전원이 같아야 박자가 맞는다 (기획서 FeverAttackTime)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float FeverAttackTime = 0.35f;
+
+	//스킬 1 / 스킬 2 모션 길이. 애셋을 열어 보고 넣는 값이다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float Skill1MotionTime = 0.8f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float Skill2MotionTime = 1.f;
+
+	//이 속도(초당 cm)보다 느리면 걷고, 빠르면 뛴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float RunSpeed = 350.f;
+
+	//이보다 빨라야 하면 구르기를 섞는다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float RollSpeed = 700.f;
+
+	//구르기 한 번이 덮는 거리. 회피자는 이 거리를 남기고 미리 가 있다가
+	//보스 공격 모션에 맞춰 구른다. 전체 거리가 이보다 짧으면 제자리에서 기다린다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float RollDistance = 500.f;
+
+	//구르기 모션 길이
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float RollSeconds = 0.5f;
 
 	//플레이어 공격과 보스 공격 모션에 쓰는 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -479,16 +528,28 @@ private:
 	//피해를 계산하고 공격 모션을 띄운다
 	void ResolveTurn();
 
+	//직업군마다 피버가 가장 높았던 공격 하나에 표시를 남긴다.
+	//피버 → 피해 → UserId 순으로 비교해 같은 입력이면 항상 같은 결과가 나온다
+	static void MarkFeverHighlights(TArray<FAttackCue>& Cues);
+
 	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
 	void FlushAttackCues();
 
 	//플레이어 공격이 다 끝나고 보스가 치는 순간 (기획서 M2의 BossAttack 단계)
 	void BossAttackBeat();
 
+	//거리와 시간에서 나온 속도로 걸음걸이를 고른다. 시간이 0 이하면 가장 빠른 것으로 본다
+	static EMoveGait ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed);
+
+	//공격 모션에 필요한 시간. 스킬 한 번 + 평타 FeverStacks회
+	static float AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds);
+
+	//피버를 평타 횟수로 바꾼다. 소수는 버리고 상한을 적용한다
+	int32 FeverStacksFor(float Fever) const;
+
 	//판정 단계 시작부터 보스가 칠 때까지의 시간.
-	//회피가 아직 진행 중일 때 치되, 플레이어 공격 연출보다는 늦어야 한다
-	static float BossStrikeDelay(float FlurrySeconds, float EvadeRemaining,
-		float StrikeLead, bool bAnyEvader);
+	//전투 개시부터 재면 BattleTime이 되어야 하지만, 플레이어 공격 연출보다 빨라서는 안 된다
+	static float BossStrikeDelay(float FlurrySeconds, float RemainingToBattleTime);
 
 	//그 자리에서 보스 쪽으로 ChargeDistance까지 당긴 좌표.
 	//보스에서 본 각도를 유지하므로 구역을 벗어나지 않는다
