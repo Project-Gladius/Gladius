@@ -1,0 +1,7 @@
+# FMOD Win64 team dependencies
+!Binaries/
+Binaries/*
+!Binaries/Win64/
+Binaries/Win64/*
+!Binaries/Win64/UnrealEditor-FMODStudioNiagara.dll
+!Binaries/Win64/UnrealEditor.modules
