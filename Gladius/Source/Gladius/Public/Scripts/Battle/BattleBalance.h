@@ -147,6 +147,17 @@ struct FBossPattern
 	TArray<FString> Steps;
 };
 
+//이동 속도에 따라 갈리는 걸음걸이. 어떤 애니메이션을 틀지는 블루프린트가 정하고,
+//C++은 '이 속도로 가야 한다'에서 나온 분류만 넘긴다
+UENUM(BlueprintType)
+enum class EMoveGait : uint8
+{
+	Walk,
+	Run,
+	//구르기를 섞어야 할 만큼 빠른 경우
+	Roll
+};
+
 //보스가 10턴을 어떻게 채울지 고르는 방식 (bosses.json의 preset.mode).
 //시뮬레이터 engine.js의 schedule()과 같은 세 갈래여야 한다
 UENUM(BlueprintType)

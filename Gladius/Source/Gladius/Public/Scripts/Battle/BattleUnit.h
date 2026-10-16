@@ -25,9 +25,9 @@ public:
 
 	//Duration 동안 Target으로 미끄러져 간다. 0 이하면 즉시 이동한다.
 	//이동하는 동안만 Tick이 돌고 도착하면 다시 꺼진다.
-	//bRollThrough는 OnMoveStarted로 그대로 넘어간다
+	//Gait는 OnMoveStarted로 그대로 넘어간다
 	UFUNCTION(BlueprintCallable, Category = "Battle")
-	void MoveTo(const FVector& Target, float Duration, bool bRollThrough = false);
+	void MoveTo(const FVector& Target, float Duration, EMoveGait Gait = EMoveGait::Walk);
 
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsMoving() const { return bMoving; }
@@ -47,24 +47,35 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnActionSelected(EBattleAction Action);
 
-	//이동 시작.
-	//Distance가 짧으면 걷고 길면 뛴다 — 기준 거리는 블루프린트가 정한다(기획서: '구역이 아닌 거리로').
-	//bRollThrough면 이동 경로의 가운데가 이번 턴 피격 범위다. 구르기로 빠져나가는 연출용
+	//이동 시작. Gait는 '이 거리를 이 시간에 가려면 얼마나 빨라야 하는가'로 정해진다.
+	//기준 속도(RunSpeed / RollSpeed)는 BattleManager가 들고 있다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
-	void OnMoveStarted(float Duration, float Distance, bool bRollThrough);
+	void OnMoveStarted(float Duration, float Distance, EMoveGait Gait);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnArrived();
 
-	//공격. AttackIndex는 1 또는 2, bCrit이면 치명타 연출
+	//회피한 전원이 보스의 공격 모션에 맞춰 구른다.
+	//RemainingSeconds만큼 더 가야 하므로, 0이면 제자리에서 구르는 것이고
+	//크면 구르면서 그만큼 더 이동한다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
-	void OnAttack(int32 AttackIndex, bool bCrit);
+	void OnEvadeRoll(float RemainingSeconds, float RemainingDistance);
 
+	//공격. AttackIndex는 1 또는 2, bCrit이면 치명타 연출.
+	//bFeverHighlight면 이번 턴 자기 직업군에서 피버가 가장 높았던 한 명이다 —
+	//평소 공격 대신 전용 모션을 재생한다 (특수 컷신이 붙을 자리)
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
+
+	//방어 자세를 잡는다. 피해 판정이 아니라 **행동 턴이 시작될 때** 불린다.
+	//막이 실제로 맞았는지는 뒤이어 오는 OnHit으로 알 수 있다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnDefend();
 
+	//맞는 순간. bLethal이면 이 타격으로 쓰러진다 — 뒤이어 OnDied가 온다.
+	//쓰러진 뒤 일어날지는 이 값으로 갈린다. OnDied를 기다려서는 늦는다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
-	void OnHit(int32 Damage);
+	void OnHit(int32 Damage, bool bLethal);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnDied();

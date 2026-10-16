@@ -134,16 +134,40 @@ bool ABattleManager::IsAcceptingInput() const
 
 // ---------------- 좌표 ----------------
 
-float ABattleManager::BossStrikeDelay(float FlurrySeconds, float EvadeRemaining,
-	float StrikeLead, bool bAnyEvader)
+EMoveGait ABattleManager::ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed)
 {
-	//회피한 사람이 아직 미끄러지고 있을 때 쳐야 아슬아슬해 보인다.
-	//도착하기 StrikeLead만큼 전을 노린다
-	const float WhileMoving = bAnyEvader ? EvadeRemaining - StrikeLead : 0.f;
+	//시간이 없으면 아무리 가까워도 가장 빠른 수단이 필요하다
+	if (Seconds <= KINDA_SMALL_NUMBER)
+	{
+		return EMoveGait::Roll;
+	}
 
-	//그래도 플레이어 공격 연출보다 먼저 치면 안 된다.
+	const float Speed = Distance / Seconds;
+	if (Speed < RunSpeed)   { return EMoveGait::Walk; }
+	if (Speed < RollSpeed)  { return EMoveGait::Run; }
+	return EMoveGait::Roll;
+}
+
+float ABattleManager::AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds)
+{
+	//스킬 한 번 + 평타 FeverStacks회. 전원이 같은 순간에 끝나야 하므로
+	//이 길이를 BattleTime에서 빼면 곧 출발 시각이 된다
+	return SkillSeconds + FMath::Max(0, FeverStacks) * FMath::Max(0.f, FeverAttackSeconds);
+}
+
+int32 ABattleManager::FeverStacksFor(float Fever) const
+{
+	const int32 Stacks = FMath::FloorToInt(FMath::Max(0.f, Fever));
+	//상한이 0이면 무제한이라는 뜻이다 (파일의 null)
+	return FeverCap > 0.f ? FMath::Min(Stacks, FMath::FloorToInt(FeverCap)) : Stacks;
+}
+
+float ABattleManager::BossStrikeDelay(float FlurrySeconds, float RemainingToBattleTime)
+{
+	//전투 개시부터 BattleTime이 지난 순간에 치는 것이 기본이다.
+	//다만 플레이어 공격 연출보다 먼저 치면 안 된다 —
 	//기획서의 PlayerAttack → BossAttack 순서가 뒤집힌다
-	return FMath::Max(FlurrySeconds, WhileMoving);
+	return FMath::Max(FlurrySeconds, RemainingToBattleTime);
 }
 
 bool ABattleManager::IsRangedClass(int32 ClassIndex) const
@@ -745,6 +769,14 @@ void ABattleManager::StartTurn()
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		Pair.Value.PendingAction = EBattleAction::Idle;
+
+		//준비 자세를 풀라는 신호. 유닛은 턴이 바뀐 걸 알 방법이 없어서
+		//여기서 Idle을 한 번 쏴 줘야 지난 턴 자세로 계속 서 있지 않는다
+		if (Pair.Value.Unit && Pair.Value.ReviveCountdown == 0)
+		{
+			Pair.Value.Unit->OnActionSelected(EBattleAction::Idle);
+		}
+
 		Pair.Value.bActedThisTurn = false;
 	}
 
@@ -757,6 +789,13 @@ void ABattleManager::StartTurn()
 			{
 				Pair.Value.PendingAction = (EBattleAction)FMath::RandRange(1, 6);
 				Pair.Value.bActedThisTurn = true;
+
+				//위 루프가 Idle을 쏴 둔 뒤라, 여기서 다시 알리지 않으면
+				//유닛은 끝까지 '무입력'으로 알고 준비 자세를 잡지 않는다
+				if (Pair.Value.Unit)
+				{
+					Pair.Value.Unit->OnActionSelected(Pair.Value.PendingAction);
+				}
 			}
 		}
 	}
@@ -803,53 +842,80 @@ void ABattleManager::BeginMove()
 {
 	Phase = EBattlePhase::Move;
 
-	//가운데를 가로질러 반대편으로 넘어가는 사람은 이동 도중에 피격 범위를 지난다.
-	//기획서는 이때 구르기로 빠져나가게 한다. 이동 전 구역을 알아야 판단할 수 있다
-	const bool bMidIsHit = TelegraphedAction.DamageByZone[(int32)EBattleLane::Mid] > 0;
-	TSet<FString> RollThrough;
-
-	//회피 이동을 먼저 반영한다. 피해 계산은 이동이 끝난 뒤 ResolveTurn에서
+	//회피 이동을 먼저 반영한다. 피해 계산은 ResolveTurn에서
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
 		if (P.ReviveCountdown == 0)
 		{
-			const EBattleLane From = P.Lane;
 			P.Lane = ApplyMove(P.PendingAction, P.Lane);
-
-			const bool bCrossesMid =
-				(From == EBattleLane::Left && P.Lane == EBattleLane::Right) ||
-				(From == EBattleLane::Right && P.Lane == EBattleLane::Left);
-
-			if (bCrossesMid && bMidIsHit)
-			{
-				RollThrough.Add(Pair.Key);
-			}
 		}
 	}
 
 	//구역 인원이 바뀌었으니 자리를 다시 배분한다
 	AssignSlots();
 
-	for (const TPair<FString, FBattlePlayer>& Pair : Players)
+	//기획서: 모든 공격 모션이 '보스 공격' 순간에 끝나도록 맞춘다.
+	//때릴 게 많은(피버가 높은) 사람일수록 일찍 출발하고 그만큼 빨리 움직인다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
-		const FBattlePlayer& P = Pair.Value;
+		FBattlePlayer& P = Pair.Value;
 		if (!P.Unit || P.ReviveCountdown > 0)
 		{
 			continue;
 		}
 
-		//근접 직업군은 공격할 때 자리를 벗어나 보스에게 붙는다 (기획서 '최대한 보스에게 붙음').
-		//원거리와 그 외 행동은 배분받은 자리로 간다
-		const bool bCharging = (P.PendingAction == EBattleAction::Attack1 || P.PendingAction == EBattleAction::Attack2)
-			&& !IsRangedClass(P.ClassIndex);
+		if (P.PendingAction == EBattleAction::Defense)
+		{
+			//막을 펼치고 대비하는 자세. 맞는 순간이 아니라 지금 잡는다
+			P.Unit->OnDefend();
+			P.Unit->MoveTo(P.TargetLocation, MoveSeconds);
+			continue;
+		}
 
-		//회피만 느리게 간다. 돌진은 공격 연출 전에 도착해야 하므로 그대로 둔다 —
-		//보스를 때리는 순간에 아직 달려오는 중이면 허공을 치는 것처럼 보인다
-		const float Duration = IsEvade(P.PendingAction) ? EvadeMoveSeconds : MoveSeconds;
+		if (IsEvade(P.PendingAction))
+		{
+			//회피는 전원 마지막에 구른다. 구르기가 덮을 거리를 남겨 두고 미리 가 있는다 —
+			//두 칸을 건너는 사람은 그래서 미리 뛰기 시작하고, 한 칸이면 남길 게 없어 제자리에서 기다린다
+			const FVector From = P.Unit->GetActorLocation();
+			const float Total = FVector::Dist(From, P.TargetLocation);
+			const float Lead = Total - RollDistance;
 
-		P.Unit->MoveTo(bCharging ? ChargeLocation(P.TargetLocation) : P.TargetLocation,
-			Duration, RollThrough.Contains(Pair.Key));
+			if (Lead > KINDA_SMALL_NUMBER)
+			{
+				const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
+				P.Unit->MoveTo(Waypoint, MoveSeconds, ChooseGait(Lead, MoveSeconds, RunSpeed, RollSpeed));
+			}
+			else
+			{
+				//구르기 한 번이면 닿는 거리다. 보스 공격 모션에 맞춰 출발한다
+			}
+			continue;
+		}
+
+		const bool bAttacking = P.PendingAction == EBattleAction::Attack1
+			|| P.PendingAction == EBattleAction::Attack2;
+
+		if (!bAttacking)
+		{
+			//무입력. 자리만 맞춘다
+			P.Unit->MoveTo(P.TargetLocation, MoveSeconds);
+			continue;
+		}
+
+		//때릴 시간을 먼저 확보하고, 남는 만큼만 이동에 쓴다
+		const float SkillSeconds = (P.PendingAction == EBattleAction::Attack1)
+			? Skill1MotionTime : Skill2MotionTime;
+		const float MotionSeconds = AttackMotionSeconds(SkillSeconds, FeverStacksFor(P.Fever), FeverAttackTime);
+		const float MoveSecondsForMe = FMath::Max(MinMoveSeconds, BattleTime - MotionSeconds);
+
+		//근접만 보스에게 붙는다. 원거리는 제자리에서 쏘므로 자기 자리로만 간다
+		const FVector Target = IsRangedClass(P.ClassIndex)
+			? P.TargetLocation : ChargeLocation(P.TargetLocation);
+		const float Distance = FVector::Dist(P.Unit->GetActorLocation(), Target);
+
+		P.Unit->MoveTo(Target, MoveSecondsForMe,
+			ChooseGait(Distance, MoveSecondsForMe, RunSpeed, RollSpeed));
 	}
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, MoveSeconds, false);
@@ -949,8 +1015,6 @@ void ABattleManager::ResolveTurn()
 	int32 Died = 0;
 	int32 Revived = 0;
 
-	//회피한 사람이 하나라도 있으면 보스 공격을 그 이동에 맞춰 늦춘다
-	bool bAnyEvader = false;
 
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
@@ -998,7 +1062,6 @@ void ABattleManager::ResolveTurn()
 		const bool bAttack1 = P.PendingAction == EBattleAction::Attack1;
 		const bool bAttack2 = P.PendingAction == EBattleAction::Attack2;
 		const bool bEvade = IsEvade(P.PendingAction);
-		bAnyEvader |= bEvade;
 
 		//기획서 5절 순서 — 플레이어 공격을 먼저 계산한다.
 		//피버는 이번 턴 공격 피해에 반영된 뒤에 갱신된다
@@ -1018,8 +1081,16 @@ void ABattleManager::ResolveTurn()
 			Crits += bCrit ? 1 : 0;
 
 			//모션은 지금 재생하지 않는다. 전원이 한 프레임에 때리면 누가 쳤는지 보이지 않아,
-			//아래에서 랜덤 순서로 조금씩 끊어 재생한다. 피해는 이미 여기서 확정됐다
-			AttackCues.Add({ Pair.Key, bAttack1 ? 1 : 2, bCrit });
+			//아래에서 랜덤 순서로 조금씩 끊어 재생한다. 피해는 이미 여기서 확정됐다.
+			//피버는 '이번 공격에 실린 값'이어야 하므로 아래에서 오르기 전에 담는다
+			FAttackCue Cue;
+			Cue.UserId = Pair.Key;
+			Cue.AttackIndex = bAttack1 ? 1 : 2;
+			Cue.bCrit = bCrit;
+			Cue.Fever = P.Fever;
+			Cue.ClassIndex = P.ClassIndex;
+			Cue.Damage = Dealt;
+			AttackCues.Add(MoveTemp(Cue));
 
 			if (Record)
 			{
@@ -1033,17 +1104,9 @@ void ABattleManager::ResolveTurn()
 			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, Classes[P.ClassIndex].DefenseDamageRatio);
 		P.HP = FMath::Max(0, P.HP - Taken);
 
-		if (P.Unit)
-		{
-			if (P.PendingAction == EBattleAction::Defense)
-			{
-				P.Unit->OnDefend();
-			}
-			if (Taken > 0)
-			{
-				P.Unit->OnHit(Taken);
-			}
-		}
+		//피격 모션은 여기서 재생하지 않는다. 보스가 아직 휘두르지도 않았는데
+		//맞는 모션이 먼저 나가면 순서가 뒤집힌다. BossAttackBeat에서 꺼내 쓴다
+		P.DamageTakenThisTurn = Taken;
 
 		//연속 회피 횟수는 회피가 아닌 행동(무입력 포함)에서 끊긴다
 		P.EvadeStreak = bEvade ? P.EvadeStreak + 1 : 0;
@@ -1067,12 +1130,8 @@ void ABattleManager::ResolveTurn()
 		if (P.HP <= 0)
 		{
 			P.ReviveCountdown = ReviveTurns;
+			P.bDiedThisTurn = true;
 			++Died;
-
-			if (P.Unit)
-			{
-				P.Unit->OnDied();
-			}
 		}
 	}
 
@@ -1102,6 +1161,10 @@ void ABattleManager::ResolveTurn()
 	//주기 저장 대신 턴 경계에서만 쓰면 조절할 값도 없고 저장 시점도 분명해진다
 	SaveRecords();
 
+	//직업군마다 피버가 가장 높았던 한 명을 특수 연출 대상으로 뽑는다.
+	//피버가 같으면 이번 턴에 더 많이 때린 쪽. 섞기 전에 골라야 순서와 무관하게 같은 결과가 나온다
+	MarkFeverHighlights(AttackCues);
+
 	//기획서는 '랜덤 순서대로' 치라고 한다. 자리 순서대로 치면 줄 세운 것처럼 보인다
 	for (int32 i = AttackCues.Num() - 1; i > 0; --i)
 	{
@@ -1126,12 +1189,46 @@ void ABattleManager::ResolveTurn()
 			FMath::Max(KINDA_SMALL_NUMBER, AttackTerm), true, 0.f);
 	}
 
-	//회피는 BeginMove에서 출발했으므로 여기 기준으로는 EvadeMoveSeconds - MoveSeconds가 남아 있다
-	const float BossDelay = BossStrikeDelay(FlurrySeconds, EvadeMoveSeconds - MoveSeconds,
-		EvadeStrikeLead, bAnyEvader);
+	//전투 개시부터 재서 BattleTime이 되는 순간에 보스가 친다.
+	//여기는 이미 MoveSeconds가 지난 뒤라 그만큼 뺀다
+	const float BossDelay = BossStrikeDelay(FlurrySeconds, BattleTime - MoveSeconds);
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BossAttackBeat,
 		FMath::Max(KINDA_SMALL_NUMBER, BossDelay), false);
+}
+
+void ABattleManager::MarkFeverHighlights(TArray<FAttackCue>& Cues)
+{
+	//직업군별 최고 피버 한 명. 같은 피버면 더 많이 때린 쪽을 고른다.
+	//UserId까지 비교해 완전히 결정적으로 만든다 — 안 그러면 맵 순회 순서에 따라 대상이 흔들린다
+	TMap<int32, int32> BestByClass;
+
+	for (int32 i = 0; i < Cues.Num(); ++i)
+	{
+		const FAttackCue& Cue = Cues[i];
+		const int32* Found = BestByClass.Find(Cue.ClassIndex);
+		if (!Found)
+		{
+			BestByClass.Add(Cue.ClassIndex, i);
+			continue;
+		}
+
+		const FAttackCue& Best = Cues[*Found];
+		const bool bWins =
+			Cue.Fever > Best.Fever ||
+			(Cue.Fever == Best.Fever && Cue.Damage > Best.Damage) ||
+			(Cue.Fever == Best.Fever && Cue.Damage == Best.Damage && Cue.UserId < Best.UserId);
+
+		if (bWins)
+		{
+			BestByClass[Cue.ClassIndex] = i;
+		}
+	}
+
+	for (const TPair<int32, int32>& Pair : BestByClass)
+	{
+		Cues[Pair.Value].bFeverHighlight = true;
+	}
 }
 
 void ABattleManager::FlushAttackCues()
@@ -1145,7 +1242,7 @@ void ABattleManager::FlushAttackCues()
 		{
 			if (P->Unit)
 			{
-				P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit);
+				P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
 			}
 		}
 	}
@@ -1166,6 +1263,55 @@ void ABattleManager::BossAttackBeat()
 		BossUnit->OnBossAttack(TelegraphedAction.AttackMotionId, TelegraphedAction.HitCount);
 	}
 
+	//회피자는 전원 여기서 구른다. 보스가 휘두르는 것과 같은 순간이라 아슬아슬해 보인다.
+	//미리 와 있던 사람은 남은 거리만, 제자리에서 기다리던 사람은 전부를 구르기로 덮는다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
+		{
+			continue;
+		}
+
+		//구르기는 '남은 거리만큼'이 아니라 **정해진 거리**를 덮는다. 모션에 이동이
+		//실려 있어서 늘이고 줄일 수 없기 때문이다. 자리까지 모자라는 만큼은
+		//구른 뒤에 걷거나 뛰어서 마저 간다 (EndTurn의 원위치 이동이 그 역할을 한다)
+		const FVector From = P.Unit->GetActorLocation();
+		const float Remaining = FVector::Dist(From, P.TargetLocation);
+		const float Covered = FMath::Min(RollDistance, Remaining);
+
+		const FVector RollTo = Remaining > KINDA_SMALL_NUMBER
+			? FMath::Lerp(From, P.TargetLocation, Covered / Remaining)
+			: From;
+
+		P.Unit->OnEvadeRoll(RollSeconds, Covered);
+		P.Unit->MoveTo(RollTo, RollSeconds, EMoveGait::Roll);
+	}
+
+	//보스가 휘두르는 바로 이 순간에 맞는 쪽 반응이 나간다.
+	//방어한 사람도 여기로 들어오므로 막는 모션과 그냥 맞는 모션은 블루프린트가 가른다.
+	//이번 턴에 쓰러진 사람은 맞는 모션까지 보여준 뒤 쓰러진다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (P.Unit)
+		{
+			if (P.DamageTakenThisTurn > 0)
+			{
+				//쓰러질 타격인지 지금 알려준다. OnDied는 뒤에 오므로
+				//블루프린트가 그걸 기다리면 이미 일어나는 모션이 섞인 뒤다
+				P.Unit->OnHit(P.DamageTakenThisTurn, P.bDiedThisTurn);
+			}
+			if (P.bDiedThisTurn)
+			{
+				P.Unit->OnDied();
+			}
+		}
+
+		P.DamageTakenThisTurn = 0;
+		P.bDiedThisTurn = false;
+	}
+
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn, BossActionSeconds, false);
 }
 
@@ -1174,13 +1320,16 @@ void ABattleManager::EndTurn()
 	Phase = EBattlePhase::Resolve;
 
 	//기획서 M2의 마지막 단계 — 돌진했던 캐릭터가 자기 자리로 돌아간다.
+	//구르고 나서 자리까지 남은 거리도 여기서 마저 간다. 거리에 따라 걷거나 뛴다.
 	//이미 제자리면 MoveTo가 알아서 넘어가므로 전원에게 그냥 걸어도 된다
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		const FBattlePlayer& P = Pair.Value;
 		if (P.Unit && P.ReviveCountdown == 0)
 		{
-			P.Unit->MoveTo(P.TargetLocation, ReturnSeconds);
+			const float Distance = FVector::Dist(P.Unit->GetActorLocation(), P.TargetLocation);
+			P.Unit->MoveTo(P.TargetLocation, ReturnSeconds,
+				ChooseGait(Distance, ReturnSeconds, RunSpeed, RollSpeed));
 		}
 	}
 
@@ -1910,26 +2059,88 @@ void ABattleManager::RunSelfTest()
 	check(!GridSlotLocation(EBattleLane::Left, 0).Equals(GridSlotLocation(EBattleLane::Right, 0)));
 	check(!GridSlotLocation(EBattleLane::Mid, 0).Equals(GridSlotLocation(EBattleLane::Mid, 1)));
 
+	// --- 피버 특수 연출 대상 고르기 ---
+	{
+		auto Make = [](const TCHAR* Id, int32 Class, float Fever, int32 Damage)
+		{
+			FAttackCue C;
+			C.UserId = Id;
+			C.ClassIndex = Class;
+			C.Fever = Fever;
+			C.Damage = Damage;
+			return C;
+		};
+
+		//직업군마다 정확히 하나씩, 피버가 가장 높은 것
+		TArray<FAttackCue> Cues = {
+			Make(TEXT("@a"), 0, 5.f, 10), Make(TEXT("@b"), 0, 15.f, 10),
+			Make(TEXT("@c"), 1, 20.f, 10), Make(TEXT("@d"), 1, 10.f, 10) };
+		MarkFeverHighlights(Cues);
+		check(!Cues[0].bFeverHighlight && Cues[1].bFeverHighlight);
+		check(Cues[2].bFeverHighlight && !Cues[3].bFeverHighlight);
+
+		//피버가 같으면 더 많이 때린 쪽
+		TArray<FAttackCue> Tie = { Make(TEXT("@a"), 0, 9.f, 3), Make(TEXT("@b"), 0, 9.f, 7) };
+		MarkFeverHighlights(Tie);
+		check(!Tie[0].bFeverHighlight && Tie[1].bFeverHighlight);
+
+		//피버도 피해도 같으면 UserId로 가른다 — 순서가 바뀌어도 같은 사람이 뽑혀야 한다
+		TArray<FAttackCue> Same = { Make(TEXT("@b"), 0, 9.f, 5), Make(TEXT("@a"), 0, 9.f, 5) };
+		MarkFeverHighlights(Same);
+		check(Same[1].bFeverHighlight && !Same[0].bFeverHighlight);
+
+		//한 명뿐이어도 뽑힌다. 아무도 없으면 아무 일도 없어야 한다
+		TArray<FAttackCue> One = { Make(TEXT("@a"), 0, 0.f, 0) };
+		MarkFeverHighlights(One);
+		check(One[0].bFeverHighlight);
+
+		TArray<FAttackCue> None;
+		MarkFeverHighlights(None);
+		check(None.Num() == 0);
+	}
+
 	// --- 보스 공격 시점 ---
 	{
-		//회피가 없으면 플레이어 공격이 끝나자마자 친다
-		check(FMath::IsNearlyEqual(BossStrikeDelay(1.2f, 5.f, 0.4f, false), 1.2f));
+		//BattleTime까지 남은 시간이 길면 그만큼 기다린다
+		check(FMath::IsNearlyEqual(BossStrikeDelay(0.5f, 2.f), 2.f));
 
-		//회피가 있으면 이동이 끝나기 StrikeLead 전에 친다
-		check(FMath::IsNearlyEqual(BossStrikeDelay(0.5f, 2.f, 0.4f, true), 1.6f));
-
-		//어떤 값을 넣어도 플레이어 공격 연출보다 빨라지지 않는다 (기획서 순서)
+		//어떤 값을 넣어도 플레이어 공격 연출보다 빨라지지 않는다 (기획서 PlayerAttack → BossAttack)
 		for (const float Flurry : { 0.f, 0.5f, 1.2f, 3.f })
 		{
 			for (const float Remaining : { -1.f, 0.f, 0.3f, 2.f, 10.f })
 			{
-				for (const float Lead : { 0.f, 0.4f, 5.f })
-				{
-					check(BossStrikeDelay(Flurry, Remaining, Lead, true) >= Flurry);
-					check(BossStrikeDelay(Flurry, Remaining, Lead, false) >= Flurry);
-				}
+				check(BossStrikeDelay(Flurry, Remaining) >= Flurry);
 			}
 		}
+	}
+
+	// --- 걸음걸이 ---
+	{
+		//같은 거리라도 시간이 짧을수록 빨라져야 한다
+		check(ChooseGait(300.f, 3.f, 350.f, 700.f) == EMoveGait::Walk);
+		check(ChooseGait(1500.f, 3.f, 350.f, 700.f) == EMoveGait::Run);
+		check(ChooseGait(3000.f, 3.f, 350.f, 700.f) == EMoveGait::Roll);
+
+		//경계는 '미만'이 아래쪽이다
+		check(ChooseGait(350.f, 1.f, 350.f, 700.f) == EMoveGait::Run);
+		check(ChooseGait(700.f, 1.f, 350.f, 700.f) == EMoveGait::Roll);
+
+		//시간이 없으면 거리가 0이어도 가장 빠른 것으로 본다 (0으로 나누지 않는다)
+		check(ChooseGait(0.f, 0.f, 350.f, 700.f) == EMoveGait::Roll);
+	}
+
+	// --- 공격 모션 길이 ---
+	{
+		//스킬 한 번 + 평타 N회
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 0, 0.35f), 1.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 4, 0.5f), 3.f));
+
+		//음수 스택이나 음수 길이가 들어와도 줄어들지 않는다
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, -3, 0.5f), 1.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 4, -0.5f), 1.f));
+
+		//피버가 높을수록 때릴 게 많아 이동에 쓸 시간이 줄어든다
+		check(AttackMotionSeconds(1.f, 9, 0.35f) > AttackMotionSeconds(1.f, 2, 0.35f));
 	}
 
 	// --- 돌진 좌표 ---

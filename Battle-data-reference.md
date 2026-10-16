@@ -116,7 +116,13 @@
 | `ReviveTurns` | 3 | 게임 오버 후 부활까지 대기 턴 |
 | `GameOverLoss` | 0.5 | 부활 시 잃는 강화 능력치 비율 |
 | `TelegraphSeconds` | 5 | 예고 시간 |
-| `MoveSeconds` | 1.5 | 회피 이동 연출 시간 |
+| `MoveSeconds` | 1.5 | 자리 재배치·방어·회피 선행 이동 시간 |
+| `BattleTime` | 4.0 | 전투 개시 → 보스 공격. 공격자의 출발 시각을 여기서 역산 |
+| `FeverAttackTime` | 0.35 | 평타 1회 모션 길이 (전원 동일해야 박자가 맞음) |
+| `Skill1MotionTime` / `Skill2MotionTime` | 0.8 / 1.0 | 스킬 모션 길이 |
+| `MinMoveSeconds` | 0.4 | 모션이 길어도 남기는 최소 이동 시간 |
+| `RunSpeed` / `RollSpeed` | 350 / 700 | 걷기·뛰기·구르기를 가르는 속도 |
+| `RollDistance` / `RollSeconds` | 500 / 0.5 | 구르기가 덮는 거리와 길이 |
 | `DefaultCharacterId` | `gladius` | 새 유저에게 줄 직업군 |
 | `BossActionSeconds` | 1.5 | 공격 모션 시간 |
 | `PlayerSelectCountdown` | 90 | 행동 선택 시간 |
@@ -183,13 +189,15 @@ Telegraph → Input → Collect → Resolve → (다음 턴)
 
 `Resolve` 단계의 처리 순서입니다.
 
-1. 회피 행동을 반영해 구역 이동 (이동 연출 `MoveSeconds`)
+1. 회피 행동을 반영해 구역 이동 (연출 시간은 역할마다 다름 — `BattleTime` 역산)
 2. 플레이어 공격 피해 계산 및 누적
 3. 보스 공격 피격 판정 및 체력 차감
 4. 연속 회피 횟수 갱신 → 피버 갱신 → 상한 적용
 5. 체력 0이면 게임 오버 처리
 6. 무입력 이탈 처리
 7. 종료 조건 검사 (보스 처치 또는 `Turns` 도달)
+
+> 1~7은 **계산**입니다. 보스 공격·회피 구르기·피격·사망 **모션**은 `BossAttackBeat`에서 따로 재생됩니다. 계산 순서(`turnOrder`)와 연출 순서를 섞지 마세요.
 
 보스 행동은 턴이 시작될 때 **진행 중인 패턴의 다음 step**에서 나옵니다. 패턴이 끝난 턴에만 새 패턴을 뽑습니다.
 

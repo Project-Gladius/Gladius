@@ -40,7 +40,7 @@ void ABattleUnit::BeginPlay()
 	ApplyLabel();
 }
 
-void ABattleUnit::MoveTo(const FVector& Target, float Duration, bool bRollThrough)
+void ABattleUnit::MoveTo(const FVector& Target, float Duration, EMoveGait Gait)
 {
 	//이미 그 자리면 굳이 움직이지 않는다
 	if (GetActorLocation().Equals(Target, 1.f))
@@ -70,8 +70,7 @@ void ABattleUnit::MoveTo(const FVector& Target, float Duration, bool bRollThroug
 		TurnToward(MoveTarget);
 	}
 
-	//걷기와 달리기는 거리로 갈린다. 기준 거리는 블루프린트가 정하므로 값만 넘긴다
-	OnMoveStarted(Duration, Distance, bRollThrough);
+	OnMoveStarted(Duration, Distance, Gait);
 }
 
 void ABattleUnit::SetFacingTarget(const FVector& WorldLocation)
