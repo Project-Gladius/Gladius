@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Scripts/Battle/BattleBalance.h"
+#include "Scripts/Battle/BattleUnit.h"
 #include "BattleManager.generated.h"
 
 class ABattleUnit;
@@ -363,6 +364,10 @@ public:
 	//Input과 Collect 단계에서만 입력을 받는다
 	UFUNCTION(BlueprintPure, Category = "Battle|State")
 	bool IsAcceptingInput() const;
+
+	// 컷신 등 표시 계층은 전투 상태를 읽기만 한다.
+	const TMap<FString, FBattlePlayer>& GetBattlePlayers() const { return Players; }
+	ABattleUnit* GetBossUnit() const { return BossUnit.Get(); }
 
 	// ---- 외부 진입점 ----
 

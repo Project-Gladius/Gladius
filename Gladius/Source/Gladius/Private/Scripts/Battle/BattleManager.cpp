@@ -1455,12 +1455,12 @@ void ABattleManager::Tick(float DeltaTime)
 	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
 
 	//구역마다 피해와 내성이 다르므로 좌·중·우를 나란히 보여준다
-	static const TCHAR* ZoneNames[] = { TEXT("L"), TEXT("M"), TEXT("R") };
+	static const TCHAR* DisplayZoneNames[] = { TEXT("L"), TEXT("M"), TEXT("R") };
 	FString Zones;
 	for (int32 i = 0; i < 3; ++i)
 	{
 		Zones += FString::Printf(TEXT("  %s dmg %d P%.1f M%.1f"),
-			ZoneNames[i], TelegraphedAction.DamageByZone[i],
+			DisplayZoneNames[i], TelegraphedAction.DamageByZone[i],
 			ResistanceMultiplier(TelegraphedAction.ResistanceByZone[i].Physical),
 			ResistanceMultiplier(TelegraphedAction.ResistanceByZone[i].Magical));
 	}
