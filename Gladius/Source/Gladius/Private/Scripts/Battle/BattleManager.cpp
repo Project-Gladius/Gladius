@@ -97,7 +97,7 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ABattleManager::StartBattle()
 {
-	EnemyHP = EnemyMaxHP;
+	BossDamageTaken = 0;
 	TurnIndex = 0;
 
 	//패턴 진행도는 한 판에 속한 값이다. 안 지우면 다음 판이 중간부터 시작한다
@@ -811,8 +811,8 @@ void ABattleManager::StartTurn()
 		BossUnit->OnBossTelegraph(TelegraphedAction.TelegraphMotionId, TelegraphedAction.TelegraphText);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / Boss %d / '%s' → %s"),
-		TurnIndex, Turns, TelegraphSeconds, Players.Num(), EnemyHP,
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / '%s' → %s"),
+		TurnIndex, Turns, TelegraphSeconds, Players.Num(),
 		*TelegraphedAction.Name, *ZonesLabel(TelegraphedAction));
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, TelegraphSeconds, false);
@@ -1123,6 +1123,9 @@ void ABattleManager::ResolveTurn()
 			Cue.Damage = Dealt;
 			AttackCues.Add(MoveTemp(Cue));
 
+			//Records는 방송 전체 누적이라 초기화되지 않는다. 판 단위 순위는 이쪽이다
+			P.DamageDealt += Dealt;
+
 			if (Record)
 			{
 				Record->TotalDamageDealt += Dealt;
@@ -1166,7 +1169,8 @@ void ABattleManager::ResolveTurn()
 		}
 	}
 
-	EnemyHP = FMath::Max(0, EnemyHP - TotalDealt);
+	//깎을 체력이 없으므로 쌓기만 한다
+	BossDamageTaken += TotalDealt;
 
 	//무입력이 이어진 유저를 전장에서 뺀다. 순회 중에는 지울 수 없어 모아뒀다가 처리한다
 	TArray<FString> Leaving;
@@ -1182,8 +1186,8 @@ void ABattleManager::ResolveTurn()
 		RemovePlayer(UserId);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d타) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → Boss %d"),
-		TurnIndex, *ZonesLabel(Boss), Boss.HitCount, TotalDealt, Crits, Died, Revived, EnemyHP);
+	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d타) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → 누적 %d"),
+		TurnIndex, *ZonesLabel(Boss), Boss.HitCount, TotalDealt, Crits, Died, Revived, BossDamageTaken);
 
 	LastTurnSummary = FString::Printf(TEXT("Boss hit %s   Damage dealt %d (%d crit)   Down %d   Revived %d"),
 		*ZonesLabel(Boss), TotalDealt, Crits, Died, Revived);
@@ -1422,19 +1426,33 @@ void ABattleManager::EndTurn()
 	//체력 변화와 사망 숨김은 모션이 끝난 지금 반영한다
 	UpdateVisuals();
 
-	if (EnemyHP <= 0)
-	{
-		LastTurnSummary = FString::Printf(TEXT("VICTORY   boss defeated on turn %d"), TurnIndex);
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — 보스 격파 (Turn %d)"), TurnIndex);
-		StopBattle();
-		return;
-	}
-
-	//목표는 생존이므로, 정해진 턴을 버티면 무승부로 끝난다
+	//보스는 체력이 없으므로 격파로 끝나는 길이 없다. 끝나는 조건은 이것 하나다 —
+	//정해진 턴을 다 치르면, 얼마나 버텼고 얼마나 넣었는지로 결과가 갈린다
 	if (TurnIndex >= Turns)
 	{
-		LastTurnSummary = FString::Printf(TEXT("DRAW   survived %d turns   boss left %d HP"), Turns, EnemyHP);
-		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — %d턴 생존, 무승부 (Boss %d 남음)"), Turns, EnemyHP);
+		FString TopName;
+		int32 TopDamage = 0;
+		int32 Alive = 0;
+		for (const TPair<FString, FBattlePlayer>& Pair : Players)
+		{
+			const FBattlePlayer& P = Pair.Value;
+			if (P.ReviveCountdown == 0)
+			{
+				++Alive;
+			}
+			if (P.DamageDealt > TopDamage)
+			{
+				TopDamage = P.DamageDealt;
+				TopName = P.DisplayName;
+			}
+		}
+
+		LastTurnSummary = FString::Printf(TEXT("END   %d turns   damage %d   alive %d/%d"),
+			Turns, BossDamageTaken, Alive, Players.Num());
+
+		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — %d턴 완주 / 누적 피해 %d / 생존 %d/%d / 1위 %s (%d)"),
+			Turns, BossDamageTaken, Alive, Players.Num(), *TopName, TopDamage);
+
 		StopBattle();
 		return;
 	}
@@ -1503,7 +1521,6 @@ void ABattleManager::ApplyBalanceFiles()
 	CritDamagePerBonus = Balance.CritDamagePerLevel;
 	CritChanceCap = Balance.CritChanceCap;
 
-	EnemyMaxHP = Balance.BossMaxHP;
 	Turns = Balance.Turns;
 
 	//보스가 추첨으로 도는지 고정 순서로 도는지는 로그만 보고도 알아야 한다.
@@ -1515,8 +1532,8 @@ void ABattleManager::ApplyBalanceFiles()
 
 	//에디터에서 고친 값이 조용히 사라지는 일이 없도록, 덮어쓴 결과를 남긴다
 	UE_LOG(LogTemp, Log, TEXT("[Balance] 에디터 값을 파일 값으로 덮어썼습니다 — ")
-		TEXT("직업군 %d종 / 피버 +%.0f·%.0f×%.0f / 보스 HP %d / %d턴 / 보스 진행 %s"),
-		Classes.Num(), FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, EnemyMaxHP, Turns, ModeText);
+		TEXT("직업군 %d종 / 피버 +%.0f·%.0f×%.0f / %d턴 / 보스 진행 %s"),
+		Classes.Num(), FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, Turns, ModeText);
 }
 
 const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft, const FString& PreviousId) const
@@ -1660,7 +1677,9 @@ void ABattleManager::UpdateVisuals()
 {
 	if (BossUnit)
 	{
-		BossUnit->SetLabel(TEXT("BOSS"), EnemyHP, EnemyMaxHP);
+		//체력이 없으니 남은 양이 아니라 쌓인 피해를 보여준다.
+		//때려도 아무 반응이 없으면 공격이 들어가는지 알 수 없다
+		BossUnit->SetLabelText(FString::Printf(TEXT("BOSS\n%d"), BossDamageTaken));
 	}
 
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
@@ -1684,8 +1703,8 @@ void ABattleManager::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	//기본 폰트에 한글 글리프가 없어 이 표시판은 영문만 쓴다
-	const FString Header = FString::Printf(TEXT("Turn %d/%d   Players %d/%d   Boss %d/%d"),
-		TurnIndex, Turns, Players.Num(), MaxPlayers, EnemyHP, EnemyMaxHP);
+	const FString Header = FString::Printf(TEXT("Turn %d/%d   Players %d/%d   Damage %d"),
+		TurnIndex, Turns, Players.Num(), MaxPlayers, BossDamageTaken);
 
 	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
 

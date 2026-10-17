@@ -108,6 +108,10 @@ struct FBattlePlayer
 
 	//0보다 크면 게임 오버 상태. 매 턴 줄어들고 0이 되면 부활한다
 	UPROPERTY() int32 ReviveCountdown = 0;
+
+	//이번 전투에 보스에게 넣은 누적 피해. Records의 TotalDamageDealt는 방송 전체
+	//누적이라 초기화되지 않으므로, 판 단위 순위에는 이쪽을 써야 한다
+	UPROPERTY() int32 DamageDealt = 0;
 };
 
 //판정이 끝난 공격 하나를 '나중에 보여주려고' 적어 둔 것.
@@ -391,9 +395,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float CritChanceCap = 1.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	int32 EnemyMaxHP = 100;
-
 	// ---- 밸런스 파일 ----
 
 	//Balancing/Data 의 abilities / enhancements / bosses .json 을 읽어
@@ -416,8 +417,11 @@ public:
 
 	// ---- 상태 ----
 
+	//보스는 체력이 없다 — 목표는 격파가 아니라 정해진 턴을 버티며 피해를 쌓는 것이다.
+	//그래서 깎는 값 대신 **이번 전투에 보스가 받은 누적 피해**를 들고 있고,
+	//머리 위 이름표도 이걸 보여준다
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
-	int32 EnemyHP = 0;
+	int32 BossDamageTaken = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	int32 TurnIndex = 0;

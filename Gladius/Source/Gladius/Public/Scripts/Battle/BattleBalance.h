@@ -224,6 +224,8 @@ struct FBattleBalance
 
 	// ---- bosses.json ----
 	FString BossName;
+	//**전투는 이 값을 쓰지 않는다.** 보스는 체력이 없고 격파로 끝나지도 않는다.
+	//스키마가 밸런스 팀과의 계약이라 읽고 검증만 계속한다 (readme의 maxHp 항목)
 	int32 BossMaxHP = 100;
 	int32 Turns = 10;
 	bool bAllowImmediateRepeat = true;

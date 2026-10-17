@@ -216,7 +216,12 @@ void ABattleUnit::Tick(float DeltaSeconds)
 
 void ABattleUnit::SetLabel(const FString& Name, int32 Current, int32 Max)
 {
-	PendingLabel = FString::Printf(TEXT("%s\n%d / %d"), *Name, Current, Max);
+	SetLabelText(FString::Printf(TEXT("%s\n%d / %d"), *Name, Current, Max));
+}
+
+void ABattleUnit::SetLabelText(const FString& Text)
+{
+	PendingLabel = Text;
 	ApplyLabel();
 }
 

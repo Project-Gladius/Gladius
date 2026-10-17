@@ -23,6 +23,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetLabel(const FString& Name, int32 Current, int32 Max);
 
+	//이름표에 넣을 글자를 그대로 지정한다. 'N / M' 꼴이 아닌 것을 띄울 때 쓴다 —
+	//보스는 체력이 없어 받은 피해만 보여준다
+	UFUNCTION(BlueprintCallable, Category = "Battle")
+	void SetLabelText(const FString& Text);
+
 	//Duration 동안 Target으로 미끄러져 간다. 0 이하면 즉시 이동한다.
 	//이동하는 동안만 Tick이 돌고 도착하면 다시 꺼진다.
 	//Gait는 OnMoveStarted로 그대로 넘어간다
