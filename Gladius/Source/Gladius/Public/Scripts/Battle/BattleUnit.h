@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -31,6 +31,22 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsMoving() const { return bMoving; }
+
+	//막을 들고 버티는 중인가. BattleManager가 켜고 끄며, ABP가 이것을 읽어
+	//Defense 상태로 들어간다 — IsMoving과 같은 방식이다.
+	//버티는 자세를 몬타주가 아니라 상태로 두어야 앞뒤 모션과 블렌드된다
+	UFUNCTION(BlueprintPure, Category = "Battle")
+	bool IsDefending() const { return bDefending; }
+
+	UFUNCTION(BlueprintCallable, Category = "Battle")
+	void SetDefending(bool bInDefending) { bDefending = bInDefending; }
+
+	//끊기면 안 되는 몬타주를 틀 때 블루프린트가 같이 부른다 (Seconds는 보통 Get Play Length).
+	//이 시간 동안 들어온 MoveTo는 **버리지 않고 미뤘다가** 끝난 뒤에 실행한다 —
+	//쓰러져 있는 동안 자리 재배치에 끌려가 미끄러지는 것을 막는 장치다.
+	//전투 박자에 묶인 이동(돌진·구르기)에는 쓰지 말 것. 늦게 출발하면 타이밍이 어긋난다
+	UFUNCTION(BlueprintCallable, Category = "Battle")
+	void HoldMotion(float Seconds);
 
 	//멈춰 있을 때 바라볼 곳. 플레이어는 보스를 본다.
 	//지정하지 않으면 이동이 끝나도 방향을 되돌리지 않는다 (보스 유닛이 그렇다)
@@ -144,6 +160,8 @@ private:
 
 	void ApplyLabel();
 
+	bool bDefending = false;
+
 	// ---- 이동 상태 ----
 	bool bMoving = false;
 	FVector MoveStart = FVector::ZeroVector;
@@ -160,4 +178,17 @@ private:
 
 	//지금 그쪽을 보도록 목표 각도를 잡는다. 이미 거의 같은 방향이면 아무것도 하지 않는다
 	void TurnToward(const FVector& WorldLocation);
+
+	// ---- 모션 보호 ----
+	//이 시각까지는 이동을 미룬다 (월드 시간). HoldMotion이 정한다
+	float MotionHoldUntil = 0.f;
+
+	//미뤄 둔 이동. 겹쳐 들어오면 마지막 것만 남는다 — 어차피 가야 할 곳은 한 곳이다
+	bool bHasPendingMove = false;
+	FVector PendingMoveTarget = FVector::ZeroVector;
+	float PendingMoveDuration = 0.f;
+	EMoveGait PendingMoveGait = EMoveGait::Walk;
+	FTimerHandle MotionHoldHandle;
+
+	void FlushPendingMove();
 };

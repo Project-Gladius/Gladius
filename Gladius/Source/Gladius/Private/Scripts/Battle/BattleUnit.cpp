@@ -3,6 +3,8 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Curves/CurveFloat.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 ABattleUnit::ABattleUnit()
 {
@@ -40,8 +42,57 @@ void ABattleUnit::BeginPlay()
 	ApplyLabel();
 }
 
+void ABattleUnit::HoldMotion(float Seconds)
+{
+	const UWorld* World = GetWorld();
+	if (!World || Seconds <= 0.f)
+	{
+		return;
+	}
+
+	//이미 더 길게 잡혀 있으면 그대로 둔다. 짧은 몬타주가 긴 것을 깎으면 안 된다
+	MotionHoldUntil = FMath::Max(MotionHoldUntil, World->GetTimeSeconds() + Seconds);
+
+	//미뤄 둔 이동이 있으면 늘어난 만큼 다시 기다리게 한다
+	if (bHasPendingMove)
+	{
+		GetWorldTimerManager().SetTimer(MotionHoldHandle, this, &ABattleUnit::FlushPendingMove,
+			MotionHoldUntil - World->GetTimeSeconds(), false);
+	}
+}
+
+void ABattleUnit::FlushPendingMove()
+{
+	if (!bHasPendingMove)
+	{
+		return;
+	}
+
+	bHasPendingMove = false;
+	MotionHoldUntil = 0.f;
+	MoveTo(PendingMoveTarget, PendingMoveDuration, PendingMoveGait);
+}
+
 void ABattleUnit::MoveTo(const FVector& Target, float Duration, EMoveGait Gait)
 {
+	//쓰러져 있는 중이라면 다 일어난 뒤에 간다. 요청을 버리지는 않는다 —
+	//버리면 자리 재배치를 놓쳐 그 자리에 영영 남는다
+	if (const UWorld* World = GetWorld())
+	{
+		const float Now = World->GetTimeSeconds();
+		if (Now < MotionHoldUntil)
+		{
+			PendingMoveTarget = Target;
+			PendingMoveDuration = Duration;
+			PendingMoveGait = Gait;
+			bHasPendingMove = true;
+
+			GetWorldTimerManager().SetTimer(MotionHoldHandle, this, &ABattleUnit::FlushPendingMove,
+				MotionHoldUntil - Now, false);
+			return;
+		}
+	}
+
 	//이미 그 자리면 굳이 움직이지 않는다
 	if (GetActorLocation().Equals(Target, 1.f))
 	{

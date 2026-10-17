@@ -130,6 +130,22 @@ struct FAttackCue
 	bool bFeverHighlight = false;
 };
 
+//직업군 하나의 공격 모션 길이. 밸런스 수치가 아니라 **애셋에서 재어 넣는 값**이라
+//Balancing/Data가 아니라 에디터에서 관리한다.
+//여기 적힌 길이만큼 공격이 걸린다고 보고 출발 시각을 역산하므로,
+//실제 몬타주보다 짧게 적으면 보스가 칠 때까지 공격 모션이 안 끝난다
+USTRUCT(BlueprintType)
+struct FCharacterMotionTimes
+{
+	GENERATED_BODY()
+
+	//평타 한 번의 길이. 피버 한 칸이 평타 하나로 바뀐다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float FeverAttack = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float Skill1 = 0.8f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) float Skill2 = 1.f;
+};
+
 UCLASS()
 class GLADIUS_API ABattleManager : public AActor
 {
@@ -268,16 +284,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float MinMoveSeconds = 0.4f;
 
-	//평타 한 번의 모션 길이. 전원이 같아야 박자가 맞는다 (기획서 FeverAttackTime)
+	//직업군 id별 공격 모션 길이. 키는 UnitClassByCharacter와 같은 id다
+	//(`abilities.json`의 `characters[].id`). 없는 id는 구조체 기본값으로 돈다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float FeverAttackTime = 0.35f;
+	TMap<FString, FCharacterMotionTimes> MotionTimesByCharacter;
 
-	//스킬 1 / 스킬 2 모션 길이. 애셋을 열어 보고 넣는 값이다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float Skill1MotionTime = 0.8f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float Skill2MotionTime = 1.f;
+	//ClassIndex가 가리키는 직업군의 모션 길이. 맵에 없으면 기본값
+	const FCharacterMotionTimes& MotionTimesFor(int32 ClassIndex) const;
 
 	//이 속도(초당 cm)보다 느리면 걷고, 빠르면 뛴다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -295,6 +308,12 @@ public:
 	//구르기 모션 길이
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float RollSeconds = 0.5f;
+
+	//보스가 휘두르기 **몇 초 전에** 구르기를 시작할지. 동시에 시작하면 피격 모션이
+	//곧바로 구르기를 덮어 구른 것이 보이지 않는다. 구르기를 먼저 보여주고
+	//그 끝자락에서 맞게 하는 값이다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	float RollLead = 0.5f;
 
 	//플레이어 공격과 보스 공격 모션에 쓰는 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -535,6 +554,9 @@ private:
 	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
 	void FlushAttackCues();
 
+	//회피자 전원이 구른다. 보스가 휘두르기 RollLead초 전이다
+	void BeginEvadeRolls();
+
 	//플레이어 공격이 다 끝나고 보스가 치는 순간 (기획서 M2의 BossAttack 단계)
 	void BossAttackBeat();
 
@@ -627,6 +649,9 @@ private:
 
 	//공격 연출을 끊어 보여주는 타이머. 단계 타이머와 동시에 돌기 때문에 따로 둔다
 	FTimerHandle AttackCueHandle;
+
+	//구르기는 보스 공격보다 먼저 시작하므로 단계 타이머와 겹친다
+	FTimerHandle EvadeRollHandle;
 
 	//이번 턴에 재생할 공격 연출. 피해 계산은 ResolveTurn에서 이미 끝났고 보여주기만 남았다.
 	//UObject를 들지 않으므로 UPROPERTY가 필요 없다

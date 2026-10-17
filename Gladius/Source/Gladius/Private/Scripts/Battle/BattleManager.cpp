@@ -117,6 +117,7 @@ void ABattleManager::StopBattle()
 {
 	Phase = EBattlePhase::Resolve;
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
+	GetWorldTimerManager().ClearTimer(EvadeRollHandle);
 
 	//공격 연출 타이머는 반복이라 따로 끄지 않으면 전투가 끝나도 계속 돈다
 	GetWorldTimerManager().ClearTimer(AttackCueHandle);
@@ -775,6 +776,10 @@ void ABattleManager::StartTurn()
 		if (Pair.Value.Unit && Pair.Value.ReviveCountdown == 0)
 		{
 			Pair.Value.Unit->OnActionSelected(EBattleAction::Idle);
+
+			//보스가 그 구역을 치지 않아 OnHit이 오지 않은 방어자가 있다.
+			//여기서 풀지 않으면 다음 턴까지 막을 들고 서 있는다
+			Pair.Value.Unit->SetDefending(false);
 		}
 
 		Pair.Value.bActedThisTurn = false;
@@ -838,21 +843,27 @@ void ABattleManager::BeginCollect()
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginMove, CollectSeconds, false);
 }
 
+const FCharacterMotionTimes& ABattleManager::MotionTimesFor(int32 ClassIndex) const
+{
+	static const FCharacterMotionTimes Default;
+
+	if (Classes.IsValidIndex(ClassIndex))
+	{
+		if (const FCharacterMotionTimes* Found = MotionTimesByCharacter.Find(Classes[ClassIndex].Id))
+		{
+			return *Found;
+		}
+	}
+	return Default;
+}
+
 void ABattleManager::BeginMove()
 {
 	Phase = EBattlePhase::Move;
 
-	//회피 이동을 먼저 반영한다. 피해 계산은 ResolveTurn에서
-	for (TPair<FString, FBattlePlayer>& Pair : Players)
-	{
-		FBattlePlayer& P = Pair.Value;
-		if (P.ReviveCountdown == 0)
-		{
-			P.Lane = ApplyMove(P.PendingAction, P.Lane);
-		}
-	}
-
-	//구역 인원이 바뀌었으니 자리를 다시 배분한다
+	//**회피자의 구역은 아직 바꾸지 않는다.** 실제로 넘어가는 것은 보스 공격 직전이고,
+	//여기서 미리 옮기면 아직 서 있는 자리를 같은 구역의 다른 사람이 배정받아 겹친다.
+	//구역 변경과 재배치는 ResolveTurn에서 한다 (turnOrder의 '회피 이동'도 거기다)
 	AssignSlots();
 
 	//기획서: 모든 공격 모션이 '보스 공격' 순간에 끝나도록 맞춘다.
@@ -867,29 +878,17 @@ void ABattleManager::BeginMove()
 
 		if (P.PendingAction == EBattleAction::Defense)
 		{
-			//막을 펼치고 대비하는 자세. 맞는 순간이 아니라 지금 잡는다
-			P.Unit->OnDefend();
+			//자리로 가기만 한다. 막는 자세는 도착한 뒤(ResolveTurn)에 잡는다 —
+			//여기서 같이 부르면 모션을 시작하자마자 이동이 덮어 캔슬된 것처럼 보인다
 			P.Unit->MoveTo(P.TargetLocation, MoveSeconds);
 			continue;
 		}
 
 		if (IsEvade(P.PendingAction))
 		{
-			//회피는 전원 마지막에 구른다. 구르기가 덮을 거리를 남겨 두고 미리 가 있는다 —
-			//두 칸을 건너는 사람은 그래서 미리 뛰기 시작하고, 한 칸이면 남길 게 없어 제자리에서 기다린다
-			const FVector From = P.Unit->GetActorLocation();
-			const float Total = FVector::Dist(From, P.TargetLocation);
-			const float Lead = Total - RollDistance;
-
-			if (Lead > KINDA_SMALL_NUMBER)
-			{
-				const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
-				P.Unit->MoveTo(Waypoint, MoveSeconds, ChooseGait(Lead, MoveSeconds, RunSpeed, RollSpeed));
-			}
-			else
-			{
-				//구르기 한 번이면 닿는 거리다. 보스 공격 모션에 맞춰 출발한다
-			}
+			//**여기서는 움직이지 않는다.** 그 전에 목적 구역에 서 있으면 회피로 보이지 않는다.
+			//접근은 ResolveTurn에서 보스 공격 직전에 시작하고, 구역을 넘는 것은
+			//BossAttackBeat의 구르기가 맡는다
 			continue;
 		}
 
@@ -903,10 +902,12 @@ void ABattleManager::BeginMove()
 			continue;
 		}
 
-		//때릴 시간을 먼저 확보하고, 남는 만큼만 이동에 쓴다
+		//때릴 시간을 먼저 확보하고, 남는 만큼만 이동에 쓴다.
+		//모션 길이는 직업군마다 다르다 — 애셋이 다르므로 같을 이유가 없다
+		const FCharacterMotionTimes& Motion = MotionTimesFor(P.ClassIndex);
 		const float SkillSeconds = (P.PendingAction == EBattleAction::Attack1)
-			? Skill1MotionTime : Skill2MotionTime;
-		const float MotionSeconds = AttackMotionSeconds(SkillSeconds, FeverStacksFor(P.Fever), FeverAttackTime);
+			? Motion.Skill1 : Motion.Skill2;
+		const float MotionSeconds = AttackMotionSeconds(SkillSeconds, FeverStacksFor(P.Fever), Motion.FeverAttack);
 		const float MoveSecondsForMe = FMath::Max(MinMoveSeconds, BattleTime - MotionSeconds);
 
 		//근접만 보스에게 붙는다. 원거리는 제자리에서 쏘므로 자기 자리로만 간다
@@ -1006,6 +1007,36 @@ void ABattleManager::ResolveTurn()
 {
 	//이동이 끝났고 이제 공격 모션이 도는 구간이다
 	Phase = EBattlePhase::BossAction;
+
+	//turnOrder의 첫 항목 — 회피 이동. 여기서야 구역이 바뀐다.
+	//BeginMove에서 미리 바꾸면 아직 떠나지도 않은 자리를 남이 배정받는다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (P.ReviveCountdown == 0)
+		{
+			P.Lane = ApplyMove(P.PendingAction, P.Lane);
+		}
+	}
+
+	//구역 인원이 바뀌었으니 자리를 다시 배분한다. 떠난 자리는 이제 비었으므로
+	//남아 있는 사람이 받아도 겹치지 않는다 — 실제 이동은 EndTurn의 원위치 이동이 맡는다
+	AssignSlots();
+
+	//도착한 뒤에 막을 펼친다. 실제로 막는 순간은 BossAttackBeat의 OnHit이고,
+	//그 사이를 버티는 자세까지가 이 모션의 몫이다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (P.Unit && P.ReviveCountdown == 0 && P.PendingAction == EBattleAction::Defense)
+		{
+			P.Unit->OnDefend();
+
+			//펼치는 모션이 끝나면 밑에 깔린 '버티는 자세'가 드러나도록 한다.
+			//보스가 언제 칠지 모르니 길이를 정해 둘 수 없고, 상태라야 앞뒤로 블렌드된다
+			P.Unit->SetDefending(true);
+		}
+	}
 
 	//턴 시작 때 예고한 그대로 친다
 	const FBossAction& Boss = TelegraphedAction;
@@ -1193,6 +1224,51 @@ void ABattleManager::ResolveTurn()
 	//여기는 이미 MoveSeconds가 지난 뒤라 그만큼 뺀다
 	const float BossDelay = BossStrikeDelay(FlurrySeconds, BattleTime - MoveSeconds);
 
+	//구르기는 보스가 휘두르기 RollLead초 전에 시작한다. 동시에 걸면 같은 순간에 오는
+	//피격 모션이 구르기를 곧바로 덮어, 구른 것은 안 보이고 미끄러지는 것만 보인다
+	const float RollAt = FMath::Max(0.f, BossDelay - RollLead);
+
+	//회피자는 **여기서야** 움직이기 시작한다. 구르기가 시작될 때까지의 시간을 꽉 채워
+	//구르기 한 번 거리만 남기고 달려가므로, 두 칸을 건너는 사람은 보스가 치는 순간
+	//가운데쯤에서 구르는 중이다. BeginMove에서 미리 보내면 회피하기도 전에 가 있게 된다
+	if (RollAt > KINDA_SMALL_NUMBER)
+	{
+		for (TPair<FString, FBattlePlayer>& Pair : Players)
+		{
+			FBattlePlayer& P = Pair.Value;
+			if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
+			{
+				continue;
+			}
+
+			const FVector From = P.Unit->GetActorLocation();
+			const float Total = FVector::Dist(From, P.TargetLocation);
+
+			//달려가 멈출 지점. '목표에서 구르기 거리만큼 앞'으로만 잡으면 거리가 멀 때
+			//그 지점이 이미 목적 구역 안이라, 다 와서 구르는 꼴이 된다.
+			//구역 경계가 보스 기준 부채꼴이라 좌표로 들고 있지 않으므로 **여정의 절반**을
+			//상한으로 쓴다 — 한 칸이면 경계 즈음, 두 칸이면 가운데 구역에서 구르기 시작이다
+			const float Lead = FMath::Min(Total * 0.5f, Total - RollDistance);
+
+			//구르기 한 번이면 닿는 거리다. 제자리에서 기다렸다가 구른다
+			if (Lead <= KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
+			P.Unit->MoveTo(Waypoint, RollAt, ChooseGait(Lead, RollAt, RunSpeed, RollSpeed));
+		}
+
+		GetWorldTimerManager().SetTimer(EvadeRollHandle, this, &ABattleManager::BeginEvadeRolls,
+			RollAt, false);
+	}
+	else
+	{
+		//보스가 바로 친다. 달려갈 틈이 없으니 그 자리에서 구른다
+		BeginEvadeRolls();
+	}
+
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BossAttackBeat,
 		FMath::Max(KINDA_SMALL_NUMBER, BossDelay), false);
 }
@@ -1254,17 +1330,11 @@ void ABattleManager::FlushAttackCues()
 	}
 }
 
-void ABattleManager::BossAttackBeat()
+void ABattleManager::BeginEvadeRolls()
 {
-	//맞은 연출이 끝났으니 이제 보스가 친다. 피해는 ResolveTurn에서 이미 반영됐다.
-	//예고한 것과 같은 행동이므로 MotionId도 그때 보여준 것과 짝이 맞는다
-	if (BossUnit)
-	{
-		BossUnit->OnBossAttack(TelegraphedAction.AttackMotionId, TelegraphedAction.HitCount);
-	}
-
-	//회피자는 전원 여기서 구른다. 보스가 휘두르는 것과 같은 순간이라 아슬아슬해 보인다.
-	//미리 와 있던 사람은 남은 거리만, 제자리에서 기다리던 사람은 전부를 구르기로 덮는다
+	//보스가 휘두르기 RollLead초 전. 구르기를 먼저 보여 주고, 그 끝자락에
+	//BossAttackBeat의 피격 모션이 덮는다 — 구르다 걸린 것처럼 보인다.
+	//구르기 전까지는 원래 구역에 서 있었으므로, 구역을 넘는 것이 곧 이 구르기다
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
@@ -1276,6 +1346,8 @@ void ABattleManager::BossAttackBeat()
 		//구르기는 '남은 거리만큼'이 아니라 **정해진 거리**를 덮는다. 모션에 이동이
 		//실려 있어서 늘이고 줄일 수 없기 때문이다. 자리까지 모자라는 만큼은
 		//구른 뒤에 걷거나 뛰어서 마저 간다 (EndTurn의 원위치 이동이 그 역할을 한다)
+		//ponytail: 두 칸을 건너는 회피는 RollDistance로 못 덮어 늦게 들어간다.
+		//거슬리면 RollDistance를 올리거나 구르기를 두 번 잇는다
 		const FVector From = P.Unit->GetActorLocation();
 		const float Remaining = FVector::Dist(From, P.TargetLocation);
 		const float Covered = FMath::Min(RollDistance, Remaining);
@@ -1286,6 +1358,16 @@ void ABattleManager::BossAttackBeat()
 
 		P.Unit->OnEvadeRoll(RollSeconds, Covered);
 		P.Unit->MoveTo(RollTo, RollSeconds, EMoveGait::Roll);
+	}
+}
+
+void ABattleManager::BossAttackBeat()
+{
+	//맞은 연출이 끝났으니 이제 보스가 친다. 피해는 ResolveTurn에서 이미 반영됐다.
+	//예고한 것과 같은 행동이므로 MotionId도 그때 보여준 것과 짝이 맞는다
+	if (BossUnit)
+	{
+		BossUnit->OnBossAttack(TelegraphedAction.AttackMotionId, TelegraphedAction.HitCount);
 	}
 
 	//보스가 휘두르는 바로 이 순간에 맞는 쪽 반응이 나간다.
@@ -1301,6 +1383,10 @@ void ABattleManager::BossAttackBeat()
 				//쓰러질 타격인지 지금 알려준다. OnDied는 뒤에 오므로
 				//블루프린트가 그걸 기다리면 이미 일어나는 모션이 섞인 뒤다
 				P.Unit->OnHit(P.DamageTakenThisTurn, P.bDiedThisTurn);
+
+				//막는 모션이 나갔으니 버티는 자세는 여기서 끝난다.
+				//막기가 끝나면 그 밑은 평소 자세여야지 다시 막고 서 있으면 안 된다
+				P.Unit->SetDefending(false);
 			}
 			if (P.bDiedThisTurn)
 			{
