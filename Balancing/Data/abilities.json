@@ -11,7 +11,7 @@
     "evadeReduction": 1,
     "evadeRepeat": "everyAfter",
     "feverRounding": "floor",
-    "feverCap": null,
+    "feverCap": 9,
     "allowStayEvade": true,
     "attackDamageRounding": "roundHalfUp",
     "defenseDamageRounding": "ceil",

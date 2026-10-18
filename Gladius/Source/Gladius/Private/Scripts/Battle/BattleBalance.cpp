@@ -486,91 +486,160 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		return false;
 	}
 
-	if (!CheckHeader(Bosses, BossesPath, TEXT("gladius-boss-patterns"), BossRevision))
+	// ---- 머리말 ----
+	//v2는 kind / revision / bossId 를 쓰지 않는다 (readme 2절). schemaVersion만 본다
+	double Version = 0.0;
+	if (!Bosses->TryGetNumberField(TEXT("schemaVersion"), Version))
 	{
+		Fail(BossesPath, TEXT("'schemaVersion' 이 없습니다"));
 		return false;
 	}
+
+	if (FMath::RoundToInt(Version) != 2)
+	{
+		Fail(BossesPath, FString::Printf(
+			TEXT("보스 파일 형식 버전 %d 는 지원하지 않습니다 (지원: 2) — 게임 코드를 함께 갱신해야 합니다"),
+			FMath::RoundToInt(Version)));
+		return false;
+	}
+
+	BossRevision = 0;
+	Bosses->TryGetStringField(TEXT("name"), BossName);
 
 	FString Text;
 
-	Bosses->TryGetStringField(TEXT("name"), BossName);
-	if (!GetInt(Bosses, TEXT("maxHp"), BossesPath, BossMaxHP, 1, 1e9)) { return false; }
-
-	const TSharedPtr<FJsonObject>* EncounterPtr = nullptr;
-	if (!Bosses->TryGetObjectField(TEXT("encounter"), EncounterPtr))
+	// ---- states ----
+	const TArray<TSharedPtr<FJsonValue>>* StateArray = nullptr;
+	if (!Bosses->TryGetArrayField(TEXT("states"), StateArray) || StateArray->Num() == 0)
 	{
-		Fail(BossesPath, TEXT("'encounter' 항목이 없습니다"));
-		return false;
-	}
-	if (!GetInt(*EncounterPtr, TEXT("turns"), BossesPath, Turns, 1, 10)) { return false; }
-
-	if (!CheckFixedString(*EncounterPtr, TEXT("patternFit"), TEXT("remainingTurns"), BossesPath))
-	{
+		Fail(BossesPath, TEXT("'states' 가 비어 있습니다"));
 		return false;
 	}
 
-	// ---- actions ----
-	const TArray<TSharedPtr<FJsonValue>>* ActionArray = nullptr;
-	if (!Bosses->TryGetArrayField(TEXT("actions"), ActionArray) || ActionArray->Num() == 0)
+	if (StateArray->Num() > 100)
 	{
-		Fail(BossesPath, TEXT("'actions' 가 비어 있습니다"));
-		return false;
-	}
-
-	if (ActionArray->Num() > 100)
-	{
-		Fail(BossesPath, FString::Printf(TEXT("공격은 최대 100개입니다 (현재 %d개)"), ActionArray->Num()));
+		Fail(BossesPath, FString::Printf(TEXT("상태는 최대 100개입니다 (현재 %d개)"), StateArray->Num()));
 		return false;
 	}
 
 	Actions.Reset();
-	for (const TSharedPtr<FJsonValue>& Value : *ActionArray)
+	for (const TSharedPtr<FJsonValue>& Value : *StateArray)
 	{
 		const TSharedPtr<FJsonObject> Obj = Value->AsObject();
 		if (!Obj.IsValid())
 		{
-			Fail(BossesPath, TEXT("actions 항목을 읽을 수 없습니다"));
+			Fail(BossesPath, TEXT("states 항목을 읽을 수 없습니다"));
 			return false;
 		}
 
 		FBossAction Action;
 		if (!GetString(Obj, TEXT("id"), BossesPath, Action.Id)) { return false; }
-		Obj->TryGetStringField(TEXT("name"), Action.Name);
+
+		//v2에는 name이 없다. id가 곧 이름이고 모션 키다
+		Action.Name = Action.Id;
 
 		if (FindAction(Action.Id))
 		{
-			Fail(BossesPath, FString::Printf(TEXT("행동 ID '%s' 가 중복입니다"), *Action.Id));
+			Fail(BossesPath, FString::Printf(TEXT("상태 ID '%s' 가 중복입니다"), *Action.Id));
 			return false;
 		}
 
-		if (!GetInt(Obj, TEXT("hitCount"), BossesPath, Action.HitCount, 1, 10)) { return false; }
+		//hitCount는 v2에서 빠졌다. 피해식이 아직 인수로 받으므로 1로 둔다
+		Action.HitCount = 1;
 
-		const TSharedPtr<FJsonObject>* DamagePtr = nullptr;
-		const TSharedPtr<FJsonObject>* AttributePtr = nullptr;
-		const TSharedPtr<FJsonObject>* ResistPtr = nullptr;
-		if (!Obj->TryGetObjectField(TEXT("damageByZone"), DamagePtr)
-			|| !Obj->TryGetObjectField(TEXT("attributeByZone"), AttributePtr)
-			|| !Obj->TryGetObjectField(TEXT("resistanceByZone"), ResistPtr))
+		int32 TotalDamage = 0;
+		if (!GetInt(Obj, TEXT("totalDamage"), BossesPath, TotalDamage, 0, 100)) { return false; }
+
+		// ---- target ----
+		const TSharedPtr<FJsonObject>* TargetPtr = nullptr;
+		if (!Obj->TryGetObjectField(TEXT("target"), TargetPtr))
+		{
+			Fail(BossesPath, FString::Printf(TEXT("'%s' 에 target 이 없습니다"), *Action.Id));
+			return false;
+		}
+
+		FString ModeText;
+		if (!GetString(*TargetPtr, TEXT("mode"), BossesPath, ModeText)) { return false; }
+
+		if (ModeText == TEXT("fixed"))          { Action.TargetMode = EBossTargetMode::Fixed; }
+		else if (ModeText == TEXT("randomOne")) { Action.TargetMode = EBossTargetMode::RandomOne; }
+		else if (ModeText == TEXT("none"))      { Action.TargetMode = EBossTargetMode::None; }
+		else
 		{
 			Fail(BossesPath, FString::Printf(
-				TEXT("'%s' 에 damageByZone / attributeByZone / resistanceByZone 가 모두 필요합니다"), *Action.Id));
+				TEXT("'%s' 의 target.mode 가 '%s' 입니다 — fixed / randomOne / none 중 하나여야 합니다"),
+				*Action.Id, *ModeText));
+			return false;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* ZoneArray = nullptr;
+		if (!(*TargetPtr)->TryGetArrayField(TEXT("zones"), ZoneArray))
+		{
+			Fail(BossesPath, FString::Printf(TEXT("'%s' 의 target.zones 가 없습니다"), *Action.Id));
+			return false;
+		}
+
+		if (Action.TargetMode == EBossTargetMode::None && ZoneArray->Num() != 0)
+		{
+			Fail(BossesPath, FString::Printf(
+				TEXT("'%s' 는 target.mode가 none인데 zones가 비어 있지 않습니다"), *Action.Id));
+			return false;
+		}
+
+		if (Action.TargetMode != EBossTargetMode::None && ZoneArray->Num() == 0)
+		{
+			Fail(BossesPath, FString::Printf(
+				TEXT("'%s' 의 target.zones 가 비어 있습니다 — 치지 않을 거면 mode를 none으로 두세요"), *Action.Id));
+			return false;
+		}
+
+		//구역 피해는 '맞는 구역이면 totalDamage, 아니면 0'이다.
+		//damageRule이 구역 수로 나누지 말라고 못 박고 있다.
+		//RandomOne은 후보 전부에 채워 두고 StartTurn에서 한 구역만 남긴다
+		for (int32 Zone = 0; Zone < 3; ++Zone)
+		{
+			Action.DamageByZone[Zone] = 0;
+			//속성은 v2에 없다. 플레이어 쪽 속성 저항이 생기면 그때 파일에 들어온다
+			Action.AttributeByZone[Zone] = EDamageType::Physical;
+		}
+
+		for (const TSharedPtr<FJsonValue>& ZoneValue : *ZoneArray)
+		{
+			const FString ZoneName = ZoneValue->AsString();
+			int32 Found = INDEX_NONE;
+			for (int32 Zone = 0; Zone < 3; ++Zone)
+			{
+				if (ZoneName == ZoneNames[Zone]) { Found = Zone; break; }
+			}
+
+			if (Found == INDEX_NONE)
+			{
+				Fail(BossesPath, FString::Printf(
+					TEXT("'%s' 의 target.zones 에 모르는 구역 '%s' 가 있습니다"), *Action.Id, *ZoneName));
+				return false;
+			}
+
+			if (Action.DamageByZone[Found] != 0)
+			{
+				Fail(BossesPath, FString::Printf(
+					TEXT("'%s' 의 target.zones 에 '%s' 가 중복입니다"), *Action.Id, *ZoneName));
+				return false;
+			}
+
+			Action.DamageByZone[Found] = TotalDamage;
+		}
+
+		// ---- resistanceByZone ----
+		const TSharedPtr<FJsonObject>* ResistPtr = nullptr;
+		if (!Obj->TryGetObjectField(TEXT("resistanceByZone"), ResistPtr))
+		{
+			Fail(BossesPath, FString::Printf(TEXT("'%s' 에 resistanceByZone 이 없습니다"), *Action.Id));
 			return false;
 		}
 
 		for (int32 Zone = 0; Zone < 3; ++Zone)
 		{
 			const FString ZoneName = ZoneNames[Zone];
-
-			if (!GetInt(*DamagePtr, ZoneName, BossesPath, Action.DamageByZone[Zone], 0, 100))
-			{
-				return false;
-			}
-
-			if (!GetString(*AttributePtr, ZoneName, BossesPath, Text)
-				|| !ParseAttribute(Text, BossesPath, Action.AttributeByZone[Zone]))
-			{
-				return false;
-			}
 
 			const TSharedPtr<FJsonObject>* ZoneResist = nullptr;
 			if (!(*ResistPtr)->TryGetObjectField(ZoneName, ZoneResist))
@@ -589,13 +658,7 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 			}
 		}
 
-		const TSharedPtr<FJsonObject>* TelegraphPtr = nullptr;
-		if (Obj->TryGetObjectField(TEXT("telegraph"), TelegraphPtr))
-		{
-			(*TelegraphPtr)->TryGetStringField(TEXT("text"), Action.TelegraphText);
-			(*TelegraphPtr)->TryGetStringField(TEXT("motionId"), Action.TelegraphMotionId);
-		}
-		Obj->TryGetStringField(TEXT("attackMotionId"), Action.AttackMotionId);
+		Obj->TryGetStringField(TEXT("telegraphText"), Action.TelegraphText);
 
 		Actions.Add(MoveTemp(Action));
 	}
@@ -615,9 +678,9 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 	}
 
 	Patterns.Reset();
-	for (const TSharedPtr<FJsonValue>& Value : *PatternArray)
+	for (int32 Index = 0; Index < PatternArray->Num(); ++Index)
 	{
-		const TSharedPtr<FJsonObject> Obj = Value->AsObject();
+		const TSharedPtr<FJsonObject> Obj = (*PatternArray)[Index]->AsObject();
 		if (!Obj.IsValid())
 		{
 			Fail(BossesPath, TEXT("patterns 항목을 읽을 수 없습니다"));
@@ -625,219 +688,150 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		}
 
 		FBossPattern Pattern;
-		if (!GetString(Obj, TEXT("id"), BossesPath, Pattern.Id)) { return false; }
+		//v2에는 패턴 id가 없다. 배열 순서로 만들어 쓴다 — 가중치도 같은 순서로 붙는다
+		Pattern.Id = FString::Printf(TEXT("pattern_%02d"), Index + 1);
 		Obj->TryGetStringField(TEXT("name"), Pattern.Name);
 
-		if (FindPattern(Pattern.Id))
-		{
-			Fail(BossesPath, FString::Printf(TEXT("패턴 ID '%s' 가 중복입니다"), *Pattern.Id));
-			return false;
-		}
-
 		const TArray<TSharedPtr<FJsonValue>>* Steps = nullptr;
-		if (!Obj->TryGetArrayField(TEXT("steps"), Steps))
+		if (!Obj->TryGetArrayField(TEXT("sequence"), Steps))
 		{
-			Fail(BossesPath, FString::Printf(TEXT("패턴 '%s' 에 steps가 없습니다"), *Pattern.Id));
+			Fail(BossesPath, FString::Printf(TEXT("패턴 '%s' 에 sequence가 없습니다"), *Pattern.Name));
 			return false;
 		}
 
 		if (Steps->Num() < 1 || Steps->Num() > 4)
 		{
 			Fail(BossesPath, FString::Printf(
-				TEXT("패턴 '%s' 의 길이는 1~4 이어야 합니다 (현재 %d)"), *Pattern.Id, Steps->Num()));
+				TEXT("패턴 '%s' 의 길이는 1~4 이어야 합니다 (현재 %d)"), *Pattern.Name, Steps->Num()));
+			return false;
+		}
+
+		//readme가 'turns는 반드시 sequence.length와 같아야 한다'고 적고 있다
+		int32 DeclaredTurns = 0;
+		if (!GetInt(Obj, TEXT("turns"), BossesPath, DeclaredTurns, 1, 4)) { return false; }
+
+		if (DeclaredTurns != Steps->Num())
+		{
+			Fail(BossesPath, FString::Printf(
+				TEXT("패턴 '%s' 의 turns가 %d인데 sequence는 %d개입니다"),
+				*Pattern.Name, DeclaredTurns, Steps->Num()));
 			return false;
 		}
 
 		for (const TSharedPtr<FJsonValue>& Step : *Steps)
 		{
-			const FString ActionId = Step->AsString();
-			if (!FindAction(ActionId))
+			const FString StateId = Step->AsString();
+			if (!FindAction(StateId))
 			{
 				Fail(BossesPath, FString::Printf(
-					TEXT("패턴 '%s' 가 없는 행동 '%s' 을(를) 가리킵니다"), *Pattern.Id, *ActionId));
+					TEXT("패턴 '%s' 가 없는 상태 '%s' 을(를) 가리킵니다"), *Pattern.Name, *StateId));
 				return false;
 			}
-			Pattern.Steps.Add(ActionId);
+			Pattern.Steps.Add(StateId);
 		}
 
 		Patterns.Add(MoveTemp(Pattern));
 	}
 
-	// ---- selection ----
-	const TSharedPtr<FJsonObject>* SelectionPtr = nullptr;
-	if (!Bosses->TryGetObjectField(TEXT("selection"), SelectionPtr))
-	{
-		Fail(BossesPath, TEXT("'selection' 항목이 없습니다"));
-		return false;
-	}
-
-	if (!CheckFixedString(*SelectionPtr, TEXT("mode"), TEXT("weightedRandom"), BossesPath))
-	{
-		return false;
-	}
-
-	if (!(*SelectionPtr)->TryGetBoolField(TEXT("allowImmediateRepeat"), bAllowImmediateRepeat))
-	{
-		Fail(BossesPath, TEXT("'allowImmediateRepeat' 값이 없습니다"));
-		return false;
-	}
-
-	const TArray<TSharedPtr<FJsonValue>>* PoolArray = nullptr;
-	if (!(*SelectionPtr)->TryGetArrayField(TEXT("pool"), PoolArray) || PoolArray->Num() == 0)
-	{
-		Fail(BossesPath, TEXT("패턴 가중치가 없습니다"));
-		return false;
-	}
+	// ---- simulation (선택) ----
+	//readme 2-4절. 원본 JSON에는 없고 시뮬레이터가 저장할 때 붙인다.
+	//없으면 기본값으로 돌되, 있는데 못 읽는 값이면 조용히 넘기지 않고 실패한다
+	Turns = 10;
+	bAllowImmediateRepeat = true;
+	PresetMode = EBossPresetMode::Random;
+	PresetCustomPatterns.Reset();
+	PresetDirectActions.Reset();
 
 	Pool.Reset();
-	for (const TSharedPtr<FJsonValue>& Value : *PoolArray)
+	for (const FBossPattern& Pattern : Patterns)
 	{
-		const TSharedPtr<FJsonObject> Obj = Value->AsObject();
 		FPatternWeight Weight;
-		if (!Obj.IsValid() || !GetString(Obj, TEXT("patternId"), BossesPath, Weight.PatternId))
-		{
-			return false;
-		}
-
-		if (!FindPattern(Weight.PatternId))
-		{
-			Fail(BossesPath, FString::Printf(TEXT("없는 패턴 ID: %s"), *Weight.PatternId));
-			return false;
-		}
-
-		if (Pool.ContainsByPredicate([&Weight](const FPatternWeight& W)
-			{ return W.PatternId == Weight.PatternId; }))
-		{
-			Fail(BossesPath, FString::Printf(TEXT("가중치 패턴 중복: %s"), *Weight.PatternId));
-			return false;
-		}
-
-		if (!GetFloat(Obj, TEXT("weight"), BossesPath, Weight.Weight, 0, 10000)) { return false; }
-
+		Weight.PatternId = Pattern.Id;
+		Weight.Weight = 1.f;
 		Pool.Add(MoveTemp(Weight));
 	}
 
-	// ---- preset ----
-	//턴을 어떻게 채울지. 이걸 안 읽으면 파일이 '고정 순서'라고 적어둬도
-	//게임은 혼자 추첨을 돌려, 시뮬레이터와 다른 전투가 된다
-	const TSharedPtr<FJsonObject>* PresetPtr = nullptr;
-	if (!Bosses->TryGetObjectField(TEXT("preset"), PresetPtr))
+	const TSharedPtr<FJsonObject>* SimulationPtr = nullptr;
+	if (Bosses->TryGetObjectField(TEXT("simulation"), SimulationPtr))
 	{
-		Fail(BossesPath, TEXT("'preset' 항목이 없습니다"));
-		return false;
-	}
-
-	FString ModeText;
-	if (!(*PresetPtr)->TryGetStringField(TEXT("mode"), ModeText))
-	{
-		Fail(BossesPath, TEXT("'preset.mode' 값이 없습니다"));
-		return false;
-	}
-
-	if (ModeText == TEXT("direct"))      { PresetMode = EBossPresetMode::Direct; }
-	else if (ModeText == TEXT("custom")) { PresetMode = EBossPresetMode::Custom; }
-	else if (ModeText == TEXT("random")) { PresetMode = EBossPresetMode::Random; }
-	else
-	{
-		Fail(BossesPath, FString::Printf(
-			TEXT("'preset.mode' 가 '%s' 입니다 — direct / custom / random 중 하나여야 합니다"), *ModeText));
-		return false;
-	}
-
-	if (PresetMode == EBossPresetMode::Direct)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* DirectArray = nullptr;
-		if (!(*PresetPtr)->TryGetArrayField(TEXT("directActions"), DirectArray) || DirectArray->Num() == 0)
+		const TSharedPtr<FJsonObject>* EncounterPtr = nullptr;
+		if ((*SimulationPtr)->TryGetObjectField(TEXT("encounter"), EncounterPtr))
 		{
-			Fail(BossesPath, TEXT("preset.mode가 direct인데 'directActions' 가 비어 있습니다"));
-			return false;
+			if (!GetInt(*EncounterPtr, TEXT("turns"), BossesPath, Turns, 1, 10)) { return false; }
 		}
 
-		for (const TSharedPtr<FJsonValue>& Value : *DirectArray)
+		(*SimulationPtr)->TryGetBoolField(TEXT("allowImmediateRepeat"), bAllowImmediateRepeat);
+
+		const TArray<TSharedPtr<FJsonValue>>* WeightArray = nullptr;
+		if ((*SimulationPtr)->TryGetArrayField(TEXT("weights"), WeightArray))
 		{
-			const FString ActionId = Value->AsString();
-			if (!FindAction(ActionId))
+			if (WeightArray->Num() != Pool.Num())
 			{
-				Fail(BossesPath, FString::Printf(TEXT("preset.directActions의 없는 공격 ID: %s"), *ActionId));
-				return false;
-			}
-			PresetDirectActions.Add(ActionId);
-		}
-
-		//자르지도 늘이지도 않으므로 개수가 곧 턴 수다
-		if (PresetDirectActions.Num() != Turns)
-		{
-			Fail(BossesPath, FString::Printf(
-				TEXT("preset.directActions가 %d개인데 encounter.turns는 %d입니다 — 정확히 맞아야 합니다"),
-				PresetDirectActions.Num(), Turns));
-			return false;
-		}
-	}
-	else if (PresetMode == EBossPresetMode::Custom)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* CustomArray = nullptr;
-		if (!(*PresetPtr)->TryGetArrayField(TEXT("customPatterns"), CustomArray) || CustomArray->Num() == 0)
-		{
-			Fail(BossesPath, TEXT("preset.mode가 custom인데 'customPatterns' 가 비어 있습니다"));
-			return false;
-		}
-
-		int32 TotalSteps = 0;
-		for (const TSharedPtr<FJsonValue>& Value : *CustomArray)
-		{
-			const FString PatternId = Value->AsString();
-			const FBossPattern* Pattern = FindPattern(PatternId);
-			if (!Pattern)
-			{
-				Fail(BossesPath, FString::Printf(TEXT("preset.customPatterns의 없는 패턴 ID: %s"), *PatternId));
+				Fail(BossesPath, FString::Printf(
+					TEXT("simulation.weights가 %d개인데 패턴은 %d개입니다 — 배열 순서로 짝지으므로 개수가 같아야 합니다"),
+					WeightArray->Num(), Pool.Num()));
 				return false;
 			}
 
-			TotalSteps += Pattern->Steps.Num();
-			PresetCustomPatterns.Add(PatternId);
+			for (int32 Index = 0; Index < WeightArray->Num(); ++Index)
+			{
+				const double Weight = (*WeightArray)[Index]->AsNumber();
+				if (Weight < 0.0 || Weight > 10000.0)
+				{
+					Fail(BossesPath, FString::Printf(
+						TEXT("simulation.weights[%d] 값 %g 은(는) 0 ~ 10000 범위를 벗어납니다"), Index, Weight));
+					return false;
+				}
+				Pool[Index].Weight = Weight;
+			}
 		}
 
-		//패턴을 중간에 자르지 않으므로 합이 정확히 맞아야 한다
-		if (TotalSteps != Turns)
+		//고정 순서 지정은 아직 읽지 않는다. 적혀 있는데 추첨으로 돌리면
+		//시뮬레이터와 다른 전투가 되므로, 조용히 넘기지 않고 멈춘다
+		if ((*SimulationPtr)->HasField(TEXT("preset")))
 		{
-			Fail(BossesPath, FString::Printf(
-				TEXT("preset.customPatterns의 총 턴이 %d인데 encounter.turns는 %d입니다 — 패턴은 중간에 잘리지 않습니다"),
-				TotalSteps, Turns));
+			Fail(BossesPath, TEXT("'simulation.preset' 은 아직 지원하지 않습니다 — 게임 코드를 함께 갱신해야 합니다"));
 			return false;
 		}
 	}
 
-	//아래 두 검사는 추첨할 때만 의미가 있다.
-	//고정 순서로 돌리는 판에서 1턴 패턴이 없다고 막으면 엉뚱하게 실패한다
-	if (PresetMode != EBossPresetMode::Random)
+	// ---- 정확히 Turns턴을 채울 수 있는가 ----
+	//v1은 1턴 패턴을 강제해 언제나 가능했다. v2 패턴은 2~3턴뿐이라
+	//길이 조합으로 딱 맞출 수 있는지를 직접 따져야 한다
+	FillableTurns.Init(false, Turns + 1);
+	FillableTurns[0] = true;
+	for (int32 Left = 1; Left <= Turns; ++Left)
 	{
-		return true;
+		for (const FPatternWeight& Entry : Pool)
+		{
+			const FBossPattern* Pattern = FindPattern(Entry.PatternId);
+			if (Entry.Weight <= 0.f || !Pattern)
+			{
+				continue;
+			}
+
+			const int32 Length = Pattern->Steps.Num();
+			if (Length <= Left && FillableTurns[Left - Length])
+			{
+				FillableTurns[Left] = true;
+				break;
+			}
+		}
 	}
 
-	//정확히 Turns턴에 맞춰 끝내려면 1턴 패턴이 반드시 있어야 한다.
-	//남은 턴이 1일 때 쓸 수 있는 패턴은 그것뿐이고, 1턴 패턴이 있으면 남은 턴이
-	//얼마든 후보가 생기므로 이 검사 하나로 모든 남은 턴을 덮는다.
-	// ponytail: 기획서는 '도달 가능한 모든 상태'를 보라고 하지만 연속 재선택을 허용하는
-	// 한 결과가 같다. 금지 모드가 실제로 쓰이면 그때 상태 탐색으로 확장
-	const bool bHasSingleTurn = Pool.ContainsByPredicate([this](const FPatternWeight& W)
-	{
-		const FBossPattern* Pattern = FindPattern(W.PatternId);
-		return W.Weight > 0.f && Pattern && Pattern->Steps.Num() == 1;
-	});
-
-	if (!bHasSingleTurn)
+	if (!FillableTurns[Turns])
 	{
 		Fail(BossesPath, FString::Printf(
-			TEXT("가중치가 있는 1턴 패턴이 없습니다 — 마지막 1턴을 채울 수 없어 정확히 %d턴에 끝낼 수 없습니다"), Turns));
+			TEXT("가진 패턴 길이로는 정확히 %d턴을 채울 수 없습니다 — 길이 조합을 확인하세요"), Turns));
 		return false;
 	}
 
 	if (!bAllowImmediateRepeat)
 	{
 		int32 Positive = 0;
-		for (const FPatternWeight& W : Pool)
+		for (const FPatternWeight& Entry : Pool)
 		{
-			Positive += W.Weight > 0.f ? 1 : 0;
+			Positive += Entry.Weight > 0.f ? 1 : 0;
 		}
 
 		if (Positive < 2)
@@ -848,4 +842,9 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 	}
 
 	return true;
+}
+
+bool FBattleBalance::CanFillExactly(int32 TurnsLeft) const
+{
+	return FillableTurns.IsValidIndex(TurnsLeft) && FillableTurns[TurnsLeft];
 }

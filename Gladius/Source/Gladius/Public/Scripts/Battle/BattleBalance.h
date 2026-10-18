@@ -108,6 +108,19 @@ struct FZoneResistance
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) EResistance Magical = EResistance::Normal;
 };
 
+//보스 상태가 어느 구역을 치는지 (bosses.json v2의 target.mode)
+UENUM(BlueprintType)
+enum class EBossTargetMode : uint8
+{
+	//zones에 적힌 구역을 전부 친다
+	Fixed,
+	//후보 구역 중 **한 곳만** 친다. 어디인지는 턴마다 뽑으므로
+	//예고 문구도 '무작위 구역'이라고 알린다 (Fury)
+	RandomOne,
+	//비공격. 기 모으기·무방비가 여기 해당한다
+	None
+};
+
 //보스의 한 가지 행동 = 한 턴. 패턴은 이 행동들을 순서대로 묶은 것이다.
 //bosses.json 의 actions 항목 하나와 필드가 1:1로 대응한다
 USTRUCT(BlueprintType)
@@ -118,10 +131,17 @@ struct FBossAction
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString Id;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString Name;
 
-	//같은 행동을 몇 번 때리는지. 구역 피해가 이 횟수만큼 들어간다
+	//**파일에는 더 이상 없다** (v2에서 hitCount가 빠졌다). 항상 1이며,
+	//피해식과 표시에 남아 있어 지우지 않았다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) int32 HitCount = 1;
 
+	//어느 구역을 치는지. RandomOne이면 아래 DamageByZone에 후보가 전부 채워져 있고,
+	//StartTurn에서 한 구역만 남기고 지운다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) EBossTargetMode TargetMode = EBossTargetMode::Fixed;
+
 	//구역별 피해. 0이면 그 구역은 맞지 않는다.
+	//v2 파일의 totalDamage를 target.zones에 들어 있는 구역에만 채운 결과다 —
+	//`damageRule`이 '구역 수로 나누지 않는다'고 못 박고 있다.
 	//고정 크기 배열은 블루프린트에 노출할 수 없어 아래 셋은 에디터 전용이다
 	UPROPERTY(EditAnywhere) int32 DamageByZone[3] = { 0, 0, 0 };
 
@@ -134,12 +154,12 @@ struct FBossAction
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString TelegraphText;
 
-	//모션 리소스 연결용 ID. 애니메이션이 붙기 전까지는 보관만 한다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString TelegraphMotionId;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString AttackMotionId;
+	//**v2에서 motionId 두 개가 사라졌다.** 대신 상태 `Id`가 그대로 모션 키다 —
+	//`SingleStrikeLeft`처럼 의미를 담고 있어 블루프린트가 바로 분기할 수 있다
 };
 
-//행동 ID를 순서대로 묶은 1~4턴 패턴
+//상태 ID를 순서대로 묶은 1~4턴 패턴.
+//v2 파일에는 id가 없어 배열 순서로 만들어 넣는다 (pattern_01 …)
 struct FBossPattern
 {
 	FString Id;
@@ -240,6 +260,9 @@ struct FBattleBalance
 	TArray<FString> PresetCustomPatterns;
 	TArray<FString> PresetDirectActions;
 
+	//CanFillExactly가 보는 표. 인덱스가 남은 턴 수이고 크기는 Turns+1이다
+	TArray<bool> FillableTurns;
+
 	//폴더 안의 abilities / enhancements / bosses .json 세 개를 읽는다.
 	//실패하면 이유를 Error 로그로 남기고 false. 조용히 기본값으로 때우지 않는다
 	bool LoadFromFolder(const FString& FolderPath);
@@ -248,6 +271,11 @@ struct FBattleBalance
 	//없으면 INDEX_NONE
 	int32 FindCharacterIndex(const FString& Id) const;
 	const FBossPattern* FindPattern(const FString& Id) const;
+
+	//남은 턴을 가진 패턴 길이들로 **정확히** 채울 수 있는가.
+	//v1에는 1턴 패턴이 있어 언제나 참이었지만, v2 패턴은 2~3턴뿐이라
+	//3+3+3으로 가면 1턴이 남아 아무것도 못 넣는 막다른 길이 생긴다
+	bool CanFillExactly(int32 TurnsLeft) const;
 
 private:
 	//파일 하나씩. 하나라도 false면 전체가 실패한다

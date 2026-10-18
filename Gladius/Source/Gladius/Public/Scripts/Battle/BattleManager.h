@@ -130,8 +130,12 @@ struct FAttackCue
 	int32 Damage = 0;
 
 	//직업군 안에서 피버가 가장 높아 특수 연출 대상으로 뽑힌 공격.
-	//블루프린트는 이게 켜지면 평소 공격 대신 전용 모션을 재생한다
+	//**피버가 0인 사람은 뽑지 않는다** — 아무도 안 쌓았으면 아무도 특별하지 않다
 	bool bFeverHighlight = false;
+
+	//이번 턴에 나갈 피버 평타의 치명타 결과. 개수가 곧 평타 횟수다.
+	//치명타는 평타마다 따로 굴리므로 미리 굴려 담아 둔다 (판정은 ResolveTurn에서 끝난다)
+	TArray<bool> FeverCrits;
 };
 
 //직업군 하나의 공격 모션 길이. 밸런스 수치가 아니라 **애셋에서 재어 넣는 값**이라
@@ -364,9 +368,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float DefenseFeverGain = 5.f;
 
-	//피해 계산에서 피버에 곱하는 계수 (파일의 feverDamageCoefficient)
+	//**더 이상 쓰이지 않는다.** 피버는 피해에 곱해지는 값이 아니라 평타 횟수로 바뀌었다.
+	//`abilities.json`에 `feverDamageCoefficient`가 남아 있어 읽고 검증만 계속한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float FeverDamageCoefficient = 1.f;
+
+	//피버 평타 한 대의 고정 피해. 스킬 피해와 달리 강화분이 붙지 않는다.
+	// ponytail: 밸런스 파일에 아직 대응 항목이 없어 에디터 값이다.
+	// abilities.json에 필드가 생기면 그쪽으로 옮긴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	int32 FeverAttackDamage = 5;
 
 	//피버 상한. 0이면 무제한 (파일의 feverCap: null)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
@@ -520,7 +531,9 @@ public:
 
 	//시뮬레이터와 같은 식: (기본 + 강화 + 피버×계수) * 내성 * (1 + 치명타 시 치명타 피해).
 	//강화 피해는 시뮬레이터가 기본 피해에 더해 넣는 것과 같은 자리다
-	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever, float FeverCoefficient,
+	//**피버는 들어가지 않는다.** 피버는 피해에 더해지는 값이 아니라 평타 횟수다 —
+	//평타는 이 함수에 BaseDamage = FeverAttackDamage로 다시 들어온다
+	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus,
 		float Resist, bool bCrit, float CritDamage);
 
 	//회피한 턴의 피버. EvadeStreak은 이번 회피까지 센 값을 넘긴다.

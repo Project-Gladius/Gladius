@@ -42,6 +42,50 @@ void ABattleUnit::BeginPlay()
 	ApplyLabel();
 }
 
+void ABattleUnit::PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay, float Interval)
+{
+	//앞 턴의 연타가 남아 있으면 버린다. 턴이 바뀌었으니 들고 있을 이유가 없다
+	GetWorldTimerManager().ClearTimer(FlurryHandle);
+
+	FlurryCrits = Crits;
+	FlurryIndex = 0;
+	FlurryInterval = FMath::Max(0.f, Interval);
+
+	if (FlurryCrits.Num() == 0)
+	{
+		return;
+	}
+
+	//스킬 모션이 도는 동안은 기다린다. 겹치면 스킬이 안 보인다
+	GetWorldTimerManager().SetTimer(FlurryHandle, this, &ABattleUnit::FireNextFeverAttack,
+		FMath::Max(KINDA_SMALL_NUMBER, FirstDelay), false);
+}
+
+void ABattleUnit::FireNextFeverAttack()
+{
+	if (!FlurryCrits.IsValidIndex(FlurryIndex))
+	{
+		GetWorldTimerManager().ClearTimer(FlurryHandle);
+		FlurryCrits.Reset();
+		return;
+	}
+
+	const int32 Index = FlurryIndex++;
+	OnFeverAttack(Index, FlurryCrits.Num(), FlurryCrits[Index]);
+
+	//마지막 대였으면 더 걸지 않는다
+	if (FlurryCrits.IsValidIndex(FlurryIndex))
+	{
+		GetWorldTimerManager().SetTimer(FlurryHandle, this, &ABattleUnit::FireNextFeverAttack,
+			FMath::Max(KINDA_SMALL_NUMBER, FlurryInterval), false);
+	}
+	else
+	{
+		FlurryCrits.Reset();
+		FlurryIndex = 0;
+	}
+}
+
 void ABattleUnit::HoldMotion(float Seconds)
 {
 	const UWorld* World = GetWorld();
