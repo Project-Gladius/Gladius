@@ -11,8 +11,9 @@ if(!fs.existsSync(dataDir)){
  const enhancements={schemaVersion:1,kind:'gladius-enhancements',revision:1,perLevel:{hp:1,damage:1,critChance:.05,critBonus:.1},initialLevels:{hp:0,damage:0,critChance:0,critBonus:0},critChanceCap:1};
  for(const [n,v] of Object.entries({abilities,bosses,enhancements}))fs.writeFileSync(path.join(dataDir,n+'.json'),JSON.stringify(v,null,2)+'\n');
 }
-const data={}; for(const n of ['abilities','bosses','enhancements']){const text=fs.readFileSync(path.join(dataDir,n+'.json'),'utf8');data[n]=JSON.parse(text);fs.writeFileSync(path.join(out,'Data',n+'.json'),text);}
+const data={}; for(const n of ['abilities','bosses','enhancements']){const currentBoss=path.join(root,'..','Balancing','bosses.json');const text=fs.readFileSync(n==='bosses'&&fs.existsSync(currentBoss)?currentBoss:path.join(dataDir,n+'.json'),'utf8');data[n]=JSON.parse(text);fs.writeFileSync(path.join(out,'Data',n+'.json'),text);}
 const inline=x=>x.replace(/<\/script/gi,'<\\/script');
 const html=fs.readFileSync(path.join(root,'shell.html'),'utf8').replace('/*STYLE*/',fs.readFileSync(path.join(root,'style.css'),'utf8')).replace('/*ENGINE*/',inline(fs.readFileSync(path.join(root,'engine.js'),'utf8'))).replace('/*DATA*/','const EMBEDDED = '+JSON.stringify(data).replace(/</g,'\\u003c')+';').replace('/*UI*/',inline(fs.readFileSync(path.join(root,'ui.js'),'utf8')));
 fs.writeFileSync(path.join(out,'Gladius 통합 시뮬레이터.html'),html);
+const balancing=path.join(root,'..','Balancing');if(fs.existsSync(balancing))fs.writeFileSync(path.join(balancing,'Gladius 통합 시뮬레이터.html'),html);
 console.log('Built standalone HTML and 3 shared JSON files.');
