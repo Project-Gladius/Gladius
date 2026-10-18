@@ -6,7 +6,7 @@ namespace
 	const TArray<FString>& GetKnownKeywords()
 	{
 		static const TArray<FString> Keywords = {
-			TEXT("공격"), TEXT("방어"), TEXT("회피"), TEXT("로그아웃"), TEXT("강화"), TEXT("대화")
+			TEXT("공격"), TEXT("방어"), TEXT("회피"), TEXT("로그아웃"), TEXT("강화"), TEXT("대화"), TEXT("전투")
 		};
 		return Keywords;
 	}
@@ -87,6 +87,13 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 		if (Remainder == TEXT("3")) { OutCommand.CommandType = ECommandType::Enhance3; return true; }
 		if (Remainder == TEXT("4")) { OutCommand.CommandType = ECommandType::Enhance4; return true; }
 		return false;
+	}
+
+	if (Keyword == TEXT("전투"))
+	{
+		if (!Remainder.IsEmpty()) return false;
+		OutCommand.CommandType = ECommandType::TravelToCombat;
+		return true;
 	}
 
 	if (Keyword == TEXT("대화"))

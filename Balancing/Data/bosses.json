@@ -13,10 +13,19 @@
         ]
       },
       "telegraphText": "test:왼쪽을 내려칠 준비를 합니다.",
-      "vulnerabilityByZone": {
-        "left": "vulnerable",
-        "center": "normal",
-        "right": "resistant"
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -29,10 +38,19 @@
         ]
       },
       "telegraphText": "test:중앙을 내려칠 준비를 합니다.",
-      "vulnerabilityByZone": {
-        "left": "resistant",
-        "center": "vulnerable",
-        "right": "resistant"
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -45,10 +63,19 @@
         ]
       },
       "telegraphText": "test:오른쪽을 내려칠 준비를 합니다.",
-      "vulnerabilityByZone": {
-        "left": "resistant",
-        "center": "normal",
-        "right": "vulnerable"
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -61,10 +88,19 @@
         ]
       },
       "telegraphText": "test:왼쪽에 강력한 번개 공격을 준비합니다.",
-      "vulnerabilityByZone": {
-        "left": "vulnerable",
-        "center": "normal",
-        "right": "resistant"
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -77,10 +113,19 @@
         ]
       },
       "telegraphText": "test:중앙에 강력한 번개 공격을 준비합니다.",
-      "vulnerabilityByZone": {
-        "left": "resistant",
-        "center": "vulnerable",
-        "right": "resistant"
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -93,10 +138,19 @@
         ]
       },
       "telegraphText": "test:오른쪽에 강력한 번개 공격을 준비합니다.",
-      "vulnerabilityByZone": {
-        "left": "resistant",
-        "center": "normal",
-        "right": "vulnerable"
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -110,10 +164,19 @@
         ]
       },
       "telegraphText": "test:왼쪽과 중앙을 향해 무기를 들어 올립니다.",
-      "vulnerabilityByZone": {
-        "left": "vulnerable",
-        "center": "vulnerable",
-        "right": "resistant"
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -127,10 +190,19 @@
         ]
       },
       "telegraphText": "test:중앙과 오른쪽을 쓸어칠 준비를 합니다.",
-      "vulnerabilityByZone": {
-        "left": "resistant",
-        "center": "vulnerable",
-        "right": "vulnerable"
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -144,10 +216,19 @@
         ]
       },
       "telegraphText": "test:왼쪽과 오른쪽을 공격할 준비를 합니다.",
-      "vulnerabilityByZone": {
-        "left": "vulnerable",
-        "center": "resistant",
-        "right": "vulnerable"
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -158,10 +239,19 @@
         "zones": []
       },
       "telegraphText": "test:트루돈이 기를 모읍니다.",
-      "vulnerabilityByZone": {
-        "left": "resistant",
-        "center": "resistant",
-        "right": "resistant"
+      "resistanceByZone": {
+        "left": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "enduring",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "enduring",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -176,10 +266,19 @@
         ]
       },
       "telegraphText": "test:모든 구역을 향해 강력한 공격을 준비합니다.",
-      "vulnerabilityByZone": {
-        "left": "vulnerable",
-        "center": "vulnerable",
-        "right": "vulnerable"
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -190,10 +289,19 @@
         "zones": []
       },
       "telegraphText": "test:트루돈이 쓰러져 무방비 상태가 됩니다.",
-      "vulnerabilityByZone": {
-        "left": "vulnerable",
-        "center": "vulnerable",
-        "right": "vulnerable"
+      "resistanceByZone": {
+        "left": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "vulnerable",
+          "magical": "normal"
+        }
       }
     },
     {
@@ -208,10 +316,19 @@
         ]
       },
       "telegraphText": "test:트루돈이 무작위 구역에 공격을 준비합니다.",
-      "vulnerabilityByZone": {
-        "left": "normal",
-        "center": "normal",
-        "right": "normal"
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
       }
     }
   ],

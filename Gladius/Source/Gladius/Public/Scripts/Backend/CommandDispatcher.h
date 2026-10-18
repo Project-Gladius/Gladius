@@ -34,6 +34,8 @@ DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnEnhanceCommand, const FString& /*UserI
 
 // !대화 ... 실행 시 브로드캐스트. AI 쿼리(uid/username/message)에 필요한 정보를 함께 넘김
 // CommentId: 채팅 고유 Id(uid), Username: 작성자 표시명(username), Argument: 대화 내용 전체(message)
+DECLARE_MULTICAST_DELEGATE(FOnTempleCombatCommand);
+
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnTalkCommand, const FString& /*UserId*/, const FString& /*CommentId*/, const FString& /*Username*/, const FString& /*Argument*/);
 
 // 파싱된 명령어(ECommandType)와 이를 처리할 함수를 map으로 연결해 실행시키는 클래스
@@ -70,6 +72,7 @@ public:
 
 	//외부(신전 로직 등)에서 구독해 대화(AI 쿼리) 처리를 연결. CommentId, Username, Argument(대화 내용 전체)를 받음
 	FOnTalkCommand OnTalkCommand;
+	FOnTempleCombatCommand OnTempleCombatCommand;
 
 private:
 	//명령어 종류 -> 처리 함수 매핑
@@ -88,6 +91,7 @@ private:
 	//강화(1~4)도 하나의 델리게이트로 묶여 있으므로 CommandHandlers에서 같은 함수를 공유함
 	void BroadcastEnhance(const FParsedCommand& Command);
 	void BroadcastTalk(const FParsedCommand& Command);
+	void BroadcastTempleCombat(const FParsedCommand& Command);
 
 	// ===== 로그인 / 로그아웃 =====
 

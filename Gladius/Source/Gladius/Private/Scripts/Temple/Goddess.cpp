@@ -84,6 +84,13 @@ void AGoddess::StopCycle()
 
 void AGoddess::EnterBlessing(int32 TierIndex)
 {
+	// 요청이 없는 축복은 상태 전환과 타이머를 모두 건너뜁니다.
+	while (TierIndex < GTempleEnhanceTierCount
+		&& (!EnhanceTiers.IsValidIndex(TierIndex) || EnhanceTiers[TierIndex].Commands.IsEmpty()))
+	{
+		++TierIndex;
+	}
+
 	if (TierIndex >= GTempleEnhanceTierCount)
 	{
 		FinishBlessing();

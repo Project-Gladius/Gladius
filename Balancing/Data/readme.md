@@ -1,31 +1,31 @@
 # 전투 데이터 JSON 항목 설명
 
-이 폴더의 JSON 3개는 통합 시뮬레이터가 함께 사용하는 초기 전투 데이터입니다. 이 문서는 **2026-09-24 현재 JSON과 시뮬레이터 계산 코드**를 기준으로 작성했습니다. 표의 현재값은 이후 밸런스 편집에 따라 달라질 수 있습니다.
+이 폴더의 JSON 3개는 통합 시뮬레이터가 함께 사용하는 초기 전투 데이터입니다. 기존 계산 설명은 2026-09-24 기준이며, 보스 상태·패턴 및 축복 정의는 **2026-10-18**에 갱신했습니다. 보스 JSON과 현재 HTML의 호환성은 2-4절을 참고하세요. 표의 현재값은 이후 밸런스 편집에 따라 달라질 수 있습니다.
 
 | 파일 | 담고 있는 데이터 |
 |---|---|
 | [abilities.json](abilities.json) | 공통 전투 규칙, 캐릭터별 HP·공격·방어, 시작 상태, 분석 기본 설정 |
-| [bosses.json](bosses.json) | 보스 공격, 공격을 묶은 패턴, 추첨 가중치, 실행 순서 |
-| [enhancements.json](enhancements.json) | 강화 1단계당 증가량, 초기 강화 단계, 치명타 확률 상한 |
+| [bosses.json](bosses.json) | 보스 상태, 구역별 물리·마법 내성, 상태를 묶은 패턴 |
+| [enhancements.json](enhancements.json) | 강화 1단계당 증가량, 초기 강화 단계, 치명타 확률 상한, 축복 정의 목록 |
 
 실제 게임에서도 사용할 수 있도록 나눈 데이터입니다. **현재 Unreal 게임에 이 JSON이 자동 연동되어 있다는 뜻은 아닙니다.** 게임에서 사용하려면 동일한 규격과 계산 순서를 읽는 로더가 필요합니다.
 
 ## 읽는 방법과 공통 항목
 
-- `characters[]`, `actions[]`처럼 `[]`가 붙은 표기는 배열의 각 항목을 뜻합니다. 실제 JSON 키에는 `[]`가 없습니다.
+- `characters[]`, `states[]`처럼 `[]`가 붙은 표기는 배열의 각 항목을 뜻합니다. 실제 JSON 키에는 `[]`가 없습니다.
 - 비율은 **1 = 100%**로 저장합니다. `0.25`는 25%, `0.5`는 50%입니다. 치명타 **추가** 피해 50%는 최종 피해 **1.5배**를 뜻합니다.
 - `left` / `center` / `right`는 플레이어 화면 기준 **좌 / 중 / 우**입니다.
 - `physical` / `magical`은 **물리 / 마법**입니다.
 - `true` / `false`는 **켜기 / 끄기**입니다. `null`은 항목에 따라 별도 의미가 있으며, 피버 상한에서는 **무제한**을 뜻합니다.
 - `id`는 다른 데이터가 참조하는 고유 식별자, `name`은 화면에 표시할 이름입니다. 이름이 같아도 ID가 다르면 별개 데이터입니다.
 
-세 파일에 공통으로 들어가는 항목입니다.
+파일별 메타데이터입니다.
 
 | 항목 | 뜻 | 현재값 / 사용법 |
 |---|---|---|
-| `schemaVersion` | JSON 구조의 버전 | `1`. 구조를 읽는 프로그램의 지원 버전과 맞아야 합니다. |
-| `kind` | 파일 종류 식별자 | 능력치: `gladius-abilities`, 보스: `gladius-boss-patterns`, 강화: `gladius-enhancements`. |
-| `revision` | 데이터 내용의 개정 번호 | 모두 `1`. 밸런스 수치를 개정할 때 관리하는 양의 정수입니다. |
+| `schemaVersion` | JSON 구조의 버전 | 능력치·강화는 `1`, 보스는 `2`. 세부 필드도 로더와 일치해야 합니다. |
+| `kind` | 파일 종류 식별자 | 능력치: `gladius-abilities`, 강화: `gladius-enhancements`. 보스에는 없음. |
+| `revision` | 데이터 내용의 개정 번호 | 능력치 `1`, 강화 `2`. 보스에는 없음. |
 
 ## 1. abilities.json — 초기 능력치와 전투 규칙
 
@@ -120,95 +120,87 @@
 | `physical` | 이 턴의 보스 물리 내성 | `normal` |
 | `magical` | 이 턴의 보스 마법 내성 | `normal` |
 
-## 2. bosses.json — 보스 공격과 패턴
+## 2. bosses.json — 보스 상태와 패턴
 
-### 2-1. 보스 기본 정보와 encounter
+### 2-1. 기본 구조
 
-| 항목 | 뜻 | 현재값 / 사용법 |
-|---|---|---|
-| `bossId` | 보스 고유 식별자 | `saved_balance_boss` |
-| `name` | 보스 표시 이름 | 최신 세이브 보스 |
-| `maxHp` | 보스 최대 HP | `100`. **현재 두 분석에서는 소모하거나 처치 종료에 사용하지 않는 게임용 보관값**입니다. |
-| `encounter` | 랜덤 패턴 전투 구간 설정 객체 | 하위 두 항목 참고. |
-| `encounter.turns` | 랜덤 모드에서 한 구간에 채울 턴 수 | `10`. 현재 지원 범위 1~10턴. |
-| `encounter.patternFit` | 남은 턴과 패턴 길이를 맞추는 규칙 | `remainingTurns` 고정. 남은 턴 이하 길이의 패턴만 선택. |
+현재 보스는 **트루돈**, `schemaVersion`은 **2**입니다. `states`에 13개 상태, `patterns`에 16개 패턴을 저장합니다. `kind`, `revision`, `bossId`, `zoneIds`는 사용하지 않습니다.
 
-### 2-2. actions[] — 한 턴짜리 보스 공격 사전
+| 항목 | 의미 |
+|---|---|
+| `schemaVersion` | 상태·패턴 형식 버전. 현재 `2`. |
+| `name` | 보스 이름. 현재 `트루돈`. |
+| `damageRule` | `totalDamage`는 타격 구역에 있는 각 대상이 받는 피해이며 구역 수로 나누지 않는다는 규칙. |
+| `states` | 한 턴에 실행할 상태 사전. |
+| `patterns` | 상태 ID를 순서대로 묶은 패턴 목록. |
 
-**공격 하나는 한 턴**입니다. 하나의 공격을 여러 패턴이나 직접 지정 순서에서 재사용할 수 있습니다.
+### 2-2. states[] — 한 턴에 한 상태
 
-| 항목 | 뜻 | 예 / 적용 방식 |
-|---|---|---|
-| `id` | 공격 고유 ID | `action_01`. 패턴의 `steps`와 직접 지정 목록에서 참조. |
-| `name` | 공격 표시 이름 | 좌, 우, 충전 등. |
-| `hitCount` | 이 턴 안에서 동일한 공격이 적중하는 타격 횟수 | 현재 모두 `1`. **패턴의 턴 수가 아닙니다.** |
-| `damageByZone` | 좌·중·우 구역별 **1타당** 보스 피해 | 하위 `left`, `center`, `right`에 피해 정수 저장. `0`이면 안전 구역. |
-| `attributeByZone` | 좌·중·우 구역별 보스 공격 속성 | 각 구역에 `physical` 또는 `magical`. 현재는 기록용이며 플레이어 피격 피해를 추가 보정하지 않습니다. |
-| `resistanceByZone` | 플레이어 위치별로 적용되는 **보스의** 속성 내성 | 하위 `left`, `center`, `right` 각각에 `physical`, `magical` 저장. 플레이어가 보스에게 주는 피해에 사용. |
-| `telegraph` | 행동 선택 전에 보여 줄 예고 정보 | 아래 두 항목을 가진 객체. |
-| `telegraph.text` | 예고 문구 | 현재는 공격명과 같은 문구. |
-| `telegraph.motionId` | 예고 모션 연결용 ID | 현재 빈 문자열. 실제 게임 리소스에 연결할 때 지정. |
-| `attackMotionId` | 공격 실행 모션 연결용 ID | 현재 빈 문자열. |
+한 턴에는 언제나 상태 하나만 존재합니다. 상태는 여러 패턴에서 재사용할 수 있습니다. 개별 모션·카메라워크는 상태 ID에 별도 스크립트로 연결할 예정이므로 JSON에 모션 ID를 저장하지 않습니다.
 
-구역별 구조 예:
+| 항목 | 의미 / 규칙 |
+|---|---|
+| `id` | 고유 상태 ID. 예: `SingleStrikeLeft`. 영문 대소문자·숫자·밑줄 사용. |
+| `totalDamage` | 타격 구역의 각 대상이 받는 총 피해 정수. `AllStrike`와 `StrongStrikeLeft/Center/Right`는 2, 나머지 공격은 1, `Defense`와 `Defenseless`는 0. |
+| `target.mode` | `fixed`: 지정 구역 모두 타격. `randomOne`: 후보 중 한 구역만 타격. `none`: 비공격. |
+| `target.zones` | `left`, `center`, `right` 중 타격 구역 또는 무작위 선택 후보. 비공격은 빈 배열. |
+| `telegraphText` | 예고 텍스트. 현재 `test:텍스트` 형식의 임시 문구. |
+| `resistanceByZone` | 세 구역 각각의 보스 물리·마법 내성. 플레이어가 보스에게 주는 피해에 적용. |
+
+`resistanceByZone`은 이전 버전의 물리·마법 분리 형식을 사용합니다. 각 구역에 `physical`, `magical`을 모두 기록합니다. 값은 `enduring`(견딤), `normal`(보통), `vulnerable`(취약)이며 현재 능력치 JSON의 배율은 각각 0.5, 1, 1.5입니다.
+
+기존 구역별 취약도는 **물리 내성에 그대로 유지**합니다. 이전 `vulnerabilityByZone`의 `resistant`는 같은 의미의 `enduring`으로 옮겼습니다. **마법 내성은 모든 상태·구역에서 항상 `normal`**입니다. `vulnerabilityByZone`은 더 이상 저장하지 않습니다.
 
 ```json
-"damageByZone": { "left": 2, "center": 0, "right": 0 },
-"attributeByZone": { "left": "physical", "center": "physical", "right": "physical" },
-"resistanceByZone": {
-  "left":   { "physical": "normal", "magical": "normal" },
-  "center": { "physical": "normal", "magical": "normal" },
-  "right":  { "physical": "vulnerable", "magical": "normal" }
+{
+  "id": "SingleStrikeLeft",
+  "totalDamage": 1,
+  "target": { "mode": "fixed", "zones": ["left"] },
+  "telegraphText": "test:왼쪽을 내려칠 준비를 합니다.",
+  "resistanceByZone": {
+    "left": { "physical": "vulnerable", "magical": "normal" },
+    "center": { "physical": "normal", "magical": "normal" },
+    "right": { "physical": "enduring", "magical": "normal" }
+  }
 }
 ```
 
-위 예는 **좌 구역에 피해 2를 주며, 우 구역에서 물리 공격을 하면 보스에게 취약 배율 1.5배의 피해를 주는 행동**입니다. 피격 구역과 취약 구역은 독립적인 설정입니다. 내성은 회피 이동 후 위치를 기준으로 조회합니다.
+공격 상태는 `SingleStrikeLeft/Center/Right`, `StrongStrikeLeft/Center/Right`, `LeftMiddle`, `RightMiddle`, `LeftRight`, `AllStrike`, `Fury`입니다. `Fury`는 세 구역 중 하나를 무작위로 타격합니다. `Defense`, `Defenseless`는 비공격 상태입니다. 피격 구역과 보스 내성은 독립된 설정입니다.
 
-예고·모션 항목은 게임 연출용 정보입니다. 현재 AI의 판독 성공률은 실험에서 설정한 확률을 사용하며, 문구의 실제 의미나 모션을 분석하지 않습니다.
+### 2-3. patterns[] — 상태의 실행 순서
 
-### 2-3. patterns[] — 여러 공격을 묶은 패턴
+| 항목 | 의미 / 규칙 |
+|---|---|
+| `name` | 패턴 이름. |
+| `turns` | 소요 턴 수. 반드시 `sequence.length`와 동일해야 합니다. |
+| `sequence` | 실행 순서대로 나열한 상태 ID 배열. 모든 ID는 `states`에 존재해야 합니다. |
 
-| 항목 | 뜻 | 예 / 사용법 |
-|---|---|---|
-| `id` | 패턴 고유 ID | `pattern_1`. 추첨 목록과 사용자 지정 순서에서 참조. |
-| `name` | 접힌 패턴 목록에 표시되는 이름 | 좌, 좌우 (마지막) 등. |
-| `steps` | 실행 순서대로 나열한 **공격 ID 배열** | `["action_01", "action_02"]`는 좌 공격 다음 우 공격의 2턴 패턴. 1~4개까지 지정. |
+```json
+{ "name": "좌, 중, 우", "turns": 3, "sequence": ["SingleStrikeLeft", "SingleStrikeCenter", "SingleStrikeRight"] }
+```
 
-패턴 길이는 `steps`의 개수입니다. 같은 공격 ID를 반복해서 넣을 수도 있습니다. 현재 기본 데이터는 모두 1턴 패턴이지만, `steps`를 늘리면 여러 공격을 묶은 패턴이 됩니다.
+현재는 2~3턴 패턴 16개입니다. `좌, 중, 우`, `좌, 좌중, 우`, `중, 좌중`, `좌, 우 강공격`, `좌, 중 강공격`, `중, 좌 강공격`, `중, 좌, 우` 및 각각의 좌우반전 패턴 14개에 `Fury 연속 2번`, `Defense → AllStrike → Defenseless`가 추가되어 있습니다. `id`, `steps`는 패턴의 저장 필드가 아닙니다.
 
-### 2-4. selection — 랜덤 패턴 선택 설정
+### 2-4. 선택적 simulation 설정과 HTML 호환성
 
-| 항목 | 뜻 | 현재값 / 사용법 |
-|---|---|---|
-| `mode` | 추첨 알고리즘 | `weightedRandom` 고정 = 가중 랜덤. 아래 `preset.mode`와 구분. |
-| `allowImmediateRepeat` | 직전과 같은 패턴의 연속 선택 허용 | `true` = 허용. `false`면 직전 패턴을 다음 후보에서 제외. |
-| `pool` | 추첨 후보와 가중치를 담은 배열 | 아래 두 항목으로 구성. |
-| `pool[].patternId` | 선택 대상 패턴 ID | `patterns[].id`에 존재해야 합니다. |
-| `pool[].weight` | 패턴의 상대 선택 가중치 | 현재 모두 `1`. `0`이면 랜덤 선택에서 제외. 합계가 100일 필요는 없습니다. |
+현재 원본 JSON에는 `simulation`이 없습니다. 기존 통합 시뮬레이터는 상태 형식을 내부 공격 형식으로 변환할 때 기본 설정을 만들며, 보스 JSON을 저장할 때 다음 설정을 `simulation` 아래 추가합니다.
 
-랜덤 모드는 패턴이 끝날 때 다음 순서로 선택합니다.
+| 항목 | 기본값 / 의미 |
+|---|---|
+| `maxHp` | 100. 현재 분석에서 보스 처치 종료에 쓰지 않는 보관값. |
+| `encounter` | `{ "turns": 10, "patternFit": "remainingTurns" }`. 랜덤 구간 길이. |
+| `allowImmediateRepeat` | `true`. 같은 패턴 연속 선택 허용. |
+| `weights` | 패턴 배열 순서에 대응하는 가중치. 기본 모두 1, 0이면 선택 제외. |
+| `preset.mode` | 기본 `random`. `custom`, `direct`도 지원. |
+| `preset.seed` | 기본 20261018. |
+| `preset.customPatternIndices` | 기본 `[0]`. 0부터 시작하는 패턴 배열 인덱스의 실행 순서. |
+| `preset.directActions` | 기본 첫 패턴의 상태 ID 순서. |
 
-1. 남은 턴 이하 길이인 패턴만 남깁니다.
-2. 가중치 0과 연속 선택 제한에 걸리는 패턴을 제외합니다.
-3. 남은 후보에서 `해당 패턴 가중치 ÷ 후보 가중치 합계`로 추첨합니다.
-4. 선택된 패턴의 공격을 모두 실행한 뒤 다시 추첨합니다.
+랜덤 선택은 남은 턴·가중치·연속 선택 제한을 확인하고, 선택 후에도 남은 턴을 끝까지 채울 수 있는 패턴만 후보로 삼습니다. 사용자 지정은 선택한 패턴의 총 길이, 직접 지정은 상태 목록 길이가 실행 턴 수입니다.
 
-예: 후보 가중치가 1과 3이면 선택 확률은 25%와 75%입니다. **패턴을 고를 확률이며, 전체 턴에서 차지하는 비중과는 다릅니다.** 남은 1턴에는 2턴 패턴을 선택할 수 없습니다. 랜덤 모드에서 끝까지 진행할 후보가 없는 설정은 실행 전에 오류로 처리합니다.
+**2026-10-18 호환성 주의:** 이번 변경은 JSON과 문서에만 적용했습니다. 현재 두 HTML의 상태 로더는 아직 `vulnerabilityByZone`을 요구하며, 이를 물리·마법 양쪽에 동일하게 적용합니다. 따라서 새 `resistanceByZone` 형식의 보스 JSON은 현재 HTML에서 불러오기 검증에 실패합니다. HTML 로더·편집기·내보내기를 새 형식에 맞추는 후속 수정이 필요합니다. 위 `simulation` 설명은 기존 구현의 동작 설명입니다.
 
-### 2-5. preset — 사용할 보스 설정 방식과 순서
-
-| 항목 | 뜻 | 현재값 / 사용법 |
-|---|---|---|
-| `mode` | 실제로 사용할 설정 방식 | `random`: 패턴 랜덤 설정 / `custom`: 패턴 사용자 지정 / `direct`: 공격 직접 지정. 현재 `direct`. |
-| `seed` | 기본 패턴 추첨용 난수 시드 | `20260909`. 같은 데이터·시드·알고리즘이면 같은 순서를 재현. 개별 실험에서 시드를 따로 지정할 수 있습니다. |
-| `customPatterns` | `custom` 모드에서 순서대로 실행할 **패턴 ID 배열** | 각 패턴의 `steps`를 순서대로 펼칩니다. 해당 모드에서 전체 길이가 1~10턴이어야 합니다. |
-| `directActions` | `direct` 모드에서 순서대로 실행할 **공격 ID 배열** | 현재 `action_01`부터 `action_10`까지. 원소 하나가 1턴이며 총 1~10턴. |
-
-현재 직접 지정 순서는 **좌 → 우 → 중 → 좌우 → 충전 → 분노 → 무방비 → 좌쓸기 → 우쓸기 → 좌우**입니다. `action_04`와 `action_10`은 이름이 좌우로 같지만 우 구역의 물리 내성이 다릅니다.
-
-`encounter.turns`는 **랜덤 모드**의 구간 길이입니다. 사용자 지정 모드에서는 선택한 패턴 길이의 합, 직접 지정 모드에서는 공격 목록 길이가 실행 턴 수를 결정합니다. 선택하지 않은 모드의 목록도 이후 전환을 위해 보관합니다.
-
-## 3. enhancements.json — 강화 수치
+## 3. enhancements.json — 강화 수치와 축복 정의
 
 ### 3-1. perLevel — 강화 1단계당 증가량
 
@@ -247,6 +239,52 @@
 
 기본 치명타 확률이 0인 공격 1도 치명타 확률 강화를 적용하면 치명타가 발생할 수 있습니다.
 
+### 3-4. blessings[] — 축복 정의 (2026-10-18 추가)
+
+`enhancements.json`의 `blessings` 배열에 축복을 저장합니다. 기존 강화 수치 필드와 별도로 관리하며, 축복마다 아래 네 필드를 갖습니다.
+
+| JSON 필드 | 자료형 | 의미 |
+|---|---|---|
+| `id` | int | 축복의 고유 정수 ID. 목록 안에서 중복되지 않아야 합니다. |
+| `title` | string | 축복 제목. 접미사 없이 저장하며 UI에서 `{title}의 축복`으로 표시합니다. 예: `회복` → `회복의 축복`. |
+| `relatedStat` | string | 축복이 관련된 능력치. 아래 식별자 중 하나를 사용합니다. |
+| `displayText` | string | 축복 설명으로 표시할 텍스트. `{변수명}`은 수치 치환 자리입니다. |
+
+관련 능력치의 허용 식별자:
+
+| `relatedStat` | 능력치 |
+|---|---|
+| `currentHp` | 현재 체력 |
+| `maxHp` | 최대 체력 |
+| `baseAttack` | 기본 공격력 |
+| `feverAttack` | FeverAttack 공격력 |
+| `critChance` | 치명타 확률 |
+| `critDamage` | 치명타 데미지 |
+
+예시 축복:
+
+| ID | 저장 제목 | UI 제목 | 관련 능력치 | 표시 텍스트 |
+|---|---|---|---|---|
+| 1 | 회복 | 회복의 축복 | `currentHp` | 체력을 `{HPGen}`만큼 회복함 |
+| 2 | 힘 | 힘의 축복 | `baseAttack` | 기본 공격력을 `{AtkInc}`만큼 증가시킴 |
+| 3 | 민첩 | 민첩의 축복 | `critChance` | 치명타 확률을 `{CritInc}` %p만큼 증가시킴 |
+| 4 | 예리함 | 예리함의 축복 | `critDamage` | 치명타 데미지를 `{CritDmgInc}` %p만큼 증가시킴 |
+
+```json
+{
+  "id": 1,
+  "title": "회복",
+  "relatedStat": "currentHp",
+  "displayText": "체력을 {HPGen}만큼 회복함"
+}
+```
+
+`HPGen`, `AtkInc`, `CritInc`, `CritDmgInc`의 실제 수치는 아직 지정하지 않았습니다. 추후 축복 시스템에서 값을 제공하고 표시 텍스트의 해당 자리를 치환합니다. `displayText`는 표시용 문자열이며 계산식을 실행하거나 파싱하는 용도가 아닙니다.
+
+`CritInc`와 `CritDmgInc`는 **퍼센트포인트(%p)** 단위입니다. 예를 들어 확률 20%에 `CritInc = 5`를 적용하면 25%입니다. 0~1 비율을 쓰는 게임 데이터에 반영할 때는 100으로 나눕니다. 이 규칙은 표시용 치환 변수에 대한 것이며, 기존 `perLevel` 필드의 단위는 바꾸지 않습니다.
+
+현재 최대 체력·FeverAttack 공격력은 허용 능력치로 정의하며, 해당 축복 예시는 아직 추가하지 않았습니다. 이 절은 데이터와 표시 형식 정의이며, 실제 축복 적용·턴별 초기화는 추후 축복 시스템에서 연결합니다.
+
 ## 4. 함께 적용되는 계산 예
 
 현재 공격 2를 강화 없이 사용하고, 피버가 5, 물리 내성이 보통이라고 가정합니다.
@@ -260,7 +298,7 @@
 
 실제 공격은 12 또는 18의 정수 피해입니다. **기대 피해나 반복 실험 평균이 소수인 것은 반올림 누락이 아닙니다.** 일반·치명타 피해를 각각 반올림한 뒤 평균을 냅니다.
 
-보스 피해 3, `hitCount=2`, 방어 시 피해 비율 50%라면:
+이전 공격 형식의 계산 예로, 보스 피해 3, `hitCount=2`, 방어 시 피해 비율 50%라면 (현재 상태 JSON에는 `hitCount`가 없으며 한 상태의 총 피해를 사용):
 
 ```text
 방어 피격 피해 = 올림(3 × 0.5) × 2 = 2 × 2 = 4
@@ -272,9 +310,9 @@
 ## 5. 편집 시 참고
 
 - 숫자는 따옴표 없이, 비율은 소수로 입력합니다. JSON에는 주석을 넣지 않습니다.
-- 공격·패턴 ID를 바꾸면 이를 참조하는 `steps`, `patternId`, `customPatterns`, `directActions`도 함께 수정합니다. 표시 이름만 바꾸면 참조를 바꿀 필요가 없습니다.
+- 상태 ID를 바꾸면 패턴의 `sequence`와 선택적 `simulation.preset.directActions` 참조도 수정합니다. 패턴 순서를 바꾸면 `weights`, `customPatternIndices`의 대응도 확인합니다.
 - 구역별 객체는 `left`, `center`, `right`를 모두 유지하고, 내성 객체에는 `physical`, `magical`을 모두 지정합니다.
-- `actions`와 `patterns`는 각각 최대 100개, 패턴의 `steps`는 1~4개, `hitCount`는 1~10입니다. 더 큰 수치가 필요하면 현재 시뮬레이터의 검증 범위도 함께 조정해야 합니다.
+- 기존 시뮬레이터의 지원 범위는 상태·패턴 각각 최대 100개, 패턴당 1~4턴입니다. `turns`와 `sequence` 길이를 일치시키세요. 새 내성 형식은 2-4절의 후속 호환 작업이 필요합니다.
 - 저장한 JSON을 사용하려면 통합 HTML에서 **Data 폴더 연결** 또는 **JSON 3개 불러오기**를 사용합니다. HTML을 더블클릭하기만 하면 빌드 당시 포함된 데이터 복사본으로 시작합니다.
 - 화면의 **JSON 직접 편집 → 검증·적용**은 메모리에 적용합니다. 파일에도 반영하려면 저장 버튼을 사용합니다.
 

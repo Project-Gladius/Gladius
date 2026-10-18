@@ -1,4 +1,4 @@
-﻿#include "Scripts/Backend/CommandDispatcher.h"
+#include "Scripts/Backend/CommandDispatcher.h"
 
 void UCommandDispatcher::Initialize()
 {
@@ -19,6 +19,7 @@ void UCommandDispatcher::RegisterCommandHandlers()
 	CommandHandlers.Add(ECommandType::Enhance2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
 	CommandHandlers.Add(ECommandType::Enhance3, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
 	CommandHandlers.Add(ECommandType::Enhance4, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
+	CommandHandlers.Add(ECommandType::TravelToCombat, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastTempleCombat));
 	CommandHandlers.Add(ECommandType::Talk, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastTalk));
 }
 
@@ -147,4 +148,9 @@ void UCommandDispatcher::BroadcastEnhance(const FParsedCommand& Command)
 void UCommandDispatcher::BroadcastTalk(const FParsedCommand& Command)
 {
 	OnTalkCommand.Broadcast(Command.UserId, Command.CommentId, Command.Username, Command.Argument);
+}
+
+void UCommandDispatcher::BroadcastTempleCombat(const FParsedCommand& Command)
+{
+	OnTempleCombatCommand.Broadcast();
 }
