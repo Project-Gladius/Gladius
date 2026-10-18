@@ -8,6 +8,8 @@
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+#include "Scripts/Backend/CommandDispatcher.h"
+#include "GameFramework/PlayerController.h"
 
 ATempleCycleController::ATempleCycleController()
 {
@@ -32,6 +34,8 @@ void ATempleCycleController::BeginPlay()
 	{
 		//신전상태에서 들어오는 !강화/!대화를 큐에 쌓기 시작
 		CommandQueue->Bind(ChatManager->GetCommandDispatcher());
+		BoundDispatcher = ChatManager->GetCommandDispatcher();
+		if (BoundDispatcher.IsValid()) BoundDispatcher->OnTempleCombatCommand.AddUObject(this, &ATempleCycleController::HandleCombatCommand);
 		ChatManager->OnChatFetchFinished.AddUObject(this, &ATempleCycleController::HandleChatFetchFinished);
 	}
 	else
@@ -44,15 +48,21 @@ void ATempleCycleController::BeginPlay()
 		UE_LOG(LogTemp, Error, TEXT("TempleCycleController: Goddess를 찾지 못했습니다."));
 	}
 
+	CurrentTurn = 1;
 	CreateStatusWidget();
+	OnTurnStarted.Broadcast(CurrentTurn);
+	GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &ATempleCycleController::HandleTurnTimer, FMath::Max(TurnTime, 1.0f), true);
 
 	//진입 후 CycleSeconds가 지나면 첫 조회, 이후 CycleSeconds마다 반복
-	GetWorldTimerManager().SetTimer(CycleTimerHandle, this, &ATempleCycleController::HandleCycleTimer, CycleSeconds, true);
+	GetWorldTimerManager().SetTimer(CycleTimerHandle, this, &ATempleCycleController::HandleCycleTimer, FMath::Max(CycleSeconds, 1.0f), true);
 }
 
 void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
+	GetWorldTimerManager().ClearTimer(TurnTimerHandle);
+	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
+	if (BoundDispatcher.IsValid()) BoundDispatcher->OnTempleCombatCommand.RemoveAll(this);
 
 	if (ChatManager)
 	{
@@ -69,6 +79,11 @@ void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (StatusWidget)
 	{
 		StatusWidget->RemoveFromParent();
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+		{
+			PC->bShowMouseCursor = bWasMouseCursorVisible;
+			PC->SetInputMode(FInputModeGameOnly());
+		}
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -92,7 +107,7 @@ void ATempleCycleController::ResolveReferences()
 
 void ATempleCycleController::CreateStatusWidget()
 {
-	if (!StatusWidgetClass || !Goddess)
+	if (!StatusWidgetClass)
 	{
 		return;
 	}
@@ -102,29 +117,19 @@ void ATempleCycleController::CreateStatusWidget()
 	{
 		StatusWidget->AddToViewport();
 		StatusWidget->BindToGoddess(Goddess);
+		StatusWidget->BindToController(this);
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+		{
+			bWasMouseCursorVisible = PC->bShowMouseCursor;
+			PC->bShowMouseCursor = true;
+			PC->SetInputMode(FInputModeGameAndUI());
+		}
 	}
 }
 
 void ATempleCycleController::HandleCycleTimer()
 {
-	if (CompletedTurns >= TurnCount)
-	{
-		GetWorldTimerManager().ClearTimer(CycleTimerHandle);
-		if (Goddess)
-		{
-			Goddess->StopCycle();
-		}
-
-		if (GameManager)
-		{
-			GameManager->TravelToCombat();
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("TempleCycleController: GameManager가 없어 전투 레벨로 이동할 수 없습니다."));
-		}
-		return;
-	}
+	if (bLeavingTemple) return;
 
 	if (ChatManager)
 	{
@@ -139,17 +144,18 @@ void ATempleCycleController::HandleCycleTimer()
 void ATempleCycleController::HandleChatFetchFinished(bool bSuccess)
 {
 	//조회에 실패해도 그동안 쌓인 명령으로 사이클은 진행 (턴 시간이 밀리지 않도록)
-	StartCycle();
+	if (!bLeavingTemple) StartCycle();
 }
 
 void ATempleCycleController::StartCycle()
 {
+	if (bLeavingTemple) return;
 	++CompletedTurns;
 
 	//큐잉 종료: 이번 사이클에 처리할 명령을 가져가고 다음 사이클 큐잉 시작
 	FTempleCycleCommands Commands = CommandQueue->TakeSnapshot();
 
-	UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d/%d 시작: 대화 %d건"), CompletedTurns, TurnCount, Commands.Talks.Num());
+	UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d 시작: 대화 %d건"), CompletedTurns, Commands.Talks.Num());
 
 	ActiveTalks = Commands.Talks;
 	ActiveBatchId.Reset();
@@ -168,7 +174,7 @@ void ATempleCycleController::StartCycle()
 
 void ATempleCycleController::HandleBatchSucceeded(const FTempleTalkBatchResult& Result)
 {
-	if (Result.BatchId != ActiveBatchId || !Goddess)
+	if (bLeavingTemple || Result.BatchId != ActiveBatchId || !Goddess)
 	{
 		return; //이전 사이클의 응답
 	}
@@ -206,11 +212,45 @@ void ATempleCycleController::HandleBatchSucceeded(const FTempleTalkBatchResult& 
 
 void ATempleCycleController::HandleBatchFailed(const FString& BatchId, const FString& ErrorMessage)
 {
-	if (BatchId != ActiveBatchId || !Goddess)
+	if (bLeavingTemple || BatchId != ActiveBatchId || !Goddess)
 	{
 		return;
 	}
 	ActiveBatchId.Reset();
 
 	Goddess->SetNoTalks();
+}
+
+void ATempleCycleController::HandleTurnTimer()
+{
+	if (bLeavingTemple) return;
+	++CurrentTurn;
+	OnTurnStarted.Broadcast(CurrentTurn);
+}
+
+void ATempleCycleController::HandleCombatCommand()
+{
+	// 채팅 목록 처리 콜백을 빠져나온 다음 프레임에 이동합니다.
+	if (!bLeavingTemple && !GetWorldTimerManager().TimerExists(TravelTimerHandle))
+		TravelTimerHandle = GetWorldTimerManager().SetTimerForNextTick(this, &ATempleCycleController::RequestCombatTravel);
+}
+
+void ATempleCycleController::RequestCombatTravel()
+{
+	if (bLeavingTemple) return;
+	ResolveReferences();
+	if (bAutoTravelOnCombatRequest && (!GameManager || GameManager->CombatLevel.IsNull()))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[신전] 전투 이동 불가: GameManager와 CombatLevel을 지정하세요."));
+		return;
+	}
+	bLeavingTemple = true;
+	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
+	GetWorldTimerManager().ClearTimer(TurnTimerHandle);
+	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
+	ActiveBatchId.Reset();
+	if (BatchClient) BatchClient->CancelActiveBatch();
+	if (Goddess) Goddess->StopCycle();
+	OnCombatRequested.Broadcast();
+	if (bAutoTravelOnCombatRequest && IsValid(GameManager)) GameManager->TravelToCombat();
 }

@@ -6,9 +6,56 @@ const clone=x=>JSON.parse(JSON.stringify(x)), sum=a=>a.reduce((x,y)=>x+y,0), key
 function assert(ok,msg){if(!ok)throw Error(msg);}
 function number(v,min,max,label,int=false){assert(typeof v==='number'&&Number.isFinite(v)&&v>=min&&v<=max&&(!int||Number.isInteger(v)),label+' 범위: '+min+'~'+max+(int?' 정수':''));}
 function str(v,label){assert(typeof v==='string'&&v.trim().length>0&&v.length<=200,label+'을 확인하세요.');}
-function unique(list,label){assert(Array.isArray(list)&&list.length>0,label+'이 비어 있습니다.');const ids=new Set();list.forEach(x=>{assert(/^[a-z0-9_]+$/.test(x.id),label+' ID는 영문 소문자·숫자·밑줄만 사용합니다.');assert(!ids.has(x.id),label+' ID 중복: '+x.id);ids.add(x.id);str(x.name,label+' 이름');});return ids;}
+function unique(list,label){assert(Array.isArray(list)&&list.length>0,label+'이 비어 있습니다.');const ids=new Set();list.forEach(x=>{assert(/^[A-Za-z0-9_]+$/.test(x.id),label+' ID는 영문·숫자·밑줄만 사용합니다.');assert(!ids.has(x.id),label+' ID 중복: '+x.id);ids.add(x.id);str(x.name,label+' 이름');});return ids;}
+// External state schema stays separate from the simulator's combat representation.
+function importBoss(source){
+ if(!source?.states)return source;
+ assert(source.schemaVersion===2,'보스 상태 JSON 버전은 2여야 합니다.');
+ assert(Array.isArray(source.states)&&source.states.length>0,'보스 상태가 비어 있습니다.');
+ const ids=new Set();
+ const actions=source.states.map(s=>{
+  str(s.id,'상태 ID');assert(/^[A-Za-z0-9_]+$/.test(s.id)&&!ids.has(s.id),'잘못되었거나 중복된 상태 ID: '+s.id);ids.add(s.id);
+  number(s.totalDamage,0,100,'총 대미지',true);str(s.telegraphText,'예고 텍스트');
+  const t=s.target;assert(t&&['none','fixed','randomOne','selectOne'].includes(t.mode)&&Array.isArray(t.zones),'타격 구역 형식 오류: '+s.id);
+  assert(t.zones.every(z=>zones.includes(z))&&new Set(t.zones).size===t.zones.length,'타격 구역 오류: '+s.id);
+  assert(t.mode==='none'?t.zones.length===0&&s.totalDamage===0:t.zones.length>0,'공격/비공격 구역 오류: '+s.id);
+  for(const z of zones)assert(['vulnerable','normal','resistant'].includes(s.vulnerabilityByZone?.[z]),'구역별 취약도 오류: '+s.id);
+  return {id:s.id,name:s.name||s.id,totalDamage:s.totalDamage,target:clone(t),vulnerabilityByZone:clone(s.vulnerabilityByZone),hitCount:1,
+   damageByZone:Object.fromEntries(zones.map(z=>[z,t.zones.includes(z)?s.totalDamage:0])),attributeByZone:Object.fromEntries(zones.map(z=>[z,'physical'])),
+   resistanceByZone:Object.fromEntries(zones.map(z=>{const v=s.vulnerabilityByZone[z]==='resistant'?'enduring':s.vulnerabilityByZone[z];return [z,{physical:v,magical:v}];})),telegraph:{text:s.telegraphText,motionId:''},attackMotionId:''};
+ });
+ assert(Array.isArray(source.patterns)&&source.patterns.length>0,'패턴이 비어 있습니다.');
+ const patterns=source.patterns.map((p,i)=>{str(p.name,'패턴 이름');assert(Array.isArray(p.sequence)&&p.sequence.length>0&&p.sequence.every(id=>ids.has(id)),'패턴 상태 참조 오류: '+p.name);assert(p.turns===p.sequence.length,'패턴 턴 수와 상태 수가 다릅니다: '+p.name);return {id:'pattern_'+i,name:p.name,steps:clone(p.sequence)};});
+ const config=source.simulation||{}, preset=config.preset||{};
+ const patternId=i=>{assert(Number.isInteger(i)&&patterns[i],'시뮬레이션 패턴 번호 오류');return patterns[i].id;};
+ return {schemaVersion:1,kind:'gladius-boss-patterns',revision:1,name:source.name||'보스',maxHp:config.maxHp??100,
+  encounter:clone(config.encounter||{turns:10,patternFit:'remainingTurns'}),actions,patterns,
+  selection:{mode:'weightedRandom',allowImmediateRepeat:config.allowImmediateRepeat??true,pool:patterns.map((p,i)=>({patternId:p.id,weight:config.weights?.[i]??1}))},
+  preset:{mode:preset.mode||'random',seed:preset.seed??20261018,customPatterns:(preset.customPatternIndices||[0]).map(patternId),directActions:clone(preset.directActions||patterns[0].steps)},
+  stateFormat:{schemaVersion:2,damageRule:source.damageRule}};
+}
+function exportBoss(b){
+ if(!b.stateFormat)return clone(b);
+ const out={schemaVersion:2,name:b.name,states:b.actions.map(a=>({id:a.id,...(a.name!==a.id?{name:a.name}:{}),totalDamage:a.totalDamage,target:clone(a.target),telegraphText:a.telegraph.text,vulnerabilityByZone:clone(a.vulnerabilityByZone)})),
+  patterns:b.patterns.map(p=>({name:p.name,turns:p.steps.length,sequence:clone(p.steps)}))};
+ if(b.stateFormat.damageRule)out.damageRule=b.stateFormat.damageRule;
+ out.simulation={maxHp:b.maxHp,encounter:clone(b.encounter),allowImmediateRepeat:b.selection.allowImmediateRepeat,weights:b.patterns.map(p=>b.selection.pool.find(x=>x.patternId===p.id)?.weight??0),preset:{mode:b.preset.mode,seed:b.preset.seed,customPatternIndices:b.preset.customPatterns.map(id=>b.patterns.findIndex(p=>p.id===id)),directActions:clone(b.preset.directActions)}};
+ return out;
+}
+function syncState(a){
+ if(!a.target)return;
+ a.hitCount=1;
+ for(const z of zones){a.damageByZone[z]=a.target.zones.includes(z)?a.totalDamage:0;const v=a.vulnerabilityByZone[z]==='resistant'?'enduring':a.vulnerabilityByZone[z];a.resistanceByZone[z]={physical:v,magical:v};}
+}
+function attackVariants(a){
+ if(!a.target||!['randomOne','selectOne'].includes(a.target.mode))return [a];
+ return a.target.zones.map(z=>({...a,damageByZone:Object.fromEntries(zones.map(k=>[k,k===z?a.totalDamage:0]))}));
+}
 function validate(data){
+ if(data.bosses?.states)data.bosses=importBoss(data.bosses);
  const {abilities:a,bosses:b,enhancements:e}=data;
+ if(b.stateFormat)importBoss(exportBoss(b));
+ b.actions?.forEach(syncState);
  for(const [x,kind] of [[a,'abilities'],[b,'boss-patterns'],[e,'enhancements']]){assert(x&&x.schemaVersion===1&&x.kind==='gladius-'+kind,'지원하지 않는 JSON 형식: '+kind);number(x.revision,1,1e9,'개정 번호',true);}
  const r=a.rules;assert(r,'전투 규칙이 없습니다.');
  number(r.attackFeverGain,0,100,'공격 피버');number(r.defenseFeverGain,0,100,'방어 피버');number(r.feverDamageCoefficient,0,20,'피버 피해 계수');number(r.evadeThreshold,1,100,'연속 회피 기준',true);number(r.evadeReduction,0,1,'회피 감소율');
@@ -34,9 +81,15 @@ function validate(data){
  return data;
 }
 function rng(seed){let a=seed>>>0;return()=>{a=(a+0x6D2B79F5)>>>0;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;};}
-function candidates(b,left,prev){return b.selection.pool.filter(x=>x.weight>0&&(b.selection.allowImmediateRepeat||x.patternId!==prev)).map(x=>({...b.patterns.find(p=>p.id===x.patternId),weight:x.weight})).filter(p=>p.steps.length<=left);}
-function schedule(b,seed=b.preset.seed){
- const mode=b.preset.mode, out=[],patterns=[],r=rng(seed);const add=(id,pid)=>out.push({...clone(b.actions.find(a=>a.id===id)),patternId:pid});
+function candidates(b,left,prev){
+ const memo=new Map();
+ function choices(n,last){return b.selection.pool.filter(x=>x.weight>0&&(b.selection.allowImmediateRepeat||x.patternId!==last)).map(x=>({...b.patterns.find(p=>p.id===x.patternId),weight:x.weight})).filter(p=>p.steps.length<=n);}
+ function fits(n,last){if(n===0)return true;const k=n+':'+last;if(memo.has(k))return memo.get(k);const ok=choices(n,last).some(p=>fits(n-p.steps.length,p.id));memo.set(k,ok);return ok;}
+ return choices(left,prev).filter(p=>fits(left-p.steps.length,p.id));
+}
+function schedule(b,seed){
+ b=importBoss(b);seed=seed??b.preset.seed;
+ const mode=b.preset.mode, out=[],patterns=[],r=rng(seed);const add=(id,pid)=>{const a=b.actions.find(a=>a.id===id),variants=attackVariants(a),chosen=variants.length===1?variants[0]:variants[Math.floor(r()*variants.length)];out.push({...clone(chosen),patternId:pid});};
  if(mode==='direct')b.preset.directActions.forEach(id=>add(id,null));
  else if(mode==='custom')b.preset.customPatterns.forEach(id=>{const p=b.patterns.find(x=>x.id===id);assert(p,'사용자 지정 패턴을 찾을 수 없습니다.');patterns.push(id);p.steps.forEach(a=>add(a,id));});
  else {let left=b.encounter.turns,prev=null;while(left>0){const pool=candidates(b,left,prev);assert(pool.length,'남은 턴에 맞는 패턴이 없습니다.');let v=r()*sum(pool.map(p=>p.weight)),p=pool[pool.length-1];for(const x of pool){v-=x.weight;if(v<0){p=x;break;}}patterns.push(p.id);p.steps.forEach(id=>add(id,p.id));left-=p.steps.length;prev=p.id;}}
@@ -88,15 +141,15 @@ function statistics(data,opts,progress=()=>{}){
 function initialBelief(){return [{queue:[],prev:null,w:1}];}
 function expandBelief(b,belief,left){const out=[];for(const s of belief){if(s.queue.length){out.push({...s,id:s.queue[0]});continue;}const pool=candidates(b,left,s.prev),total=sum(pool.map(p=>p.weight));for(const p of pool)out.push({queue:p.steps,prev:p.id,id:p.steps[0],w:s.w*p.weight/total});}return out;}
 function normalizeBelief(belief){const map=new Map();for(const s of belief){const k=s.prev+'|'+s.queue.join(',');if(map.has(k))map.get(k).w+=s.w;else map.set(k,{...s});}const total=sum([...map.values()].map(s=>s.w));return [...map.values()].map(s=>({...s,w:s.w/total}));}
-function nextBelief(expanded){return normalizeBelief(expanded.map(s=>({...s,queue:s.queue.slice(1)})));}
+function nextBelief(expanded){return normalizeBelief(expanded.map(s=>(({attack,...rest})=>({...rest,queue:rest.queue.slice(1)}))(s)));}
 function planner(data,player,policy='optimal'){
  const p=profile(data,player.character,player.levels),r=data.abilities.rules,b=data.bosses,q=player.q/100,threshold=p.maxHp*player.threshold/100,memo=new Map();let nodes=0;
  const costs=(h,nh)=>player.hpCost*(Math.max(0,threshold-nh)-Math.max(0,threshold-h))+(nh<=0?player.deathCost:0);
  const bkey=belief=>belief.map(x=>x.prev+':'+x.queue.join('.')+':'+x.w.toFixed(6)).sort().join(';');
  function value(s,left,belief,depth){if(s.h<=0||left<=0||depth<=0)return 0;const kk=[s.h,s.f,s.e,s.z,left,depth,bkey(belief)].join('|');if(memo.has(kk))return memo.get(kk);assert(++nodes<=1000000,'AI 최적화 상태가 너무 많습니다. 예측 깊이나 패턴 수를 줄여 주세요.');const ex=expandBelief(b,belief,left),ids=[...new Set(ex.map(x=>x.id))];let v=0;if(q<1)v+=(1-q)*rankExpanded(s,left,ex,depth)[0].v;if(q>0)for(const id of ids){const sub=ex.filter(x=>x.id===id),w=sum(sub.map(x=>x.w));v+=q*w*rankExpanded(s,left,sub.map(x=>({...x,w:x.w/w})),depth)[0].v;}memo.set(kk,v);return v;}
  const future=ex=>normalizeBelief(nextBelief(ex).map(x=>b.selection.allowImmediateRepeat?{...x,prev:null}:x));
- function rankExpanded(s,left,ex,depth){const after=future(ex);return actions(s,r).map(a=>{let v=0;for(const item of ex){const attack=b.actions.find(x=>x.id===item.id),tr=transition(s,a,attack,p,r);v+=item.w*(policy==='defense'?(a===2?1:0):policy==='attack'?(a<2?tr.damage:-1):policy==='evade'?(a>=3?-tr.loss:-1e6):tr.damage-costs(s.h,tr.s.h)+(tr.s.h>0?value(tr.s,left-1,after,depth-1):0));}return {a,v};}).sort((x,y)=>y.v-x.v||x.a-y.a);}
- return {rank(s,left,belief,knownId){let ex=expandBelief(b,belief,left);if(knownId){const sub=ex.filter(x=>x.id===knownId);if(sub.length)ex=normalizeBelief(sub).map(x=>({...x,id:x.queue[0]}));}const ranked=rankExpanded(s,left,ex,Math.min(left,player.lookahead||10));return {ranked,belief:future(ex)};},p};
+ function rankExpanded(s,left,ex,depth){const after=future(ex);return actions(s,r).map(a=>{let v=0;for(const item of ex){const variants=item.attack?[item.attack]:attackVariants(b.actions.find(x=>x.id===item.id));for(const attack of variants){const tr=transition(s,a,attack,p,r);v+=item.w/variants.length*(policy==='defense'?(a===2?1:0):policy==='attack'?(a<2?tr.damage:-1):policy==='evade'?(a>=3?-tr.loss:-1e6):tr.damage-costs(s.h,tr.s.h)+(tr.s.h>0?value(tr.s,left-1,after,depth-1):0));}}return {a,v};}).sort((x,y)=>y.v-x.v||x.a-y.a);}
+ return {rank(s,left,belief,knownAttack){const knownId=typeof knownAttack==='string'?knownAttack:knownAttack?.id;let ex=expandBelief(b,belief,left);if(knownId){const sub=ex.filter(x=>x.id===knownId);if(sub.length)ex=normalizeBelief(sub).map(x=>({...x,id:x.queue[0]}));}if(knownAttack&&typeof knownAttack==='object')ex=ex.map(x=>({...x,attack:knownAttack}));const ranked=rankExpanded(s,left,ex,Math.min(left,player.lookahead||10));return {ranked,belief:future(ex)};},p};
 }
 function simulate(data,opts,progress=()=>{}){
  validate(data);const seq=opts.sequences||1,n=opts.iterations||1,players=opts.players,r=data.abilities.rules,b=data.bosses;number(seq,1,100,'시퀀스',true);number(n,1,50000,'반복 횟수',true);assert(players.length>0&&players.length<=30,'AI 인원은 1~30명입니다.');
@@ -107,8 +160,8 @@ function simulate(data,opts,progress=()=>{}){
    // Fixed schedules are known inputs for deterministic policy; q still hides the current attack.
    const fixed=b.preset.mode!=='random';
    for(let t=0;t<sch.turns.length&&states.some(s=>s.h>0);t++){globalTurn++;const attack=sch.turns[t],rows=[];for(let i=0;i<players.length;i++){const s=states[i],pl=players[i];if(s.h<=0)continue;const recognized=random()<pl.q/100;let rank;
-    if(fixed){const fk=[i,t,s.h,s.f,s.e,s.z,recognized].join(',');rank=fixedRanks.get(fk);if(!rank){rank=rankFixed(data,pl,s,sch.turns,t,recognized,opts.policy||'optimal');fixedRanks.set(fk,rank);}
-    }else {const result=plans[i].rank(s,sch.turns.length-t,beliefs[i],recognized?attack.id:null);rank=result.ranked;beliefs[i]=result.belief;}
+    if(fixed){const fk=[cycle,JSON.stringify(sch.turns.map(x=>x.damageByZone)),i,t,s.h,s.f,s.e,s.z,recognized].join(',');rank=fixedRanks.get(fk);if(!rank){rank=rankFixed(data,pl,s,sch.turns,t,recognized,opts.policy||'optimal');fixedRanks.set(fk,rank);}
+    }else {const result=plans[i].rank(s,sch.turns.length-t,beliefs[i],recognized?attack:null);rank=result.ranked;beliefs[i]=result.belief;}
     const a=rank[0].a,crit=a<2&&random()<plans[i].p.skills[a].critChance,before=clone(s),tr=transition(s,a,attack,plans[i].p,r,{crit});Object.assign(s,tr.s);s.counts[a<2?0:a===2?1:2]++;if(s.h<=0)s.deadTurn=globalTurn;if(n===1)rows.push({i,name:pl.name,a,recognized,crit,damage:tr.damage,loss:tr.loss,before,after:clone(s),score:rank[0].v});
    }if(n===1)logs.push({turn:globalTurn,cycle:cycle+1,attack:clone(attack),rows});}
   }
@@ -117,6 +170,6 @@ function simulate(data,opts,progress=()=>{}){
  const mean=sum(teamDamages)/n,se=Math.sqrt(sum(teamDamages.map(x=>(x-mean)**2))/Math.max(1,n-1)/n);return {iterations:n,sequences:seq,hist,by:by.map(x=>({...x,dead:x.dead/n,damage:x.damage/n,hp:x.hp/n})),survival:1-sum(by.map(x=>x.dead))/(n*players.length),damage:mean,damageCI:[mean-1.96*se,mean+1.96*se],logs,states:lastStates,deathTurn:lastDeathTurns.length?sum(lastDeathTurns)/lastDeathTurns.length:null,patternCounts};
 }
 function rankFixed(data,pl,start,turns,index,recognized,policy){const p=profile(data,pl.character,pl.levels),r=data.abilities.rules,threshold=p.maxHp*pl.threshold/100,memo=new Map();function val(s,t,depth){if(s.h<=0||t>=turns.length||depth<=0)return 0;const kk=[s.h,s.f,s.e,s.z,t,depth].join();if(memo.has(kk))return memo.get(kk);const v=rank(s,t,depth,true)[0].v;memo.set(kk,v);return v;}function rank(s,t,depth,known){const pool=known?[turns[t]]:turns;return actions(s,r).map(a=>{let v=0;for(const attack of pool){const tr=transition(s,a,attack,p,r),cost=pl.hpCost*(Math.max(0,threshold-tr.s.h)-Math.max(0,threshold-s.h))+(tr.s.h<=0?pl.deathCost:0);v+=(policy==='attack'?(a<2?tr.damage:-1):policy==='defense'?(a===2?1:0):policy==='evade'?(a>=3?-tr.loss:-1e6):tr.damage-cost+val(tr.s,t+1,depth-1))/pool.length;}return {a,v};}).sort((x,y)=>y.v-x.v||x.a-y.a);}return rank(start,index,Math.min(pl.lookahead,turns.length-index),recognized);}
-return {zones,names,clone,validate,rng,candidates,schedule,profile,initial,actions,fever,attackDamage,expectedDamage,transition,trace,search,statistics,simulate,planner};
+return {zones,names,clone,importBoss,exportBoss,syncState,validate,rng,candidates,schedule,profile,initial,actions,fever,attackDamage,expectedDamage,transition,trace,search,statistics,simulate,planner};
 }
 if(typeof module!=='undefined')module.exports=createEngine;

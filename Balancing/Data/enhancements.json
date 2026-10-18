@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "gladius-enhancements",
-  "revision": 1,
+  "revision": 2,
   "perLevel": {
     "hp": 1,
     "damage": 1,
@@ -14,5 +14,31 @@
     "critChance": 0,
     "critBonus": 0
   },
-  "critChanceCap": 1
+  "critChanceCap": 1,
+  "blessings": [
+    {
+      "id": 1,
+      "title": "회복",
+      "relatedStat": "currentHp",
+      "displayText": "체력을 {HPGen}만큼 회복함"
+    },
+    {
+      "id": 2,
+      "title": "힘",
+      "relatedStat": "baseAttack",
+      "displayText": "기본 공격력을 {AtkInc}만큼 증가시킴"
+    },
+    {
+      "id": 3,
+      "title": "민첩",
+      "relatedStat": "critChance",
+      "displayText": "치명타 확률을 {CritInc} %p만큼 증가시킴"
+    },
+    {
+      "id": 4,
+      "title": "예리함",
+      "relatedStat": "critDamage",
+      "displayText": "치명타 데미지를 {CritDmgInc} %p만큼 증가시킴"
+    }
+  ]
 }

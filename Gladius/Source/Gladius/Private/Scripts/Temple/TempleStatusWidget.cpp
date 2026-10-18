@@ -2,6 +2,9 @@
 #include "Scripts/Temple/Goddess.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
+#include "Components/VerticalBox.h"
+#include "Scripts/Temple/TempleCycleController.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ScrollBox.h"
@@ -33,6 +36,7 @@ void UTempleStatusWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
 	BuildDefaultWidgetTree();
+	if (CombatButton) CombatButton->OnClicked.AddUniqueDynamic(this, &UTempleStatusWidget::HandleCombatClicked);
 }
 
 void UTempleStatusWidget::NativeDestruct()
@@ -41,6 +45,8 @@ void UTempleStatusWidget::NativeDestruct()
 	{
 		BoundGoddess->OnStateChanged.RemoveDynamic(this, &UTempleStatusWidget::HandleGoddessStateChanged);
 	}
+	BindToController(nullptr);
+	if (CombatButton) CombatButton->OnClicked.RemoveDynamic(this, &UTempleStatusWidget::HandleCombatClicked);
 	Super::NativeDestruct();
 }
 
@@ -76,6 +82,18 @@ void UTempleStatusWidget::BuildDefaultWidgetTree()
 	StateText->SetColorAndOpacity(FSlateColor(FLinearColor(0.92f, 0.82f, 0.45f)));
 	SetFontSize(StateText, 20);
 	StatePanel->SetContent(StateText);
+
+	UBorder* ControlPanel = AddPanel(WidgetTree, Canvas, TEXT("ControlPanel"), FAnchors(0.02f, 0.12f, 0.30f, 0.25f), 0.85f);
+	UVerticalBox* Controls = WidgetTree->ConstructWidget<UVerticalBox>();
+	ControlPanel->SetContent(Controls);
+	TurnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TurnText"));
+	SetFontSize(TurnText, 18);
+	Controls->AddChildToVerticalBox(TurnText);
+	CombatButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CombatButton"));
+	UTextBlock* ButtonText = WidgetTree->ConstructWidget<UTextBlock>();
+	ButtonText->SetText(FText::FromString(TEXT("전투 씬으로 이동")));
+	CombatButton->SetContent(ButtonText);
+	Controls->AddChildToVerticalBox(CombatButton);
 
 	//상태 로그: 우측 넓게, 작은 글씨
 	UBorder* LogPanel = AddPanel(WidgetTree, Canvas, TEXT("LogPanel"), FAnchors(0.34f, 0.03f, 0.98f, 0.70f), 0.75f);
@@ -199,4 +217,36 @@ FString UTempleStatusWidget::BuildBlessingDialogue(const FGoddessStateContext& C
 		Lines.Add(FString::Printf(TEXT("외 %d명"), Names.Num() - ShownCount));
 	}
 	return FString::Join(Lines, LINE_TERMINATOR);
+}
+
+void UTempleStatusWidget::BindToController(ATempleCycleController* InController)
+{
+	if (Controller.IsValid())
+	{
+		Controller->OnTurnStarted.RemoveDynamic(this, &UTempleStatusWidget::HandleTurnStarted);
+		Controller->OnCombatRequested.RemoveDynamic(this, &UTempleStatusWidget::HandleCombatRequested);
+	}
+	Controller = InController;
+	if (InController)
+	{
+		InController->OnTurnStarted.AddUniqueDynamic(this, &UTempleStatusWidget::HandleTurnStarted);
+		InController->OnCombatRequested.AddUniqueDynamic(this, &UTempleStatusWidget::HandleCombatRequested);
+		HandleTurnStarted(InController->GetCurrentTurn());
+	}
+}
+
+void UTempleStatusWidget::HandleCombatClicked()
+{
+	if (Controller.IsValid()) Controller->RequestCombatTravel();
+}
+
+void UTempleStatusWidget::HandleTurnStarted(int32 TurnNumber)
+{
+	if (TurnText && Controller.IsValid())
+		TurnText->SetText(FText::FromString(FString::Printf(TEXT("신전 %d턴 · 턴 길이 %.0f초"), TurnNumber, Controller->TurnTime)));
+}
+
+void UTempleStatusWidget::HandleCombatRequested()
+{
+	if (CombatButton) CombatButton->SetIsEnabled(false);
 }

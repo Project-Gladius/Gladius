@@ -5,6 +5,8 @@
 #include "Scripts/Temple/TempleTypes.h"
 #include "TempleStatusWidget.generated.h"
 
+class ATempleCycleController;
+class UButton;
 class AGoddess;
 class UScrollBox;
 class UTextBlock;
@@ -21,6 +23,7 @@ class GLADIUS_API UTempleStatusWidget : public UUserWidget
 
 public:
 	void BindToGoddess(AGoddess* InGoddess);
+	void BindToController(ATempleCycleController* InController);
 
 	//상태 로그에 남겨둘 최대 줄 수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple Status", meta = (ClampMin = "1"))
@@ -46,11 +49,25 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Temple Status", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> DialogueText;
 
+	UPROPERTY(BlueprintReadOnly, Category = "Temple Status", meta = (BindWidgetOptional))
+	TObjectPtr<UButton> CombatButton;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Temple Status", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> TurnText;
+
+	UFUNCTION()
+	void HandleCombatClicked();
+	UFUNCTION()
+	void HandleTurnStarted(int32 TurnNumber);
+	UFUNCTION()
+	void HandleCombatRequested();
+
 	UFUNCTION()
 	void HandleGoddessStateChanged(EGoddessState NewState, const FGoddessStateContext& Context);
 
 private:
 	TWeakObjectPtr<AGoddess> Goddess;
+	TWeakObjectPtr<ATempleCycleController> Controller;
 	TArray<FString> LogLines;
 
 	void BuildDefaultWidgetTree();

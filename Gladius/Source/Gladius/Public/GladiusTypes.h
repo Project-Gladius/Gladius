@@ -55,6 +55,7 @@ enum class ECommandType : uint8
 	Enhance3,
 	Enhance4,
 	Talk,
+	TravelToCombat, // !전투: 신전에서 전투 이동 요청
 };
 
 // 채팅 한 줄을 파싱한 결과
