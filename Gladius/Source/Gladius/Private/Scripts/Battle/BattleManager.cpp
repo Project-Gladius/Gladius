@@ -118,6 +118,7 @@ void ABattleManager::StopBattle()
 	Phase = EBattlePhase::Resolve;
 	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(EvadeRollHandle);
+	GetWorldTimerManager().ClearTimer(EvadeApproachHandle);
 
 	//공격 연출 타이머는 반복이라 따로 끄지 않으면 전투가 끝나도 계속 돈다
 	GetWorldTimerManager().ClearTimer(AttackCueHandle);
@@ -149,11 +150,27 @@ EMoveGait ABattleManager::ChooseGait(float Distance, float Seconds, float RunSpe
 	return EMoveGait::Roll;
 }
 
-float ABattleManager::AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds)
+float ABattleManager::AttackMotionSeconds(float SkillSeconds, float FlurrySeconds)
 {
-	//스킬 한 번 + 평타 FeverStacks회. 전원이 같은 순간에 끝나야 하므로
+	//스킬 한 번 + 평타 전부. 전원이 같은 순간에 끝나야 하므로
 	//이 길이를 BattleTime에서 빼면 곧 출발 시각이 된다
-	return SkillSeconds + FMath::Max(0, FeverStacks) * FMath::Max(0.f, FeverAttackSeconds);
+	return FMath::Max(0.f, SkillSeconds) + FMath::Max(0.f, FlurrySeconds);
+}
+
+float ABattleManager::FeverFlurrySeconds(const TArray<float>& SectionSeconds, int32 Hits)
+{
+	if (SectionSeconds.Num() == 0)
+	{
+		return 0.f;
+	}
+
+	//섹션이 평타 수보다 적으면 앞에서부터 다시 쓴다 (3개면 1,2,3,1,2,3…)
+	float Total = 0.f;
+	for (int32 Hit = 0; Hit < FMath::Max(0, Hits); ++Hit)
+	{
+		Total += FMath::Max(0.f, SectionSeconds[Hit % SectionSeconds.Num()]);
+	}
+	return Total;
 }
 
 int32 ABattleManager::FeverStacksFor(float Fever) const
@@ -907,7 +924,8 @@ void ABattleManager::BeginMove()
 		const FCharacterMotionTimes& Motion = MotionTimesFor(P.ClassIndex);
 		const float SkillSeconds = (P.PendingAction == EBattleAction::Attack1)
 			? Motion.Skill1 : Motion.Skill2;
-		const float MotionSeconds = AttackMotionSeconds(SkillSeconds, FeverStacksFor(P.Fever), Motion.FeverAttack);
+		const float MotionSeconds = AttackMotionSeconds(SkillSeconds,
+			FeverFlurrySeconds(Motion.FeverAttacks, FeverStacksFor(P.Fever)));
 		const float MoveSecondsForMe = FMath::Max(MinMoveSeconds, BattleTime - MotionSeconds);
 
 		//근접만 보스에게 붙는다. 원거리는 제자리에서 쏘므로 자기 자리로만 간다
@@ -1243,7 +1261,7 @@ void ABattleManager::ResolveTurn()
 		//이 사람의 연출이 시작되는 시각 + 스킬 + 평타 전부
 		const float StartsAt = (Index / FMath::Max(1, AttackCount)) * FMath::Max(0.f, AttackTerm);
 		const float EndsAt = StartsAt + SkillSeconds
-			+ Cue.FeverCrits.Num() * FMath::Max(0.f, Motion.FeverAttack);
+			+ FeverFlurrySeconds(Motion.FeverAttacks, Cue.FeverCrits.Num());
 
 		FlurrySeconds = FMath::Max(FlurrySeconds, EndsAt);
 	}
@@ -1269,38 +1287,26 @@ void ABattleManager::ResolveTurn()
 	//피격 모션이 구르기를 곧바로 덮어, 구른 것은 안 보이고 미끄러지는 것만 보인다
 	const float RollAt = FMath::Max(0.f, BossDelay - RollLead);
 
-	//회피자는 **여기서야** 움직이기 시작한다. 구르기가 시작될 때까지의 시간을 꽉 채워
-	//구르기 한 번 거리만 남기고 달려가므로, 두 칸을 건너는 사람은 보스가 치는 순간
-	//가운데쯤에서 구르는 중이다. BeginMove에서 미리 보내면 회피하기도 전에 가 있게 된다
+	//회피자는 **여기서 바로 움직이지 않는다.** 구르기 직전에 달려가 구르기 시작점에
+	//도착해야 하므로, 달리기에 쓸 시간만큼 앞에서 출발한다.
+	//**BossDelay를 그대로 쓰면 안 된다** — 피버 연타가 길어지면 BossDelay가 20초까지
+	//늘어나는데, 그만큼을 이동에 주면 걸어가는 것처럼 기어간다
+	EvadeApproachSeconds = FMath::Min(MoveSeconds, RollAt);
+	const float ApproachAt = RollAt - EvadeApproachSeconds;
+
+	if (ApproachAt > KINDA_SMALL_NUMBER)
+	{
+		GetWorldTimerManager().SetTimer(EvadeApproachHandle, this, &ABattleManager::BeginEvadeApproach,
+			ApproachAt, false);
+	}
+	else
+	{
+		//기다릴 틈이 없으면 지금 출발한다
+		BeginEvadeApproach();
+	}
+
 	if (RollAt > KINDA_SMALL_NUMBER)
 	{
-		for (TPair<FString, FBattlePlayer>& Pair : Players)
-		{
-			FBattlePlayer& P = Pair.Value;
-			if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
-			{
-				continue;
-			}
-
-			const FVector From = P.Unit->GetActorLocation();
-			const float Total = FVector::Dist(From, P.TargetLocation);
-
-			//달려가 멈출 지점. '목표에서 구르기 거리만큼 앞'으로만 잡으면 거리가 멀 때
-			//그 지점이 이미 목적 구역 안이라, 다 와서 구르는 꼴이 된다.
-			//구역 경계가 보스 기준 부채꼴이라 좌표로 들고 있지 않으므로 **여정의 절반**을
-			//상한으로 쓴다 — 한 칸이면 경계 즈음, 두 칸이면 가운데 구역에서 구르기 시작이다
-			const float Lead = FMath::Min(Total * 0.5f, Total - RollDistance);
-
-			//구르기 한 번이면 닿는 거리다. 제자리에서 기다렸다가 구른다
-			if (Lead <= KINDA_SMALL_NUMBER)
-			{
-				continue;
-			}
-
-			const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
-			P.Unit->MoveTo(Waypoint, RollAt, ChooseGait(Lead, RollAt, RunSpeed, RollSpeed));
-		}
-
 		GetWorldTimerManager().SetTimer(EvadeRollHandle, this, &ABattleManager::BeginEvadeRolls,
 			RollAt, false);
 	}
@@ -1375,7 +1381,7 @@ void ABattleManager::FlushAttackCues()
 				{
 					const FCharacterMotionTimes& Motion = MotionTimesFor(Cue.ClassIndex);
 					const float SkillSeconds = Cue.AttackIndex == 1 ? Motion.Skill1 : Motion.Skill2;
-					P->Unit->PlayFeverFlurry(Cue.FeverCrits, SkillSeconds, Motion.FeverAttack);
+					P->Unit->PlayFeverFlurry(Cue.FeverCrits, SkillSeconds, Motion.FeverAttacks);
 				}
 			}
 		}
@@ -1385,6 +1391,38 @@ void ABattleManager::FlushAttackCues()
 	{
 		GetWorldTimerManager().ClearTimer(AttackCueHandle);
 		AttackCues.Reset();
+	}
+}
+
+void ABattleManager::BeginEvadeApproach()
+{
+	//구르기 한 번 거리만 남기고 달려간다. 도착하는 순간이 곧 BeginEvadeRolls다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
+		{
+			continue;
+		}
+
+		const FVector From = P.Unit->GetActorLocation();
+		const float Total = FVector::Dist(From, P.TargetLocation);
+
+		//달려가 멈출 지점. '목표에서 구르기 거리만큼 앞'으로만 잡으면 거리가 멀 때
+		//그 지점이 이미 목적 구역 안이라, 다 와서 구르는 꼴이 된다.
+		//구역 경계가 보스 기준 부채꼴이라 좌표로 들고 있지 않으므로 **여정의 절반**을
+		//상한으로 쓴다 — 한 칸이면 경계 즈음, 두 칸이면 가운데 구역에서 구르기 시작이다
+		const float Lead = FMath::Min(Total * 0.5f, Total - RollDistance);
+
+		//구르기 한 번이면 닿는 거리다. 제자리에서 기다렸다가 구른다
+		if (Lead <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
+		P.Unit->MoveTo(Waypoint, EvadeApproachSeconds,
+			ChooseGait(Lead, EvadeApproachSeconds, RunSpeed, RollSpeed));
 	}
 }
 
@@ -2362,15 +2400,28 @@ void ABattleManager::RunSelfTest()
 	// --- 공격 모션 길이 ---
 	{
 		//스킬 한 번 + 평타 N회
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 0, 0.35f), 1.f));
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 4, 0.5f), 3.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 0.f), 1.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 2.f), 3.f));
 
-		//음수 스택이나 음수 길이가 들어와도 줄어들지 않는다
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, -3, 0.5f), 1.f));
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 4, -0.5f), 1.f));
+		//음수가 들어와도 줄어들지 않는다
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, -3.f), 1.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(-1.f, 2.f), 2.f));
+
+		//섹션 길이를 돌려 쓴다 — 세라의 실제 값 1.12 / 2.05 / 1.50
+		const TArray<float> Sections = { 1.12f, 2.05f, 1.5f };
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 0), 0.f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 1), 1.12f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 3), 4.67f));
+		//네 번째 대는 다시 1번 섹션
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 4), 5.79f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 6), 9.34f));
+
+		//비어 있으면 0 — 연출이 안 나가는 것이지 시간을 먹지는 않는다
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(TArray<float>(), 5), 0.f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, -2), 0.f));
 
 		//피버가 높을수록 때릴 게 많아 이동에 쓸 시간이 줄어든다
-		check(AttackMotionSeconds(1.f, 9, 0.35f) > AttackMotionSeconds(1.f, 2, 0.35f));
+		check(FeverFlurrySeconds(Sections, 9) > FeverFlurrySeconds(Sections, 2));
 	}
 
 	// --- 돌진 좌표 ---

@@ -147,8 +147,10 @@ struct FCharacterMotionTimes
 {
 	GENERATED_BODY()
 
-	//평타 한 번의 길이. 피버 한 칸이 평타 하나로 바뀐다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) float FeverAttack = 0.35f;
+	//피버 평타 섹션들의 길이, 몬타주에 적힌 순서대로.
+	//평타가 N번이면 이 배열을 **돌려 쓴다** (3개면 1,2,3,1,2,3…).
+	//길이가 섹션마다 달라 하나로 못 적는다 — 비어 있으면 평타 연출이 나가지 않는다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<float> FeverAttacks;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) float Skill1 = 0.8f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) float Skill2 = 1.f;
@@ -571,6 +573,9 @@ private:
 	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
 	void FlushAttackCues();
 
+	//회피자가 구르기 거리를 남기고 달려간다. 구르기가 시작되는 순간에 도착한다
+	void BeginEvadeApproach();
+
 	//회피자 전원이 구른다. 보스가 휘두르기 RollLead초 전이다
 	void BeginEvadeRolls();
 
@@ -581,7 +586,10 @@ private:
 	static EMoveGait ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed);
 
 	//공격 모션에 필요한 시간. 스킬 한 번 + 평타 FeverStacks회
-	static float AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds);
+	static float AttackMotionSeconds(float SkillSeconds, float FlurrySeconds);
+
+	//평타 Hits번의 총 길이. 섹션 길이 배열을 앞에서부터 돌려 쓰며 더한다
+	static float FeverFlurrySeconds(const TArray<float>& SectionSeconds, int32 Hits);
 
 	//피버를 평타 횟수로 바꾼다. 소수는 버리고 상한을 적용한다
 	int32 FeverStacksFor(float Fever) const;
@@ -669,6 +677,12 @@ private:
 
 	//구르기는 보스 공격보다 먼저 시작하므로 단계 타이머와 겹친다
 	FTimerHandle EvadeRollHandle;
+
+	//접근 달리기는 구르기보다 더 먼저 시작한다
+	FTimerHandle EvadeApproachHandle;
+
+	//그 달리기에 쓸 시간. BeginEvadeApproach가 꺼내 쓴다
+	float EvadeApproachSeconds = 0.f;
 
 	//이번 턴에 재생할 공격 연출. 피해 계산은 ResolveTurn에서 이미 끝났고 보여주기만 남았다.
 	//UObject를 들지 않으므로 UPROPERTY가 필요 없다

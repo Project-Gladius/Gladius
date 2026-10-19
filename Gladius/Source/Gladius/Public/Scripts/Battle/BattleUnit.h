@@ -46,10 +46,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetDefending(bool bInDefending) { bDefending = bInDefending; }
 
-	//피버 평타를 FirstDelay 뒤부터 Interval 간격으로 Crits.Num()회 재생한다.
-	//BattleManager가 한 번만 불러 주고, 간격 유지는 유닛이 스스로 한다 —
-	//공격자마다 평타 수가 달라 매니저가 전부 들고 있기 어렵다
-	void PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay, float Interval);
+	//피버 평타를 FirstDelay 뒤부터 Crits.Num()회 재생한다.
+	//SectionSeconds는 섹션 길이들이고 **돌려 쓴다** — 섹션마다 길이가 달라
+	//고정 간격으로는 맞지 않는다. BattleManager가 한 번만 불러 주고
+	//이어 가는 것은 유닛이 스스로 한다 (공격자마다 평타 수가 다르다)
+	void PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay,
+		const TArray<float>& SectionSeconds);
 
 	//끊기면 안 되는 몬타주를 틀 때 블루프린트가 같이 부른다 (Seconds는 보통 Get Play Length).
 	//이 시간 동안 들어온 MoveTo는 **버리지 않고 미뤘다가** 끝난 뒤에 실행한다 —
@@ -212,7 +214,8 @@ private:
 	//미리 굴려 받은 치명타 결과. 앞에서부터 하나씩 꺼내 쓴다
 	TArray<bool> FlurryCrits;
 	int32 FlurryIndex = 0;
-	float FlurryInterval = 0.f;
+	//섹션 길이. 평타 수보다 짧으면 앞에서부터 다시 쓴다
+	TArray<float> FlurrySections;
 	FTimerHandle FlurryHandle;
 
 	void FireNextFeverAttack();
