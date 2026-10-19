@@ -222,9 +222,27 @@ void ABattleManager::GatherSpots()
 		Lane.Reset();
 	}
 
+	bHasBoundary[0] = bHasBoundary[1] = false;
+
 	//레벨에 놓인 것을 전부 자동으로 찾는다. 배열에 등록할 필요가 없다
 	for (TActorIterator<ABattleSpot> It(GetWorld()); It; ++It)
 	{
+		if (It->bIsBoundary)
+		{
+			//경계 표식은 자리가 아니다. Mid는 좌/중인지 중/우인지 알 수 없어 거른다
+			if (It->Lane == EBattleLane::Mid)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("[Battle] 경계 표식의 Lane이 Mid입니다 — 좌/중이면 Left, 중/우면 Right로 두세요"));
+				continue;
+			}
+
+			const int32 Index = It->Lane == EBattleLane::Left ? 0 : 1;
+			BoundaryPoints[Index] = It->GetActorLocation();
+			bHasBoundary[Index] = true;
+			continue;
+		}
+
 		Spots[(int32)It->Lane].Add(It->GetActorLocation());
 	}
 
@@ -245,8 +263,17 @@ void ABattleManager::GatherSpots()
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개 (좌 %d / 중 %d / 우 %d)"),
-		Total, Spots[0].Num(), Spots[1].Num(), Spots[2].Num());
+	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개 (좌 %d / 중 %d / 우 %d) / 경계 표식 좌중 %s 중우 %s"),
+		Total, Spots[0].Num(), Spots[1].Num(), Spots[2].Num(),
+		bHasBoundary[0] ? TEXT("있음") : TEXT("없음"),
+		bHasBoundary[1] ? TEXT("있음") : TEXT("없음"));
+
+	if (!bHasBoundary[0] || !bHasBoundary[1])
+	{
+		//없어도 돌아가지만, 회피가 구역을 넘는 것처럼 보이지 않는다
+		UE_LOG(LogTemp, Warning,
+			TEXT("[Battle] 구역 경계 표식이 모자랍니다 — 회피 구르기가 경계를 넘지 않고 자리에 내려앉습니다"));
+	}
 
 	for (int32 i = 0; i < 3; ++i)
 	{
@@ -1033,6 +1060,8 @@ void ABattleManager::ResolveTurn()
 		FBattlePlayer& P = Pair.Value;
 		if (P.ReviveCountdown == 0)
 		{
+			//어느 경계를 넘어야 하는지는 '어디서 어디로'가 정한다. 지금 적어 둔다
+			P.LaneBeforeMove = P.Lane;
 			P.Lane = ApplyMove(P.PendingAction, P.Lane);
 		}
 	}
@@ -1394,9 +1423,34 @@ void ABattleManager::FlushAttackCues()
 	}
 }
 
+bool ABattleManager::TryGetLaneBoundary(EBattleLane From, EBattleLane To, FVector& OutBoundary) const
+{
+	if (From == To)
+	{
+		return false;
+	}
+
+	//목적 구역이 가장자리면 그 구역의 경계, 가운데면 들어온 쪽의 경계다.
+	//좌→우는 중/우 경계를 마지막으로 넘는다
+	const int32 Index =
+		To == EBattleLane::Left  ? 0 :
+		To == EBattleLane::Right ? 1 :
+		(From == EBattleLane::Left ? 0 : 1);
+
+	if (!bHasBoundary[Index])
+	{
+		return false;
+	}
+
+	OutBoundary = BoundaryPoints[Index];
+	return true;
+}
+
 void ABattleManager::BeginEvadeApproach()
 {
-	//구르기 한 번 거리만 남기고 달려간다. 도착하는 순간이 곧 BeginEvadeRolls다
+	//구르기 시작점까지 달려간다. 도착하는 순간이 곧 BeginEvadeRolls다.
+	//회피 한 번은 세 토막으로 나뉜다 — 경계 앞까지 달리기 / 구르며 경계 넘기 /
+	//남은 거리를 걸어 자리로 (마지막은 EndTurn의 원위치 이동이 맡는다)
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
@@ -1406,21 +1460,47 @@ void ABattleManager::BeginEvadeApproach()
 		}
 
 		const FVector From = P.Unit->GetActorLocation();
-		const float Total = FVector::Dist(From, P.TargetLocation);
+		const FVector ToTarget = P.TargetLocation - From;
+		const float Total = ToTarget.Size();
+		if (Total <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
 
-		//달려가 멈출 지점. '목표에서 구르기 거리만큼 앞'으로만 잡으면 거리가 멀 때
-		//그 지점이 이미 목적 구역 안이라, 다 와서 구르는 꼴이 된다.
-		//구역 경계가 보스 기준 부채꼴이라 좌표로 들고 있지 않으므로 **여정의 절반**을
-		//상한으로 쓴다 — 한 칸이면 경계 즈음, 두 칸이면 가운데 구역에서 구르기 시작이다
-		const float Lead = FMath::Min(Total * 0.5f, Total - RollDistance);
+		const FVector Dir = ToTarget / Total;
 
-		//구르기 한 번이면 닿는 거리다. 제자리에서 기다렸다가 구른다
+		//넘어야 할 경계가 있으면 그 앞까지만 간다. 없으면(제자리 회피이거나
+		//레벨에 표식이 없으면) 예전처럼 구르기 한 번 거리를 남기고 간다.
+		//
+		//**경계는 점이 아니라 선이다.** 구역이 보스 중심 부채꼴이므로 경계선은
+		//보스에서 표식을 지나 뻗어나가는 선이고, 표식은 그 선 위 아무 곳에나 두면 된다.
+		//점으로만 보고 경로에 투영하면, 보스에서 먼 데서 건너는 사람의 경계가 어긋난다
+		FVector Boundary = FVector::ZeroVector;
+		float Lead = FMath::Max(0.f, Total - RollDistance);
+
+		if (TryGetLaneBoundary(P.LaneBeforeMove, P.Lane, Boundary))
+		{
+			const FVector Boss = BossLocation();
+			const FVector Along = (Boundary - Boss).GetSafeNormal2D();
+
+			//경계선의 법선. 경로와 이 선의 교점까지가 달려갈 거리다
+			const FVector Normal(-Along.Y, Along.X, 0.f);
+			const float Denom = FVector::DotProduct(Dir, Normal);
+
+			//경로가 경계선과 나란하면 교점이 없다. 그때는 기본값을 쓴다
+			if (!Along.IsNearlyZero() && FMath::Abs(Denom) > SMALL_NUMBER)
+			{
+				Lead = FMath::Clamp(FVector::DotProduct(Boss - From, Normal) / Denom, 0.f, Total);
+			}
+		}
+
+		//경계가 코앞이면 달려갈 것 없이 그 자리에서 구른다
 		if (Lead <= KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
 
-		const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
+		const FVector Waypoint = From + Dir * Lead;
 		P.Unit->MoveTo(Waypoint, EvadeApproachSeconds,
 			ChooseGait(Lead, EvadeApproachSeconds, RunSpeed, RollSpeed));
 	}
@@ -1442,8 +1522,8 @@ void ABattleManager::BeginEvadeRolls()
 		//구르기는 '남은 거리만큼'이 아니라 **정해진 거리**를 덮는다. 모션에 이동이
 		//실려 있어서 늘이고 줄일 수 없기 때문이다. 자리까지 모자라는 만큼은
 		//구른 뒤에 걷거나 뛰어서 마저 간다 (EndTurn의 원위치 이동이 그 역할을 한다)
-		//ponytail: 두 칸을 건너는 회피는 RollDistance로 못 덮어 늦게 들어간다.
-		//거슬리면 RollDistance를 올리거나 구르기를 두 번 잇는다
+		//출발점이 '경계에서 구르기 절반 앞'이므로, 여기서 RollDistance를 덮으면
+		//경계를 확실히 넘는다. 자리까지 모자라는 만큼만 걸어서 마저 간다
 		const FVector From = P.Unit->GetActorLocation();
 		const float Remaining = FVector::Dist(From, P.TargetLocation);
 		const float Covered = FMath::Min(RollDistance, Remaining);

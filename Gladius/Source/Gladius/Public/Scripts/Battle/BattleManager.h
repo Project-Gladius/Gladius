@@ -86,6 +86,11 @@ struct FBattlePlayer
 
 	UPROPERTY() EBattleLane Lane = EBattleLane::Mid;
 
+	//회피로 구역을 옮기기 **직전**의 구역. 구르기가 어느 경계를 넘어야 하는지는
+	//이 둘(출발·도착)로 정해진다. 좌표에서 되짚으면 가장자리에 선 사람을
+	//이웃 구역으로 잘못 짚는다
+	UPROPERTY() EBattleLane LaneBeforeMove = EBattleLane::Mid;
+
 	//이번 턴에 서야 할 자리. 매 턴 구역 인원에 맞춰 다시 배분된다
 	UPROPERTY() FVector TargetLocation = FVector::ZeroVector;
 
@@ -573,8 +578,13 @@ private:
 	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
 	void FlushAttackCues();
 
-	//회피자가 구르기 거리를 남기고 달려간다. 구르기가 시작되는 순간에 도착한다
+	//회피자가 구르기 시작점까지 달려간다. 도착하는 순간이 구르기 시작이다
 	void BeginEvadeApproach();
+
+	//From에서 To로 갈 때 **마지막으로 넘는** 경계를 돌려준다.
+	//좌→우면 중/우 경계다 — 목적 구역 바로 앞의 선을 넘어야 '들어갔다'가 된다.
+	//레벨에 그 표식이 없으면 false (회피는 목표 자리에 내려놓는 식으로 돈다)
+	bool TryGetLaneBoundary(EBattleLane From, EBattleLane To, FVector& OutBoundary) const;
 
 	//회피자 전원이 구른다. 보스가 휘두르기 RollLead초 전이다
 	void BeginEvadeRolls();
@@ -660,6 +670,11 @@ private:
 	//구역별 자리 좌표. 비어 있으면 SlotLocation이 격자 계산으로 넘어간다.
 	//FVector라 GC 대상이 아니어서 UPROPERTY가 필요 없다
 	TArray<FVector> Spots[3];
+
+	//구역 경계 표식의 좌표. [0] = 좌/중, [1] = 중/우.
+	//`ABattleSpot`에 `bIsBoundary`를 켜서 레벨에 놓은 것들이다
+	FVector BoundaryPoints[2] = { FVector::ZeroVector, FVector::ZeroVector };
+	bool bHasBoundary[2] = { false, false };
 
 	//지금 전투 중인 참여자
 	UPROPERTY() TMap<FString, FBattlePlayer> Players;
