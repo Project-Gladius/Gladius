@@ -64,7 +64,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void RequestChatFetch();
 
-	/** TurnManager pauses recurring polls while draining the final request. */
+	/** BattleManager pauses recurring polls while draining the final request. */
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void SetCombatAutoPollingEnabled(bool bEnabled);
 
@@ -109,10 +109,7 @@ private:
 	//CommandDispatcher의 GetGameStateDelegate에 바인딩되는 함수. GameManagerRef가 없으면 기본값(신전상태) 반환
 	EGameState GetCurrentGameState() const;
 
-	//CommandDispatcher의 OnUserLoginRequired 구독 함수
-	//플레이어 로그인 상태를 저장. 필드 캐릭터 스폰은 추후 연결
-	void HandleUserLoginRequired(const FString& UserId);
-	void HandleUserLoggedOut(const FString& UserId);
+
 
 	//API 상태 저장용 변수
 	FString LiveChatId;

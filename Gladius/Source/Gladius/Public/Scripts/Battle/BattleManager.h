@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -8,23 +8,24 @@
 
 class ABattleUnit;
 class UTextRenderComponent;
+class ACutSceneApplier;
 
-//턴의 진행 단계. 기획서의 4단계와 그대로 대응한다
+//BattleStart -> Prepare -> Collect -> CutScenes -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
 enum class EBattlePhase : uint8
 {
-	//보스 행동 예고. 이 시간의 입력도 이번 턴 행동으로 유효하다
-	Telegraph,
-	//플레이어 행동 선택 카운트다운
-	Input,
+	BattleStart = 6,
+	Prepare = 0,
 	//카운트다운은 끝났지만 늦게 도착하는 채팅을 계속 받는 대기 시간
-	Collect,
+	Collect = 2,
 	//회피 이동 연출. 여기부터는 입력을 받지 않는다
 	Move,
 	//플레이어 공격과 보스 공격 모션
 	BossAction,
 	//결과 표시
-	Resolve
+	Resolve,
+	CutScenes = 7,
+	BattleEnd = 8
 };
 
 //전투가 끝나도 남는 유저 기록. 이 구조체가 그대로 JSON 파일이 된다.
@@ -41,6 +42,8 @@ struct FPlayerRecord
 	UPROPERTY() FString CharacterId;
 
 	//신전에서 사는 '강화' 능력치들. 게임 오버 시 일정 비율을 잃는다
+	// -1 is only the legacy-file sentinel; registration/load initializes it.
+	UPROPERTY() int32 CurrentHealth = -1;
 	UPROPERTY() int32 MaxHPBonus = 0;
 	UPROPERTY() int32 DamageBonus = 0;
 	UPROPERTY() int32 CritChanceBonus = 0;
@@ -68,8 +71,8 @@ struct FBattlePlayer
 
 	UPROPERTY() int32 HP = 0;
 
-	//소수 유지 모드가 있어 실수다. 피해 계산에 그대로 더해진다
-	UPROPERTY() float Fever = 0.f;
+	//피버는 정수 스택이다.
+	UPROPERTY() int32 Fever = 0;
 
 	//연속으로 회피한 턴 수. 회피가 아닌 행동을 하면 0으로 돌아간다
 	UPROPERTY() int32 EvadeStreak = 0;
@@ -123,7 +126,7 @@ struct FAttackCue
 	bool bCrit = false;
 
 	//이번 공격에 실제로 실린 피버. 피버가 오르기 전 값이라 피해 계산에 쓴 것과 같다
-	float Fever = 0.f;
+	int32 Fever = 0;
 	//직업군별로 한 명씩 고르므로 같이 들고 있는다
 	int32 ClassIndex = 0;
 	//이 공격으로 보스에게 들어간 피해. 피버가 같을 때 가르는 데 쓴다
@@ -344,9 +347,6 @@ public:
 
 	//강화 한 단계당 오르는 양
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	int32 HPPerBonus = 1;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 DamagePerBonus = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
@@ -357,12 +357,12 @@ public:
 
 	//공격 시 오르는 피버 (파일의 attackFeverGain)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	float FeverIncrement = 5.f;
+	int32 FeverIncrement = 5;
 
 	//방어 시 오르는 피버 (파일의 defenseFeverGain).
 	// ponytail: 방어 행동 자체를 조건으로 본다. '실제로 피격을 막아야 오르는지'는 기획서 미정
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	float DefenseFeverGain = 5.f;
+	int32 DefenseFeverGain = 5;
 
 	//피해 계산에서 피버에 곱하는 계수 (파일의 feverDamageCoefficient)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
@@ -370,7 +370,7 @@ public:
 
 	//피버 상한. 0이면 무제한 (파일의 feverCap: null)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
-	float FeverCap = 0.f;
+	int32 FeverCap = 0;
 
 	//연속 회피 감소. N회 연속 회피하면 피버가 비율만큼 줄어든다.
 	//회피가 아닌 행동을 하면 연속 횟수가 0으로 돌아간다
@@ -409,7 +409,7 @@ public:
 
 	//채팅이 붙기 전까지 더미 유저들이 매 턴 무작위 행동을 고르게 한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
-	bool bRandomizeTestPlayers = true;
+	bool bRandomizeTestPlayers = false;
 
 	//에디터에서 자리 배치를 점으로 미리 보여준다. Play 없이 격자를 맞출 때 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
@@ -427,19 +427,53 @@ public:
 	int32 TurnIndex = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
-	EBattlePhase Phase = EBattlePhase::Resolve;
+	EBattlePhase Phase = EBattlePhase::BattleEnd;
 
 	//이번 턴에 보스가 할 행동. 턴이 시작될 때 정해져 입력 시간 내내 예고된다
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	FBossAction TelegraphedAction;
 
-	//Input과 Collect 단계에서만 입력을 받는다
+	//Prepare와 Collect 단계에서만 입력을 받는다
 	UFUNCTION(BlueprintPure, Category = "Battle|State")
 	bool IsAcceptingInput() const;
 
 	// 컷신 등 표시 계층은 전투 상태를 읽기만 한다.
 	const TMap<FString, FBattlePlayer>& GetBattlePlayers() const { return Players; }
 	ABattleUnit* GetBossUnit() const { return BossUnit.Get(); }
+
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+ bool bAutoStartBattle = true;
+
+ // HPGen for the temple recovery blessing; adjustable until design fixes the value.
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Temple", meta = (ClampMin = "0"))
+ int32 BlessingHealAmount = 1;
+
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
+ int32 HPPerBonus = 1;
+
+ void InitializePlayerRecords();
+
+ UFUNCTION(BlueprintCallable, Category = "Battle|Temple")
+ bool ApplyTempleEnhancement(const FString& UserId, const FString& DisplayName, int32 Tier);
+
+ UFUNCTION(BlueprintPure, Category = "Battle|State")
+ bool IsBattleRunning() const { return bBattleRunning; }
+
+ // Damage/healing callers use this entry point so the save changes immediately.
+ UFUNCTION(BlueprintCallable, Category = "Battle|Health")
+ bool SetPlayerHealth(const FString& UserId, int32 CurrentHealth);
+
+ UFUNCTION(BlueprintCallable, Category = "Battle")
+ void LogoutPlayer(const FString& UserId);
+
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+ float BattleStartSeconds = 0.1f;
+
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|CutScenes")
+ TArray<FName> CutSceneIds = { TEXT("GladiusRun"), TEXT("GladiusSkill1") };
+
+ UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Battle|CutScenes")
+ TObjectPtr<ACutSceneApplier> CutSceneApplier;
 
 	// ---- 외부 진입점 ----
 
@@ -484,7 +518,7 @@ public:
 
 	// ---- 순수 함수 (상태 없음, 자체 테스트 대상) ----
 
-	//채팅 한 줄을 행동으로. 앞의 '!'는 있어도 되고 없어도 된다
+	//ChatCommandParser와 같은 문법으로 해석한다 (!공격 1, !회피 좌 등).
 	static bool ParseCommand(const FString& Text, EBattleAction& OutAction);
 
 	//회피 행동이면 그 영역으로 이동, 아니면 제자리
@@ -520,12 +554,12 @@ public:
 
 	//시뮬레이터와 같은 식: (기본 + 강화 + 피버×계수) * 내성 * (1 + 치명타 시 치명타 피해).
 	//강화 피해는 시뮬레이터가 기본 피해에 더해 넣는 것과 같은 자리다
-	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever, float FeverCoefficient,
+	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever, float FeverCoefficient,
 		float Resist, bool bCrit, float CritDamage);
 
 	//회피한 턴의 피버. EvadeStreak은 이번 회피까지 센 값을 넘긴다.
 	//기준에 닿지 않았으면 그대로 돌려준다
-	static float DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
+	static int32 DecayFever(int32 Fever, int32 EvadeStreak, int32 StreakN,
 		float Reduction, EEvadeRepeatMode Repeat, EFeverRounding Rounding);
 
 	//구역 피해 0이면 안 맞는다. 방어는 비율을 곱한 뒤 올림, 그 뒤 타격 횟수만큼 곱한다
@@ -542,7 +576,29 @@ public:
 	FVector GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const;
 
 private:
-	//Telegraph → Input → Collect → Move → BossAction → Resolve 순으로 타이머가 이어진다
+ friend struct FBattleUnificationTestAccess;
+ friend struct FBattleCameraTestAccess;
+ bool bRecordLoadFailed = false;
+ bool bRecordsInitialized = false;
+ FPlayerRecord& GetOrCreateRecord(const FString& UserId, const FString& DisplayName, const FString& CharacterId = TEXT(""));
+#if WITH_DEV_AUTOMATION_TESTS
+ FString TestRecordPath;
+#endif
+ FString RecordFilePath() const
+ {
+#if WITH_DEV_AUTOMATION_TESTS
+  if (!TestRecordPath.IsEmpty()) return TestRecordPath;
+#endif
+  return SaveFilePath();
+ }
+ bool bBattleRunning = false;
+ TArray<FName> ActiveCutSceneIds;
+ int32 CutSceneIndex = 0;
+ void BeginCutScenes();
+ void PlayNextCutScene();
+ UFUNCTION()
+ void HandleCutSceneEnded(FName Type, bool bInterrupted);
+	//Prepare contains the telegraph and player selection intervals.
 	void StartTurn();
 	void BeginInput();
 	void BeginCollect();
@@ -570,8 +626,8 @@ private:
 	//공격 모션에 필요한 시간. 스킬 한 번 + 평타 FeverStacks회
 	static float AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds);
 
-	//피버를 평타 횟수로 바꾼다. 소수는 버리고 상한을 적용한다
-	int32 FeverStacksFor(float Fever) const;
+	//정수 피버에 상한을 적용해 평타 횟수로 쓴다
+	int32 FeverStacksFor(int32 Fever) const;
 
 	//판정 단계 시작부터 보스가 칠 때까지의 시간.
 	//전투 개시부터 재면 BattleTime이 되어야 하지만, 플레이어 공격 연출보다 빨라서는 안 된다

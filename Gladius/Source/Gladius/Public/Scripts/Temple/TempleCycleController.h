@@ -12,6 +12,7 @@ class UCommandDispatcher;
 class AYouTubeChatManager;
 class AGameManager;
 class AGoddess;
+class ABattleManager;
 class UTempleCommandQueue;
 class UTempleAIBatchClient;
 class UTempleStatusWidget;
@@ -80,6 +81,12 @@ private:
 
 	UPROPERTY(EditInstanceOnly, Category = "Temple|References")
 	TObjectPtr<AGameManager> GameManager;
+
+ UPROPERTY(EditInstanceOnly, Category = "Temple|References")
+ TObjectPtr<ABattleManager> BattleManager;
+ TWeakObjectPtr<AGoddess> BoundGoddess;
+ UFUNCTION()
+ void HandleEnhanceExecuted(const FString& UserId, const FString& Username, int32 Tier);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTempleCommandQueue> CommandQueue;

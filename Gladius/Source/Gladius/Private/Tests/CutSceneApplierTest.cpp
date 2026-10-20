@@ -1,6 +1,7 @@
 #include "Scripts/Battle/CutSceneApplier.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+#include "BattleCameraTestAccess.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Engine/Engine.h"
@@ -36,6 +37,7 @@ struct FCutSceneTestWorld
     }
     ~FCutSceneTestWorld()
     {
+        FBattleCameraTestAccess::Cleanup(World);
         Instance->Shutdown();
         GEngine->DestroyWorldContext(World);
         World->DestroyWorld(false);
@@ -118,7 +120,7 @@ bool FCutSceneSplitPlaybackTest::RunTest(const FString& Parameters)
     // 실제 직업 ID로 조회하는지 확인하기 위해 통상 순서를 뒤집는다.
     Manager->Classes = { SeraClass, GladiusClass };
     Manager->DefaultCharacterId = GladiusClass.Id;
-    Manager->StartBattle();
+    FBattleCameraTestAccess::Prepare(Manager);
     TestTrue(TEXT("Gladius joined"), Manager->SubmitAction(TEXT("G"), TEXT("G"), EBattleAction::Attack1, GladiusClass.Id));
     TestTrue(TEXT("Sera joined"), Manager->SubmitAction(TEXT("S"), TEXT("S"), EBattleAction::Attack2, SeraClass.Id));
     Manager->StopBattle();
@@ -243,7 +245,7 @@ bool FCutSceneLifecycleTest::RunTest(const FString& Parameters)
     Character.Id = TEXT("test");
     Character.BaseHP = 100;
     Manager->Classes = { Character };
-    Manager->StartBattle();
+    FBattleCameraTestAccess::Prepare(Manager);
     if (!TestTrue(TEXT("Participant joined"), Manager->SubmitAction(TEXT("test-user"), TEXT("Test"), EBattleAction::Idle))) { return false; }
     Manager->StopBattle();
     ABattleUnit* Subject = Manager->GetBattlePlayers().FindChecked(TEXT("test-user")).Unit;

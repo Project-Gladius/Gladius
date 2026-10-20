@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "BattleBalance.generated.h"
@@ -185,21 +185,21 @@ struct FBattleBalance
 	bool bLoaded = false;
 
 	// ---- abilities.json : rules ----
-	float AttackFeverGain = 5.f;
-	float DefenseFeverGain = 5.f;
+	int32 AttackFeverGain = 5;
+	int32 DefenseFeverGain = 5;
 	float FeverDamageCoefficient = 1.f;
 	int32 EvadeThreshold = 2;
 	float EvadeReduction = 1.f;
 	EEvadeRepeatMode EvadeRepeat = EEvadeRepeatMode::EveryAfter;
 	EFeverRounding FeverRounding = EFeverRounding::Floor;
 	//파일의 null(상한 없음)은 0으로 들어온다
-	float FeverCap = 0.f;
+	int32 FeverCap = 0;
 	bool bAllowStayEvade = true;
 	float ResistanceMultipliers[3] = { 0.5f, 1.f, 1.5f };
 
 	// ---- abilities.json : initial / characters ----
 	EBattleLane InitialZone = EBattleLane::Mid;
-	float InitialFever = 0.f;
+	int32 InitialFever = 0;
 	int32 InitialEvadeStreak = 0;
 	//파일에 적힌 순서 그대로. 앞에 있는 직업군이 보스에 가까운 자리를 쓴다
 	TArray<FCharacterDef> Characters;

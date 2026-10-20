@@ -1,6 +1,7 @@
 #include "Scripts/Battle/GladiusRunCamera.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+#include "BattleCameraTestAccess.h"
 #include "Scripts/Battle/CutSceneApplier.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
@@ -39,7 +40,7 @@ struct FRunCameraWorld
         S.Id = TEXT("sera");
         Manager->Classes = { S, G }; // 직업은 고정 인덱스가 아니라 ID로 찾는다.
         Manager->DefaultCharacterId = G.Id;
-        Manager->StartBattle();
+        FBattleCameraTestAccess::Prepare(Manager);
         Manager->SubmitAction(TEXT("A"), TEXT("Subject"), EBattleAction::Attack1, G.Id);
         Manager->SubmitAction(TEXT("B"), TEXT("Other"), EBattleAction::Attack2, G.Id);
         Manager->SubmitAction(TEXT("C"), TEXT("Sera"), EBattleAction::Attack1, S.Id);
@@ -54,6 +55,7 @@ struct FRunCameraWorld
     }
     ~FRunCameraWorld()
     {
+        FBattleCameraTestAccess::Cleanup(World);
         Instance->Shutdown();
         GEngine->DestroyWorldContext(World);
         World->DestroyWorld(false);

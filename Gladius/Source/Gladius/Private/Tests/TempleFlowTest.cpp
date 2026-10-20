@@ -1,5 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
+#include "BattleCameraTestAccess.h"
+#include "Misc/FileHelper.h"
+#include "JsonObjectConverter.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -27,10 +30,18 @@ struct FTempleTestWorld
  AGoddess* Goddess;
  ATempleCycleController* Controller;
  AYouTubeChatManager* Chat;
+ ABattleManager* Records;
  FTempleTestWorld()
  {
   Instance->AddToRoot(); Instance->InitializeStandalone(); World=Instance->GetWorld();
+#if UE_SUPPORT_FOR_ACTOR_TICK_DISABLE
+  World->EnableActorTickAndUserCallbacks(true);
+#endif
+  World->InitializeActorsForPlay(FURL());
   World->SpawnActor<AGameManager>();
+  Records=World->SpawnActor<ABattleManager>();
+  FBattleCameraTestAccess::RecordsOnly(Records);
+  Records->DispatchBeginPlay();
   Chat=World->SpawnActor<AYouTubeChatManager>();
   Goddess=World->SpawnActor<AGoddess>();
   Controller=World->SpawnActor<ATempleCycleController>();
@@ -41,6 +52,7 @@ struct FTempleTestWorld
  ~FTempleTestWorld()
  {
   Controller->Destroy(); Goddess->Destroy(); Chat->Destroy();
+  FBattleCameraTestAccess::Cleanup(World);
   Instance->Shutdown(); GEngine->DestroyWorldContext(World); World->DestroyWorld(false); Instance->RemoveFromRoot();
  }
 };
@@ -121,4 +133,74 @@ bool FTempleBlessingTest::RunTest(const FString& Parameters)
  ADD_LATENT_AUTOMATION_COMMAND(FTempleBlessingSequence(T,this));
  return true;
 }
+namespace
+{
+class FTempleEnhancementAssertions : public IAutomationLatentCommand
+{
+ TSharedPtr<FTempleTestWorld> T;
+ FAutomationTestBase* Test;
+ int32 Frames=0;
+public:
+ FTempleEnhancementAssertions(TSharedPtr<FTempleTestWorld> In, FAutomationTestBase* InTest):T(In),Test(InTest){}
+ bool Update() override
+ {
+  T->World->GetTimerManager().Tick(0.1f);
+  if (T->Goddess->GetState()!=EGoddessState::Idle)
+  {
+   if (++Frames>30) { Test->AddError(TEXT("Blessing execution did not complete")); return true; }
+   return false;
+  }
+  const FPlayerRecord& R=FBattleCameraTestAccess::Record(T->Records,TEXT("temple-viewer"));
+  Test->TestEqual(TEXT("Healing blessing restores current health"),R.CurrentHealth,T->Records->MaxHPFor(R));
+  Test->TestEqual(TEXT("Recovery does not silently change restored max HP bonus"),R.MaxHPBonus,2);
+  Test->TestEqual(TEXT("Strength increases damage level once"),R.DamageBonus,1);
+  Test->TestEqual(TEXT("Agility increases crit chance level once"),R.CritChanceBonus,1);
+  Test->TestEqual(TEXT("Sharpness increases crit damage level once"),R.CritDamageBonus,1);
+  FString Json;FFileHelper::LoadFileToString(Json,*FBattleCameraTestAccess::Path(T->Records));
+  FPlayerRecordFile Saved;FJsonObjectConverter::JsonObjectStringToUStruct(Json,&Saved);
+  Test->TestEqual(TEXT("Completed blessings persisted one user"),Saved.Records.Num(),1);
+  if(Saved.Records.Num())
+  {
+   Test->TestEqual(TEXT("JSON stores restored maximum HP level"),Saved.Records[0].MaxHPBonus,2);
+   Test->TestEqual(TEXT("JSON stores healed current HP"),Saved.Records[0].CurrentHealth,R.CurrentHealth);
+   Test->TestEqual(TEXT("JSON stores enhancement result"),Saved.Records[0].CritDamageBonus,1);
+  }
+  auto* Next=T->World->SpawnActor<ABattleManager>();
+  FBattleCameraTestAccess::RecordsOnly(Next);
+  FBattleCameraTestAccess::UsePath(Next,FBattleCameraTestAccess::Path(T->Records));
+  Next->InitializePlayerRecords();
+  FBattleCameraTestAccess::BeginPrepared(Next);
+  Test->TestTrue(TEXT("Next battle can join with temple result"),Next->SubmitAction(TEXT("temple-viewer"),TEXT("Temple user"),EBattleAction::Attack1));
+  if(const FBattlePlayer* P=Next->GetBattlePlayers().Find(TEXT("temple-viewer")))
+  {
+   Test->TestEqual(TEXT("Next battle maximum includes MaxHPBonus"),P->MaxHP,Next->Classes[0].BaseHP+2*Next->HPPerBonus);
+   Test->TestEqual(TEXT("Next battle starts with stored healed HP"),P->HP,R.CurrentHealth);
+   Test->TestEqual(TEXT("Next battle applies strength"),P->DamageBonus,Next->DamagePerBonus);
+   Test->TestEqual(TEXT("Next battle applies agility"),P->CritChanceBonus,Next->CritChancePerBonus);
+   Test->TestEqual(TEXT("Next battle applies sharpness"),P->CritDamageBonus,Next->CritDamagePerBonus);
+  }
+  return true;
+ }
+};
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleEnhancementIntegrationTest,"Gladius.Temple.Flow.YouTubeBlessingsPersistToBattle",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTempleEnhancementIntegrationTest::RunTest(const FString& Parameters)
+{
+ auto T=MakeShared<FTempleTestWorld>();
+ T->Records->BlessingHealAmount=2;
+ TestFalse(TEXT("Temple record manager never starts battle"),T->Records->IsBattleRunning());
+ T->Records->ApplyTempleEnhancement(TEXT("temple-viewer"),TEXT("Temple user"),2);
+ auto& R=FBattleCameraTestAccess::Record(T->Records,TEXT("temple-viewer"));
+ R.MaxHPBonus=2;R.DamageBonus=0;R.CurrentHealth=T->Records->MaxHPFor(R)-2;
+ T->Records->SaveRecords();
+ T->Chat->MaxAllowedComments=100;
+ for(int32 Tier=1;Tier<=4;++Tier)
+  T->Chat->OnReceiveYouTubeCommentWithUsername(FString::Printf(TEXT("blessing-%d"),Tier),TEXT("temple-viewer"),TEXT("Temple user"),FString::Printf(TEXT("!강화 %d"),Tier));
+ TestEqual(TEXT("Queueing alone does not apply strength"),R.DamageBonus,0);
+ T->Goddess->BlessingDurations.Init(0.01f,4);
+ FTempleFlowTestAccess::Cycle(T->Controller);
+ ADD_LATENT_AUTOMATION_COMMAND(FTempleEnhancementAssertions(T,this));
+ return true;
+}
+
 #endif

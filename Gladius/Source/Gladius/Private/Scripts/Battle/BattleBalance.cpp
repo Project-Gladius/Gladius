@@ -1,4 +1,4 @@
-﻿#include "Scripts/Battle/BattleBalance.h"
+#include "Scripts/Battle/BattleBalance.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -80,6 +80,20 @@ namespace
 		Out = FMath::RoundToInt(Value);
 		return true;
 	}
+
+ bool GetFeverInt(const TSharedPtr<FJsonObject>& Obj, const FString& Field,
+  const FString& File, int32& Out, double Min, double Max)
+ {
+  double Value = 0;
+  if (!Obj.IsValid() || !Obj->TryGetNumberField(Field, Value)
+   || !FMath::IsFinite(Value) || Value < Min || Value > Max || Value != FMath::FloorToDouble(Value))
+  {
+   Fail(File, FString::Printf(TEXT("'%s' must be an integer in [%g, %g]"), *Field, Min, Max));
+   return false;
+  }
+  Out = static_cast<int32>(Value);
+  return true;
+ }
 
 	//readme '읽는 방법과 공통 항목'의 schemaVersion / kind / revision 검사.
 	//세 파일 모두 이 셋을 가진다
@@ -276,8 +290,8 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		return false;
 	}
 
-	if (!GetFloat(Rules, TEXT("attackFeverGain"), AbilitiesPath, AttackFeverGain, 0, 100)
-		|| !GetFloat(Rules, TEXT("defenseFeverGain"), AbilitiesPath, DefenseFeverGain, 0, 100)
+	if (!GetFeverInt(Rules, TEXT("attackFeverGain"), AbilitiesPath, AttackFeverGain, 0, 100)
+		|| !GetFeverInt(Rules, TEXT("defenseFeverGain"), AbilitiesPath, DefenseFeverGain, 0, 100)
 		|| !GetFloat(Rules, TEXT("feverDamageCoefficient"), AbilitiesPath, FeverDamageCoefficient, 0, 20)
 		|| !GetInt(Rules, TEXT("evadeThreshold"), AbilitiesPath, EvadeThreshold, 1, 100)
 		|| !GetFloat(Rules, TEXT("evadeReduction"), AbilitiesPath, EvadeReduction, 0, 1))
@@ -308,7 +322,7 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 	//null이면 상한 없음. 게임에서는 0이 상한 없음을 뜻한다
 	FeverCap = 0.f;
 	if (Rules->HasField(TEXT("feverCap")) && !Rules->HasTypedField<EJson::Null>(TEXT("feverCap"))
-		&& !GetFloat(Rules, TEXT("feverCap"), AbilitiesPath, FeverCap, 0, 10000))
+		&& !GetFeverInt(Rules, TEXT("feverCap"), AbilitiesPath, FeverCap, 0, 10000))
 	{
 		return false;
 	}
@@ -342,7 +356,7 @@ bool FBattleBalance::LoadAbilities(const FString& AbilitiesPath)
 		Fail(AbilitiesPath, TEXT("'initial' 항목이 없습니다"));
 		return false;
 	}
-	if (!GetFloat(*InitialPtr, TEXT("fever"), AbilitiesPath, InitialFever, 0, 10000)
+	if (!GetFeverInt(*InitialPtr, TEXT("fever"), AbilitiesPath, InitialFever, 0, 10000)
 		|| !GetInt(*InitialPtr, TEXT("evadeStreak"), AbilitiesPath, InitialEvadeStreak, 0, 100))
 	{
 		return false;

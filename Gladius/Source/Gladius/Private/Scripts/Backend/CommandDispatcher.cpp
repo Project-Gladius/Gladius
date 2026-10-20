@@ -1,156 +1,59 @@
 #include "Scripts/Backend/CommandDispatcher.h"
-
-void UCommandDispatcher::Initialize()
-{
-	RegisterCommandHandlers();
-}
-
-void UCommandDispatcher::RegisterCommandHandlers()
-{
-	CommandHandlers.Add(ECommandType::Attack1, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastAttack));
-	CommandHandlers.Add(ECommandType::Attack2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastAttack));
-	CommandHandlers.Add(ECommandType::Defend, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDefend));
-	CommandHandlers.Add(ECommandType::DodgeLeft, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDodge));
-	CommandHandlers.Add(ECommandType::DodgeRight, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDodge));
-	CommandHandlers.Add(ECommandType::DodgeMid, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastDodge));
-	CommandHandlers.Add(ECommandType::Logout, FCommandHandler::CreateUObject(this, &UCommandDispatcher::HandleLogout));
-
-	CommandHandlers.Add(ECommandType::Enhance1, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
-	CommandHandlers.Add(ECommandType::Enhance2, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
-	CommandHandlers.Add(ECommandType::Enhance3, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
-	CommandHandlers.Add(ECommandType::Enhance4, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastEnhance));
-	CommandHandlers.Add(ECommandType::TravelToCombat, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastTempleCombat));
-	CommandHandlers.Add(ECommandType::Talk, FCommandHandler::CreateUObject(this, &UCommandDispatcher::BroadcastTalk));
-}
+#include "Scripts/Backend/ChatCommandParser.h"
+#include "Scripts/Battle/BattleManager.h"
+#include "Kismet/GameplayStatics.h"
 
 void UCommandDispatcher::Execute(const FParsedCommand& Command)
 {
-	if (IsCombatCommand(Command.CommandType))
-	{
-		//로그아웃 자체는 로그인을 트리거하는 명령이 아니므로 제외 (공격/방어/회피 3종만 자동 로그인 트리거)
-		if (Command.CommandType != ECommandType::Logout)
-		{
-			TryAutoLogin(Command.UserId);
-		}
-
-		UpdateLogoutStatus(Command.UserId, true);
-	}
-
-	if (!IsCommandValidForCurrentState(Command.CommandType))
-	{
-		return; //현재 게임 상태(전투/신전)와 맞지 않는 명령어는 무시 (ex. 전투중 !강화, 신전에서 !공격)
-	}
-
-	if (const FCommandHandler* Handler = CommandHandlers.Find(Command.CommandType))
-	{
-		Handler->ExecuteIfBound(Command);
-	}
+ ABattleManager* Battle = ResolveBattleManager();
+ EBattleAction Action;
+ if (FChatCommandParser::TryGetBattleAction(Command.CommandType, Action))
+ {
+  if (IsValid(Battle) && Battle->IsBattleRunning() && SubmitBattleAction.IsBound())
+   SubmitBattleAction.Execute(Command.UserId, Command.Username.IsEmpty() ? Command.UserId : Command.Username, Action, TEXT(""));
+  return;
+ }
+ if (Command.CommandType == ECommandType::Logout)
+ {
+  if (IsValid(Battle) && Battle->IsBattleRunning()) Battle->LogoutPlayer(Command.UserId);
+  return;
+ }
+ const EGameState State = IsValid(Battle)
+  ? (Battle->IsBattleRunning() ? EGameState::Combat : EGameState::Temple)
+  : (GetGameStateDelegate.IsBound() ? GetGameStateDelegate.Execute() : EGameState::Temple);
+ if (State != EGameState::Temple) return;
+ switch (Command.CommandType)
+ {
+ case ECommandType::Enhance1: case ECommandType::Enhance2:
+ case ECommandType::Enhance3: case ECommandType::Enhance4:
+  OnEnhanceCommand.Broadcast(Command.UserId, Command.Username, Command.Argument); break;
+ case ECommandType::Talk:
+  OnTalkCommand.Broadcast(Command.UserId, Command.CommentId, Command.Username, Command.Argument); break;
+ case ECommandType::TravelToCombat: OnTempleCombatCommand.Broadcast(); break;
+ default: break;
+ }
 }
 
-bool UCommandDispatcher::IsCombatCommand(ECommandType CommandType) const
+void UCommandDispatcher::BindBattleManager(ABattleManager* Manager)
 {
-	switch (CommandType)
-	{
-	case ECommandType::Attack1:
-	case ECommandType::Attack2:
-	case ECommandType::Defend:
-	case ECommandType::DodgeLeft:
-	case ECommandType::DodgeRight:
-	case ECommandType::DodgeMid:
-	case ECommandType::Logout:
-		return true;
-	default:
-		return false;
-	}
+ if (BoundBattleManager.Get() == Manager && SubmitBattleAction.IsBound()) return;
+ SubmitBattleAction.Unbind();
+ BoundBattleManager = Manager;
+ if (IsValid(Manager)) SubmitBattleAction.BindUObject(Manager, &ABattleManager::SubmitAction);
 }
 
-bool UCommandDispatcher::IsCommandValidForCurrentState(ECommandType CommandType) const
+void UCommandDispatcher::UnbindBattleManager(ABattleManager* Manager)
 {
-	//GetGameStateDelegate가 아직 바인딩되지 않았다면(GameManager 연결 전) 기본값으로 신전상태 취급
-	const EGameState CurrentState = GetGameStateDelegate.IsBound() ? GetGameStateDelegate.Execute() : EGameState::Temple;
-
-	return IsCombatCommand(CommandType)
-		? (CurrentState == EGameState::Combat)
-		: (CurrentState == EGameState::Temple);
+ if (BoundBattleManager.Get() != Manager) return;
+ SubmitBattleAction.Unbind();
+ BoundBattleManager.Reset();
 }
 
-void UCommandDispatcher::TryAutoLogin(const FString& UserId)
+ABattleManager* UCommandDispatcher::ResolveBattleManager()
 {
-	//GetGameStateDelegate가 바인딩되어있지 않거나(아직 GameManager 연결 전) 전투상태가 아니면 로그인 트리거 안함
-	if (!GetGameStateDelegate.IsBound() || GetGameStateDelegate.Execute() != EGameState::Combat)
-	{
-		return;
-	}
-
-	if (LoggedInUsers.Contains(UserId))
-	{
-		return; //이미 로그인된 유저
-	}
-
-	if (LoggedInUsers.Num() >= MaxLoggedInUsers)
-	{
-		return; //최대 인원 초과로 로그인 불가
-	}
-
-	LoggedInUsers.Add(UserId);
-
-	//실제 DB 조회/신규 생성/필드 스폰 로직은 이 델리게이트를 구독하는 쪽(플레이어 매니저 등)에서 처리
-	OnUserLoginRequired.Broadcast(UserId);
-}
-
-void UCommandDispatcher::UpdateLogoutStatus(const FString& UserId, bool bInputCombatCommand)
-{
-	//TODO: 로그인 상태에서 전투 명령 미입력 턴을 누적시키고, 2턴 연속 미입력 시 다음 턴부터 로그아웃 처리
-}
-
-void UCommandDispatcher::ResetLoginForNewBattle()
-{
-	//TODO: 매 전투 시작마다 LoggedInUsers, MissedTurnCounts 초기화
-}
-
-// ===== 전투상태 명령 처리 함수 =====
-
-//!공격 1, !공격 2 공통 진입점. Argument("1"/"2")와 UserId를 그대로 OnAttackCommand에 전달
-void UCommandDispatcher::BroadcastAttack(const FParsedCommand& Command)
-{
-	OnAttackCommand.Broadcast(Command.UserId, Command.Argument);
-}
-
-//!방어 진입점. 인자가 없는 명령이므로 UserId만 OnDefendCommand에 전달
-void UCommandDispatcher::BroadcastDefend(const FParsedCommand& Command)
-{
-	OnDefendCommand.Broadcast(Command.UserId);
-}
-
-//!회피 좌/우/중 공통 진입점. Argument("좌"/"우"/"중")와 UserId를 그대로 OnDodgeCommand에 전달
-void UCommandDispatcher::BroadcastDodge(const FParsedCommand& Command)
-{
-	OnDodgeCommand.Broadcast(Command.UserId, Command.Argument);
-}
-
-void UCommandDispatcher::HandleLogout(const FParsedCommand& Command)
-{
-	LoggedInUsers.Remove(Command.UserId);
-	MissedTurnCounts.Remove(Command.UserId);
-	OnUserLoggedOut.Broadcast(Command.UserId);
-	UE_LOG(LogTemp, Log, TEXT("[로그아웃] 유저: %s"), *Command.UserId);
-}
-
-// ===== 신전상태 명령 처리 함수 =====
-
-//!강화 1~4 공통 진입점. Argument("1"~"4"), UserId, Username을 그대로 OnEnhanceCommand에 전달
-void UCommandDispatcher::BroadcastEnhance(const FParsedCommand& Command)
-{
-	OnEnhanceCommand.Broadcast(Command.UserId, Command.Username, Command.Argument);
-}
-
-//!대화 진입점. AI 쿼리에 필요한 CommentId(uid), Username(username), Argument(message)를 UserId와 함께 OnTalkCommand에 전달
-void UCommandDispatcher::BroadcastTalk(const FParsedCommand& Command)
-{
-	OnTalkCommand.Broadcast(Command.UserId, Command.CommentId, Command.Username, Command.Argument);
-}
-
-void UCommandDispatcher::BroadcastTempleCombat(const FParsedCommand& Command)
-{
-	OnTempleCombatCommand.Broadcast();
+ if (BoundBattleManager.IsValid()) return BoundBattleManager.Get();
+ UWorld* World = GetOuter() ? GetOuter()->GetWorld() : nullptr;
+ ABattleManager* Found = World ? Cast<ABattleManager>(UGameplayStatics::GetActorOfClass(World, ABattleManager::StaticClass())) : nullptr;
+ BindBattleManager(Found);
+ return Found;
 }

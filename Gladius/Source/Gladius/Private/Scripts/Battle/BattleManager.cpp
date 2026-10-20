@@ -1,6 +1,12 @@
-﻿#include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/BattleSpot.h"
+#include "Scripts/Battle/CutSceneApplier.h"
+#include "Scripts/Backend/ChatCommandParser.h"
+#include "Scripts/Backend/CommandDispatcher.h"
+#include "Scripts/Backend/YouTubeChatManager.h"
+#include "Scripts/Backend/GameManager.h"
+#include "Kismet/GameplayStatics.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Components/InputComponent.h"
@@ -63,9 +69,16 @@ void ABattleManager::BeginPlay()
 {
 	Super::BeginPlay();
 
-	ApplyBalanceFiles();
-	LoadRecords();
-	GatherSpots();
+ InitializePlayerRecords();
+ if (!bAutoStartBattle)
+ {
+  StatusText->SetVisibility(false);
+  SetActorTickEnabled(false);
+  return;
+ }
+ if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
+  Chat->GetCommandDispatcher()->BindBattleManager(this);
+ GatherSpots();
 
 	for (const FCharacterDef& Class : Classes)
 	{
@@ -90,14 +103,27 @@ void ABattleManager::BeginPlay()
 
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	//방송이 정상 종료되는 경우의 마지막 저장
+ if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
+  Chat->GetCommandDispatcher()->UnbindBattleManager(this);
+ StopBattle();
+ //방송이 정상 종료되는 경우의 마지막 저장
 	SaveRecords();
 	Super::EndPlay(EndPlayReason);
 }
 
 void ABattleManager::StartBattle()
 {
-	BossDamageTaken = 0;
+ StopBattle();
+ bBattleRunning = true;
+ Phase = EBattlePhase::BattleStart;
+ for (auto& Pair : Players) { if (IsValid(Pair.Value.Unit)) Pair.Value.Unit->Destroy(); }
+ Players.Reset();
+ if (IsValid(BossUnit)) BossUnit->Destroy();
+ if (AGameManager* Game = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(this, AGameManager::StaticClass())))
+  Game->SetGameState(EGameState::Combat);
+ if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
+  Chat->SetCombatAutoPollingEnabled(false);
+ BossDamageTaken = 0;
 	TurnIndex = 0;
 
 	//패턴 진행도는 한 판에 속한 값이다. 안 지우면 다음 판이 중간부터 시작한다
@@ -105,18 +131,28 @@ void ABattleManager::StartBattle()
 	PatternStep = 0;
 	PresetPatternIndex = 0;
 
-	// ponytail: 플레이어 체력·피버는 아직 초기화하지 않는다 (다음 판 흐름이 정해지면 같이)
-	CurrentPatternId.Reset();
-	PatternStep = 0;
+	// A new battle starts with a fresh participant list; persistent Records are retained.
 	SpawnBoss();
 	UpdateVisuals();
-	StartTurn();
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, FMath::Max(0.001f, BattleStartSeconds), false);
 }
 
 void ABattleManager::StopBattle()
 {
-	Phase = EBattlePhase::Resolve;
-	GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
+ if (bBattleRunning) SaveRecords();
+ bBattleRunning = false;
+ Phase = EBattlePhase::BattleEnd;
+ if (IsValid(CutSceneApplier))
+ {
+  CutSceneApplier->OnCutSceneEnded.RemoveDynamic(this, &ABattleManager::HandleCutSceneEnded);
+  CutSceneApplier->CancelCutScene();
+ }
+ if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
+ {
+  Chat->SetCombatAutoPollingEnabled(false);
+  Chat->CancelPendingChatFetch();
+ }
+ GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(EvadeRollHandle);
 
 	//공격 연출 타이머는 반복이라 따로 끄지 않으면 전투가 끝나도 계속 돈다
@@ -128,9 +164,8 @@ void ABattleManager::StopBattle()
 bool ABattleManager::IsAcceptingInput() const
 {
 	//예고 시간의 선택도 유효하다. 이동이 시작되면 이번 턴 행동은 확정된다
-	return Phase == EBattlePhase::Telegraph
-		|| Phase == EBattlePhase::Input
-		|| Phase == EBattlePhase::Collect;
+	return bBattleRunning && (Phase == EBattlePhase::Prepare
+		|| Phase == EBattlePhase::Collect);
 }
 
 // ---------------- 좌표 ----------------
@@ -156,11 +191,11 @@ float ABattleManager::AttackMotionSeconds(float SkillSeconds, int32 FeverStacks,
 	return SkillSeconds + FMath::Max(0, FeverStacks) * FMath::Max(0.f, FeverAttackSeconds);
 }
 
-int32 ABattleManager::FeverStacksFor(float Fever) const
+int32 ABattleManager::FeverStacksFor(int32 Fever) const
 {
-	const int32 Stacks = FMath::FloorToInt(FMath::Max(0.f, Fever));
+	const int32 Stacks = FMath::Max(0, Fever);
 	//상한이 0이면 무제한이라는 뜻이다 (파일의 null)
-	return FeverCap > 0.f ? FMath::Min(Stacks, FMath::FloorToInt(FeverCap)) : Stacks;
+	return FeverCap > 0.f ? FMath::Min(Stacks, FeverCap) : Stacks;
 }
 
 float ABattleManager::BossStrikeDelay(float FlurrySeconds, float RemainingToBattleTime)
@@ -374,18 +409,9 @@ void ABattleManager::DrawArenaGuides() const
 
 bool ABattleManager::ParseCommand(const FString& Text, EBattleAction& OutAction)
 {
-	FString T = Text.TrimStartAndEnd();
-	T.RemoveFromStart(TEXT("!"));
-	T = T.ToLower();
-
-	if (T == TEXT("공격") || T == TEXT("attack") || T == TEXT("a")) { OutAction = EBattleAction::Attack1; return true; }
-	if (T == TEXT("강공격") || T == TEXT("attack2") || T == TEXT("aa")) { OutAction = EBattleAction::Attack2; return true; }
-	if (T == TEXT("왼쪽") || T == TEXT("left") || T == TEXT("l")) { OutAction = EBattleAction::AvoidL; return true; }
-	if (T == TEXT("가운데") || T == TEXT("mid") || T == TEXT("m")) { OutAction = EBattleAction::AvoidM; return true; }
-	if (T == TEXT("오른쪽") || T == TEXT("right") || T == TEXT("r")) { OutAction = EBattleAction::AvoidR; return true; }
-	if (T == TEXT("방어") || T == TEXT("defend") || T == TEXT("d")) { OutAction = EBattleAction::Defense; return true; }
-
-	return false;
+ FParsedCommand Command;
+ return FChatCommandParser::TryParse(TEXT(""), Text, Command)
+  && FChatCommandParser::TryGetBattleAction(Command.CommandType, OutAction);
 }
 
 // ---------------- 저장 ----------------
@@ -397,6 +423,11 @@ FString ABattleManager::SaveFilePath()
 
 void ABattleManager::SaveRecords()
 {
+ if (bRecordLoadFailed) return;
+ for (const auto& Pair : Players)
+ {
+  if (FPlayerRecord* Record = Records.Find(Pair.Key)) Record->CurrentHealth = Pair.Value.HP;
+ }
 	FPlayerRecordFile File;
 	Records.GenerateValueArray(File.Records);
 
@@ -409,10 +440,10 @@ void ABattleManager::SaveRecords()
 
 	//인코딩을 지정하지 않으면 한글 핸들이 섞였을 때 UTF-16으로 저장돼
 	//외부 도구에서 열기 번거로워진다. 읽을 때는 자동 판별되므로 저장만 고정하면 된다
-	if (!FFileHelper::SaveStringToFile(Json, *SaveFilePath(),
+	if (!FFileHelper::SaveStringToFile(Json, *RecordFilePath(),
 		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
-		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록 저장 실패: %s"), *SaveFilePath());
+		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록 저장 실패: %s"), *RecordFilePath());
 		return;
 	}
 
@@ -421,8 +452,9 @@ void ABattleManager::SaveRecords()
 
 void ABattleManager::LoadRecords()
 {
+ bRecordLoadFailed = false;
 	FString Json;
-	if (!FFileHelper::LoadFileToString(Json, *SaveFilePath()))
+	if (!FFileHelper::LoadFileToString(Json, *RecordFilePath()))
 	{
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 저장된 유저 기록 없음 — 새로 시작합니다"));
 		return;
@@ -431,16 +463,22 @@ void ABattleManager::LoadRecords()
 	FPlayerRecordFile File;
 	if (!FJsonObjectConverter::JsonObjectStringToUStruct(Json, &File))
 	{
-		//파일이 깨졌다면 덮어쓰지 않고 남겨둔다. 사람이 열어볼 수 있어야 한다
-		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록을 읽지 못했습니다: %s"), *SaveFilePath());
+		bRecordLoadFailed = true;
+		//파일이 깨졌다면 덮어쓰지 않고 남겨둔다.
+		UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 기록을 읽지 못했습니다: %s"), *RecordFilePath());
 		return;
 	}
 
 	Records.Empty();
-	for (const FPlayerRecord& Record : File.Records)
-	{
-		Records.Add(Record.UserId, Record);
-	}
+ bool bMigrated = false;
+ for (FPlayerRecord Record : File.Records)
+ {
+  // Old records lack currentHealth. Start them at the class's base maximum.
+  if (Record.CurrentHealth < 0) { Record.CurrentHealth = MaxHPFor(Record); bMigrated = true; }
+  Record.CurrentHealth = FMath::Clamp(Record.CurrentHealth, 0, MaxHPFor(Record));
+  Records.Add(Record.UserId, Record);
+ }
+ if (bMigrated) SaveRecords();
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] 유저 기록 %d명 불러옴"), Records.Num());
 }
@@ -635,7 +673,7 @@ bool ABattleManager::SubmitChat(const FString& UserId, const FString& DisplayNam
 bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayName, EBattleAction Action,
 	const FString& CharacterId)
 {
-	if (!IsAcceptingInput())
+	if (UserId.TrimStartAndEnd().IsEmpty() || !IsAcceptingInput())
 	{
 		return false;
 	}
@@ -650,27 +688,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 			return false;
 		}
 
-		//저장된 기록이 있으면 능력치를 이어받고, 없으면 새로 만든다
-		const bool bNewRecord = !Records.Contains(UserId);
-		FPlayerRecord& Record = Records.FindOrAdd(UserId);
-		Record.UserId = UserId;
-		Record.DisplayName = DisplayName;
-
-		//직업군은 한 번 정해지면 기록에 남아 다시 참가해도 유지된다.
-		//직업군이 생기기 전에 저장된 기록은 비어 있으므로 이때 채워 넣는다
-		if (Record.CharacterId.IsEmpty())
-		{
-			Record.CharacterId = CharacterId.IsEmpty() ? DefaultCharacterId : CharacterId;
-		}
-
-		//처음 참가하는 유저는 밸런스 파일의 initialLevels 단계를 들고 시작한다
-		if (bNewRecord)
-		{
-			Record.MaxHPBonus = Balance.InitialHPLevel;
-			Record.DamageBonus = Balance.InitialDamageLevel;
-			Record.CritChanceBonus = Balance.InitialCritChanceLevel;
-			Record.CritDamageBonus = Balance.InitialCritDamageLevel;
-		}
+		FPlayerRecord& Record = GetOrCreateRecord(UserId, DisplayName, CharacterId);
 
 		FBattlePlayer NewPlayer;
 		NewPlayer.DisplayName = DisplayName;
@@ -678,7 +696,10 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.Fever = Balance.InitialFever;
 		NewPlayer.EvadeStreak = Balance.InitialEvadeStreak;
 		ApplyRecordToPlayer(Record, NewPlayer);
-		NewPlayer.HP = NewPlayer.MaxHP;
+  if (Record.CurrentHealth < 0) Record.CurrentHealth = NewPlayer.MaxHP;
+  NewPlayer.HP = FMath::Clamp(Record.CurrentHealth, 0, NewPlayer.MaxHP);
+  Record.CurrentHealth = NewPlayer.HP;
+  if (NewPlayer.HP == 0) NewPlayer.ReviveCountdown = FMath::Max(1, ReviveTurns);
 		//직업군에 지정된 블루프린트로 스폰한다
 		const TSubclassOf<ABattleUnit>* UnitClass = UnitClassByCharacter.Find(Record.CharacterId);
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
@@ -695,6 +716,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 #endif
 
 		Player = &Players.Add(UserId, NewPlayer);
+  SaveRecords();
 
 		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분한다.
 		//본인은 바로 세우고, 자리가 밀린 사람들은 그 즉시 비켜 준다 —
@@ -760,8 +782,11 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 void ABattleManager::StartTurn()
 {
-	++TurnIndex;
-	Phase = EBattlePhase::Telegraph;
+ if (!bBattleRunning) return;
+ ++TurnIndex;
+ Phase = EBattlePhase::Prepare;
+ if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
+  Chat->SetCombatAutoPollingEnabled(true);
 
 	//보스 행동을 먼저 정해 예고한다.
 	//판정 시점에 정하면 회피가 순수 확률 찍기가 되어 선택지의 의미가 없어진다
@@ -815,12 +840,12 @@ void ABattleManager::StartTurn()
 		TurnIndex, Turns, TelegraphSeconds, Players.Num(),
 		*TelegraphedAction.Name, *ZonesLabel(TelegraphedAction));
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, TelegraphSeconds, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, FMath::Max(0.001f, TelegraphSeconds), false);
 }
 
 void ABattleManager::BeginInput()
 {
-	Phase = EBattlePhase::Input;
+	if (!bBattleRunning || Phase != EBattlePhase::Prepare) return;
 
 	//예고 모션이 끝나고 플레이어가 고르는 동안의 대기 자세
 	if (BossUnit)
@@ -830,7 +855,7 @@ void ABattleManager::BeginInput()
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 선택 — %.1f초"), TurnIndex, PlayerSelectCountdown);
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, PlayerSelectCountdown, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, FMath::Max(0.001f, PlayerSelectCountdown), false);
 }
 
 void ABattleManager::BeginCollect()
@@ -840,7 +865,125 @@ void ABattleManager::BeginCollect()
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 수집 — %.1f초"), TurnIndex, CollectSeconds);
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginMove, CollectSeconds, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCutScenes, FMath::Max(0.001f, CollectSeconds), false);
+}
+
+void ABattleManager::BeginCutScenes()
+{
+ if (!bBattleRunning) return;
+ Phase = EBattlePhase::CutScenes;
+ if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
+ {
+  Chat->SetCombatAutoPollingEnabled(false);
+  Chat->CancelPendingChatFetch();
+ }
+ if (!IsValid(CutSceneApplier))
+  CutSceneApplier = Cast<ACutSceneApplier>(UGameplayStatics::GetActorOfClass(this, ACutSceneApplier::StaticClass()));
+ if (!IsValid(CutSceneApplier) && !CutSceneIds.IsEmpty())
+  CutSceneApplier = GetWorld()->SpawnActor<ACutSceneApplier>();
+ ActiveCutSceneIds = CutSceneIds;
+ CutSceneIndex = 0;
+ if (IsValid(CutSceneApplier))
+ {
+  CutSceneApplier->BattleManager = this;
+  CutSceneApplier->OnCutSceneEnded.AddUniqueDynamic(this, &ABattleManager::HandleCutSceneEnded);
+ }
+ PlayNextCutScene();
+}
+
+void ABattleManager::PlayNextCutScene()
+{
+ if (!bBattleRunning || Phase != EBattlePhase::CutScenes) return;
+ while (IsValid(CutSceneApplier) && CutSceneIndex < ActiveCutSceneIds.Num())
+ {
+  const FName Id = ActiveCutSceneIds[CutSceneIndex++];
+  if (CutSceneApplier->ApplyCutScene(ECutSceneCharacterStrategy::DefaultGladius, Id)) return;
+ }
+ BeginMove();
+}
+
+void ABattleManager::HandleCutSceneEnded(FName Type, bool bInterrupted)
+{
+ PlayNextCutScene();
+}
+
+void ABattleManager::InitializePlayerRecords()
+{
+ if (bRecordsInitialized) return;
+ ApplyBalanceFiles();
+ LoadRecords();
+ bRecordsInitialized = true;
+}
+
+FPlayerRecord& ABattleManager::GetOrCreateRecord(const FString& UserId, const FString& DisplayName, const FString& CharacterId)
+{
+ const bool bNew = !Records.Contains(UserId);
+ FPlayerRecord& Record = Records.FindOrAdd(UserId);
+ Record.UserId = UserId;
+ if (!DisplayName.IsEmpty()) Record.DisplayName = DisplayName;
+ if (Record.CharacterId.IsEmpty()) Record.CharacterId = CharacterId.IsEmpty() ? DefaultCharacterId : CharacterId;
+ if (bNew)
+ {
+  Record.MaxHPBonus = Balance.InitialHPLevel;
+  Record.DamageBonus = Balance.InitialDamageLevel;
+  Record.CritChanceBonus = Balance.InitialCritChanceLevel;
+  Record.CritDamageBonus = Balance.InitialCritDamageLevel;
+  Record.CurrentHealth = MaxHPFor(Record);
+ }
+ if (Record.CurrentHealth < 0) Record.CurrentHealth = MaxHPFor(Record);
+ return Record;
+}
+
+bool ABattleManager::ApplyTempleEnhancement(const FString& UserId, const FString& DisplayName, int32 Tier)
+{
+ if (UserId.TrimStartAndEnd().IsEmpty() || Tier < 1 || Tier > 4 || IsBattleRunning()) return false;
+ InitializePlayerRecords();
+ if (bRecordLoadFailed) return false;
+ FPlayerRecord& Record = GetOrCreateRecord(UserId, DisplayName);
+ switch (Tier)
+ {
+ case 1: Record.CurrentHealth = FMath::Clamp(Record.CurrentHealth + BlessingHealAmount, 0, MaxHPFor(Record)); break;
+ case 2: ++Record.DamageBonus; break;
+ case 3: ++Record.CritChanceBonus; break;
+ case 4: ++Record.CritDamageBonus; break;
+ }
+ if (FBattlePlayer* Player = Players.Find(UserId))
+ {
+  ApplyRecordToPlayer(Record, *Player);
+  SetPlayerHealth(UserId, Record.CurrentHealth);
+ }
+ SaveRecords();
+ return true;
+}
+
+bool ABattleManager::SetPlayerHealth(const FString& UserId, int32 CurrentHealth)
+{
+ FBattlePlayer* Player = Players.Find(UserId);
+ FPlayerRecord* Record = Records.Find(UserId);
+ if (!Player || !Record) return false;
+ const int32 Health = FMath::Clamp(CurrentHealth, 0, Player->MaxHP);
+ if (Player->HP == Health && Record->CurrentHealth == Health) return true;
+ Player->HP = Health;
+ Record->CurrentHealth = Health;
+ if (Health == 0)
+ {
+  Player->ReviveCountdown = FMath::Max(1, ReviveTurns);
+  Player->bDiedThisTurn = true;
+ }
+ else if (Player->ReviveCountdown > 0)
+ {
+  Player->ReviveCountdown = 0;
+  Player->bDiedThisTurn = false;
+  if (IsValid(Player->Unit)) Player->Unit->OnRevived();
+ }
+ SaveRecords();
+ return true;
+}
+
+void ABattleManager::LogoutPlayer(const FString& UserId)
+{
+ RemovePlayer(UserId);
+ SaveRecords();
 }
 
 const FCharacterMotionTimes& ABattleManager::MotionTimesFor(int32 ClassIndex) const
@@ -1077,7 +1220,7 @@ void ABattleManager::ResolveTurn()
 				}
 
 				//부활은 처음 참가한 것과 같은 상태로 되돌린다
-				P.HP = P.MaxHP;
+				SetPlayerHealth(Pair.Key, P.MaxHP);
 				P.Fever = Balance.InitialFever;
 				P.EvadeStreak = Balance.InitialEvadeStreak;
 				++Revived;
@@ -1136,7 +1279,7 @@ void ABattleManager::ResolveTurn()
 
 		const int32 Taken = DamageToPlayer(P.PendingAction,
 			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, Classes[P.ClassIndex].DefenseDamageRatio);
-		P.HP = FMath::Max(0, P.HP - Taken);
+		SetPlayerHealth(Pair.Key, P.HP - Taken);
 
 		//피격 모션은 여기서 재생하지 않는다. 보스가 아직 휘두르지도 않았는데
 		//맞는 모션이 먼저 나가면 순서가 뒤집힌다. BossAttackBeat에서 꺼내 쓴다
@@ -1163,7 +1306,7 @@ void ABattleManager::ResolveTurn()
 
 		if (P.HP <= 0)
 		{
-			P.ReviveCountdown = ReviveTurns;
+			P.ReviveCountdown = FMath::Max(1, ReviveTurns);
 			P.bDiedThisTurn = true;
 			++Died;
 		}
@@ -1453,12 +1596,12 @@ void ABattleManager::EndTurn()
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — %d턴 완주 / 누적 피해 %d / 생존 %d/%d / 1위 %s (%d)"),
 			Turns, BossDamageTaken, Alive, Players.Num(), *TopName, TopDamage);
 
-		StopBattle();
+		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StopBattle, FMath::Max(0.001f, FMath::Max(ReturnSeconds, ResolveSeconds)), false);
 		return;
 	}
 
 	//결과를 보여주는 시간을 준 뒤 다음 턴으로
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, ResolveSeconds, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, FMath::Max(0.001f, FMath::Max(ReturnSeconds, ResolveSeconds)), false);
 }
 
 void ABattleManager::RemovePlayer(const FString& UserId)
@@ -1532,7 +1675,7 @@ void ABattleManager::ApplyBalanceFiles()
 
 	//에디터에서 고친 값이 조용히 사라지는 일이 없도록, 덮어쓴 결과를 남긴다
 	UE_LOG(LogTemp, Log, TEXT("[Balance] 에디터 값을 파일 값으로 덮어썼습니다 — ")
-		TEXT("직업군 %d종 / 피버 +%.0f·%.0f×%.0f / %d턴 / 보스 진행 %s"),
+		TEXT("직업군 %d종 / 피버 +%d·%d×%.0f / %d턴 / 보스 진행 %s"),
 		Classes.Num(), FeverIncrement, DefenseFeverGain, FeverDamageCoefficient, Turns, ModeText);
 }
 
@@ -1726,15 +1869,11 @@ void ABattleManager::Tick(float DeltaTime)
 	FString Body;
 	switch (Phase)
 	{
-	case EBattlePhase::Telegraph:
-		Body = FString::Printf(TEXT("%s\nGET READY...   %.1fs"), *Telegraph, Remaining);
-		break;
-
-	case EBattlePhase::Input:
+	case EBattlePhase::Prepare:
 	{
 		const FBattlePlayer* Me = Players.Find(DebugUserId);
 		const FString MyLine = Me
-			? FString::Printf(TEXT("%s: %s   HP %d/%d   Fever %.1f"), *DebugUserId,
+			? FString::Printf(TEXT("%s: %s   HP %d/%d   Fever %d"), *DebugUserId,
 				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction),
 				Me->HP, Me->MaxHP, Me->Fever)
 			: FString::Printf(TEXT("%s: not joined"), *DebugUserId);
@@ -1778,12 +1917,12 @@ void ABattleManager::GrantBonusToAll()
 		++Record.CritChanceBonus;
 		++Record.CritDamageBonus;
 
-		//진행 중인 전투에도 바로 반영한다. 늘어난 최대 체력만큼 현재 체력도 올린다
 		const int32 OldMax = Pair.Value.MaxHP;
 		ApplyRecordToPlayer(Record, Pair.Value);
-		Pair.Value.HP += Pair.Value.MaxHP - OldMax;
+		SetPlayerHealth(Pair.Key, Pair.Value.HP + Pair.Value.MaxHP - OldMax);
 	}
 
+	SaveRecords();
 	UpdateVisuals();
 	UE_LOG(LogTemp, Log, TEXT("[Battle] 참여자 %d명 능력치 +1"), Players.Num());
 }
@@ -1888,7 +2027,7 @@ FString ABattleManager::ZonesLabel(const FBossAction& Action)
 	return Label.IsEmpty() ? TEXT("Nothing") : Label;
 }
 
-int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fever, float FeverCoefficient,
+int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever, float FeverCoefficient,
 	float Resist, bool bCrit, float CritDamage)
 {
 	const float Raw = (BaseDamage + DamageBonus + Fever * FeverCoefficient)
@@ -1898,7 +2037,7 @@ int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, float Fe
 	return FMath::Max(0, FMath::RoundToInt(Raw));
 }
 
-float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
+int32 ABattleManager::DecayFever(int32 Fever, int32 EvadeStreak, int32 StreakN,
 	float Reduction, EEvadeRepeatMode Repeat, EFeverRounding Rounding)
 {
 	const int32 N = FMath::Max(1, StreakN);
@@ -1919,9 +2058,9 @@ float ABattleManager::DecayFever(float Fever, int32 EvadeStreak, int32 StreakN,
 
 	switch (Rounding)
 	{
-	case EFeverRounding::Floor: return FMath::FloorToFloat(Reduced);
-	case EFeverRounding::Round: return FMath::RoundToFloat(Reduced);
-	default:                    return Reduced;
+	case EFeverRounding::Floor: return FMath::FloorToInt(Reduced);
+	case EFeverRounding::Round: return FMath::RoundToInt(Reduced);
+	default:                    return FMath::FloorToInt(Reduced);
 	}
 }
 
@@ -2026,7 +2165,7 @@ void ABattleManager::RunSelfTest()
 	//기준에 닿기 전에는 손대지 않는다
 	check(DecayFever(7.f, 1, 2, 1.f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 7.f);
 	//소수 처리 — 5 × 0.5 = 2.5
-	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::None) == 2.5f);
+	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::None) == 2);
 	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Floor) == 2.f);
 	check(DecayFever(5.f, 2, 2, 0.5f, EEvadeRepeatMode::EveryAfter, EFeverRounding::Round) == 3.f);
 
@@ -2134,10 +2273,10 @@ void ABattleManager::RunSelfTest()
 	}
 
 	EBattleAction A;
-	check(ParseCommand(TEXT("  공격 "), A) && A == EBattleAction::Attack1);
-	check(ParseCommand(TEXT("!왼쪽"), A) && A == EBattleAction::AvoidL);
-	check(ParseCommand(TEXT("RIGHT"), A) && A == EBattleAction::AvoidR);
-	check(ParseCommand(TEXT("방어"), A) && A == EBattleAction::Defense);
+	check(ParseCommand(TEXT("  !공격 1 "), A) && A == EBattleAction::Attack1);
+	check(ParseCommand(TEXT("!회피 좌"), A) && A == EBattleAction::AvoidL);
+	check(ParseCommand(TEXT("!회피 우"), A) && A == EBattleAction::AvoidR);
+	check(ParseCommand(TEXT("!방어"), A) && A == EBattleAction::Defense);
 	check(!ParseCommand(TEXT("안녕하세요"), A));
 	check(!ParseCommand(TEXT(""), A));
 
@@ -2147,6 +2286,7 @@ void ABattleManager::RunSelfTest()
 		R.CharacterId = Classes[0].Id;
 		check(MaxHPFor(R) == Classes[0].BaseHP);
 		R.MaxHPBonus = 3;
+		R.CurrentHealth = 1;
 		check(MaxHPFor(R) == Classes[0].BaseHP + 3 * HPPerBonus);
 
 		//강화 수치가 전투용 스냅샷으로 옮겨지는지

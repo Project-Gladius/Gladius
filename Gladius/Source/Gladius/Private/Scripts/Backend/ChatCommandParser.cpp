@@ -106,3 +106,17 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 
 	return false;
 }
+
+bool FChatCommandParser::TryGetBattleAction(ECommandType Type, EBattleAction& OutAction)
+{
+ switch (Type)
+ {
+ case ECommandType::Attack1: OutAction = EBattleAction::Attack1; return true;
+ case ECommandType::Attack2: OutAction = EBattleAction::Attack2; return true;
+ case ECommandType::Defend: OutAction = EBattleAction::Defense; return true;
+ case ECommandType::DodgeLeft: OutAction = EBattleAction::AvoidL; return true;
+ case ECommandType::DodgeMid: OutAction = EBattleAction::AvoidM; return true;
+ case ECommandType::DodgeRight: OutAction = EBattleAction::AvoidR; return true;
+ default: return false;
+ }
+}

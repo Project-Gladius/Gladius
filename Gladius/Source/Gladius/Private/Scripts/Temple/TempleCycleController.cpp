@@ -1,5 +1,7 @@
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Scripts/Temple/Goddess.h"
+#include "Scripts/Battle/BattleManager.h"
+#include "Engine/World.h"
 #include "Scripts/Temple/TempleAIBatchClient.h"
 #include "Scripts/Temple/TempleCommandQueue.h"
 #include "Scripts/Temple/TempleStatusWidget.h"
@@ -21,7 +23,12 @@ void ATempleCycleController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	ResolveReferences();
+ ResolveReferences();
+ if (IsValid(Goddess))
+ {
+  BoundGoddess = Goddess;
+  Goddess->OnEnhanceExecuted.AddUniqueDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);
+ }
 
 	CommandQueue = NewObject<UTempleCommandQueue>(this);
 	BatchClient = NewObject<UTempleAIBatchClient>(this);
@@ -62,6 +69,7 @@ void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
 	GetWorldTimerManager().ClearTimer(TurnTimerHandle);
 	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
+ if (BoundGoddess.IsValid()) BoundGoddess->OnEnhanceExecuted.RemoveDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);
 	if (BoundDispatcher.IsValid()) BoundDispatcher->OnTempleCombatCommand.RemoveAll(this);
 
 	if (ChatManager)
@@ -103,6 +111,19 @@ void ATempleCycleController::ResolveReferences()
 	{
 		GameManager = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(GetWorld(), AGameManager::StaticClass()));
 	}
+ if (!IsValid(BattleManager))
+  BattleManager = Cast<ABattleManager>(UGameplayStatics::GetActorOfClass(this, ABattleManager::StaticClass()));
+ if (!IsValid(BattleManager))
+ {
+  BattleManager = GetWorld()->SpawnActorDeferred<ABattleManager>(ABattleManager::StaticClass(), FTransform::Identity);
+  if (IsValid(BattleManager))
+  {
+   BattleManager->bAutoStartBattle = false;
+   BattleManager->FinishSpawning(FTransform::Identity);
+  }
+ }
+ if (IsValid(BattleManager)) BattleManager->InitializePlayerRecords();
+
 }
 
 void ATempleCycleController::CreateStatusWidget()
@@ -253,4 +274,11 @@ void ATempleCycleController::RequestCombatTravel()
 	if (Goddess) Goddess->StopCycle();
 	OnCombatRequested.Broadcast();
 	if (bAutoTravelOnCombatRequest && IsValid(GameManager)) GameManager->TravelToCombat();
+}
+
+void ATempleCycleController::HandleEnhanceExecuted(const FString& UserId, const FString& Username, int32 Tier)
+{
+ if (bLeavingTemple) return;
+ if (!IsValid(BattleManager)) ResolveReferences();
+ if (IsValid(BattleManager)) BattleManager->ApplyTempleEnhancement(UserId, Username, Tier);
 }

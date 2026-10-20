@@ -1,6 +1,7 @@
 #include "Scripts/Battle/GladiusSkill1Camera.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
+#include "BattleCameraTestAccess.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/CutSceneApplier.h"
@@ -37,7 +38,7 @@ struct FSkillCameraWorld
         G.BaseHP = 100;
         Manager->Classes = { G };
         Manager->DefaultCharacterId = G.Id;
-        Manager->StartBattle();
+        FBattleCameraTestAccess::Prepare(Manager);
         Manager->SubmitAction(TEXT("A"), TEXT("A"), EBattleAction::Attack1, G.Id);
         Manager->StopBattle();
         Subject = Manager->GetBattlePlayers().FindChecked(TEXT("A")).Unit;
@@ -57,6 +58,7 @@ struct FSkillCameraWorld
     }
     ~FSkillCameraWorld()
     {
+        FBattleCameraTestAccess::Cleanup(World);
         Instance->Shutdown();
         GEngine->DestroyWorldContext(World);
         World->DestroyWorld(false);

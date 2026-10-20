@@ -1,11 +1,11 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
-#include "Scripts/Backend/PlayerDataManager.h"
+#include "Scripts/Battle/BattleManager.h"
 #include "GameFramework/Actor.h" 
 #include "Kismet/GameplayStatics.h"
 #include "HttpModule.h"
@@ -51,10 +51,10 @@ UCommandDispatcher* AYouTubeChatManager::GetCommandDispatcher()
 
 		//전투/신전 상태 조회 및 자동 로그인 처리를 CommandDispatcher에 연결
 		CommandDispatcher->GetGameStateDelegate.BindUObject(this, &AYouTubeChatManager::GetCurrentGameState);
-		CommandDispatcher->OnUserLoginRequired.AddUObject(this, &AYouTubeChatManager::HandleUserLoginRequired);
-		CommandDispatcher->OnUserLoggedOut.AddUObject(this, &AYouTubeChatManager::HandleUserLoggedOut);
 	}
-	return CommandDispatcher;
+ if (ABattleManager* Battle = Cast<ABattleManager>(UGameplayStatics::GetActorOfClass(this, ABattleManager::StaticClass())))
+  CommandDispatcher->BindBattleManager(Battle);
+ return CommandDispatcher;
 }
 
 // Called every frame
@@ -153,13 +153,6 @@ void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString
 
 		UserDatabase.Add(UserId, NewUser);
 		User = UserDatabase.Find(UserId);
-	}
-
-	// Player records use exactly the same identifier as the chat user database.
-	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
-	{
-		FPlayerData Player;
-		Players->GetOrCreatePlayer(User->UserId, Player);
 	}
 
 	if (User->UnbanTime > Now) //블랙리스트 진행중
@@ -421,26 +414,11 @@ void AYouTubeChatManager::SendToUserRemainingTime(const FString& UserId, FTimesp
 EGameState AYouTubeChatManager::GetCurrentGameState() const
 {
 	//GameManagerRef를 찾지 못한 경우(월드에 배치 안 됨 등) 기본값으로 신전상태 취급
-	return GameManagerRef ? GameManagerRef->GetGameState() : EGameState::Temple;
-}
-
-void AYouTubeChatManager::HandleUserLoginRequired(const FString& UserId)
-{
-	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
+	if (ABattleManager* Battle = Cast<ABattleManager>(UGameplayStatics::GetActorOfClass(this, ABattleManager::StaticClass())))
 	{
-		Players->SetLoginState(UserId, true);
-		Players->BeginPlayerCombat(UserId);
+		return Battle->IsBattleRunning() ? EGameState::Combat : EGameState::Temple;
 	}
-	//TODO: 저장된 플레이어 정보를 이용해 필드에 캐릭터를 스폰하는 로직 연결
-	UE_LOG(LogTemp, Log, TEXT("[로그인] 유저 %s 의 전투 참가 로그인 처리 필요"), *UserId);
-}
-
-void AYouTubeChatManager::HandleUserLoggedOut(const FString& UserId)
-{
-	if (UPlayerDataManager* Players = UPlayerDataManager::Get(this))
-	{
-		Players->SetLoginState(UserId, false);
-	}
+	return IsValid(GameManagerRef) ? GameManagerRef->GetGameState() : EGameState::Temple;
 }
 
 //받은 채팅을 프로젝트의 Saved/ChatLogs 폴더 아래 그날 날짜의 txt 파일로 이어 붙여 저장
