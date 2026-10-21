@@ -88,6 +88,11 @@ struct FBattlePlayer
 
 	UPROPERTY() EBattleLane Lane = EBattleLane::Mid;
 
+	//회피로 구역을 옮기기 **직전**의 구역. 구르기가 어느 경계를 넘어야 하는지는
+	//이 둘(출발·도착)로 정해진다. 좌표에서 되짚으면 가장자리에 선 사람을
+	//이웃 구역으로 잘못 짚는다
+	UPROPERTY() EBattleLane LaneBeforeMove = EBattleLane::Mid;
+
 	//이번 턴에 서야 할 자리. 매 턴 구역 인원에 맞춰 다시 배분된다
 	UPROPERTY() FVector TargetLocation = FVector::ZeroVector;
 
@@ -132,8 +137,12 @@ struct FAttackCue
 	int32 Damage = 0;
 
 	//직업군 안에서 피버가 가장 높아 특수 연출 대상으로 뽑힌 공격.
-	//블루프린트는 이게 켜지면 평소 공격 대신 전용 모션을 재생한다
+	//**피버가 0인 사람은 뽑지 않는다** — 아무도 안 쌓았으면 아무도 특별하지 않다
 	bool bFeverHighlight = false;
+
+	//이번 턴에 나갈 피버 평타의 치명타 결과. 개수가 곧 평타 횟수다.
+	//치명타는 평타마다 따로 굴리므로 미리 굴려 담아 둔다 (판정은 ResolveTurn에서 끝난다)
+	TArray<bool> FeverCrits;
 };
 
 //직업군 하나의 공격 모션 길이. 밸런스 수치가 아니라 **애셋에서 재어 넣는 값**이라
@@ -145,8 +154,10 @@ struct FCharacterMotionTimes
 {
 	GENERATED_BODY()
 
-	//평타 한 번의 길이. 피버 한 칸이 평타 하나로 바뀐다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite) float FeverAttack = 0.35f;
+	//피버 평타 섹션들의 길이, 몬타주에 적힌 순서대로.
+	//평타가 N번이면 이 배열을 **돌려 쓴다** (3개면 1,2,3,1,2,3…).
+	//길이가 섹션마다 달라 하나로 못 적는다 — 비어 있으면 평타 연출이 나가지 않는다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) TArray<float> FeverAttacks;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) float Skill1 = 0.8f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) float Skill2 = 1.f;
@@ -363,9 +374,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	int32 DefenseFeverGain = 5;
 
-	//피해 계산에서 피버에 곱하는 계수 (파일의 feverDamageCoefficient)
+	//**더 이상 쓰이지 않는다.** 피버는 피해에 곱해지는 값이 아니라 평타 횟수로 바뀌었다.
+	//`abilities.json`에 `feverDamageCoefficient`가 남아 있어 읽고 검증만 계속한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
 	float FeverDamageCoefficient = 1.f;
+
+	//피버 평타 한 대의 고정 피해. 스킬 피해와 달리 강화분이 붙지 않는다.
+	// ponytail: 밸런스 파일에 아직 대응 항목이 없어 에디터 값이다.
+	// abilities.json에 필드가 생기면 그쪽으로 옮긴다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	int32 FeverAttackDamage = 5;
 
 	//피버 상한. 0이면 무제한 (파일의 feverCap: null)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
@@ -565,7 +583,9 @@ public:
 
 	//시뮬레이터와 같은 식: (기본 + 강화 + 피버×계수) * 내성 * (1 + 치명타 시 치명타 피해).
 	//강화 피해는 시뮬레이터가 기본 피해에 더해 넣는 것과 같은 자리다
-	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever, float FeverCoefficient,
+	//**피버는 들어가지 않는다.** 피버는 피해에 더해지는 값이 아니라 평타 횟수다 —
+	//평타는 이 함수에 BaseDamage = FeverAttackDamage로 다시 들어온다
+	static int32 DamageToBoss(int32 BaseDamage, int32 DamageBonus,
 		float Resist, bool bCrit, float CritDamage);
 
 	//회피한 턴의 피버. EvadeStreak은 이번 회피까지 센 값을 넘긴다.
@@ -629,6 +649,14 @@ private:
 	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
 	void FlushAttackCues();
 
+	//회피자가 구르기 시작점까지 달려간다. 도착하는 순간이 구르기 시작이다
+	void BeginEvadeApproach();
+
+	//From에서 To로 갈 때 **마지막으로 넘는** 경계를 돌려준다.
+	//좌→우면 중/우 경계다 — 목적 구역 바로 앞의 선을 넘어야 '들어갔다'가 된다.
+	//레벨에 그 표식이 없으면 false (회피는 목표 자리에 내려놓는 식으로 돈다)
+	bool TryGetLaneBoundary(EBattleLane From, EBattleLane To, FVector& OutBoundary) const;
+
 	//회피자 전원이 구른다. 보스가 휘두르기 RollLead초 전이다
 	void BeginEvadeRolls();
 
@@ -639,7 +667,10 @@ private:
 	static EMoveGait ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed);
 
 	//공격 모션에 필요한 시간. 스킬 한 번 + 평타 FeverStacks회
-	static float AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds);
+	static float AttackMotionSeconds(float SkillSeconds, float FlurrySeconds);
+
+	//평타 Hits번의 총 길이. 섹션 길이 배열을 앞에서부터 돌려 쓰며 더한다
+	static float FeverFlurrySeconds(const TArray<float>& SectionSeconds, int32 Hits);
 
 	//정수 피버에 상한을 적용해 평타 횟수로 쓴다
 	int32 FeverStacksFor(int32 Fever) const;
@@ -711,6 +742,11 @@ private:
 	//FVector라 GC 대상이 아니어서 UPROPERTY가 필요 없다
 	TArray<FVector> Spots[3];
 
+	//구역 경계 표식의 좌표. [0] = 좌/중, [1] = 중/우.
+	//`ABattleSpot`에 `bIsBoundary`를 켜서 레벨에 놓은 것들이다
+	FVector BoundaryPoints[2] = { FVector::ZeroVector, FVector::ZeroVector };
+	bool bHasBoundary[2] = { false, false };
+
 	//지금 전투 중인 참여자
 	UPROPERTY() TMap<FString, FBattlePlayer> Players;
 
@@ -727,6 +763,12 @@ private:
 
 	//구르기는 보스 공격보다 먼저 시작하므로 단계 타이머와 겹친다
 	FTimerHandle EvadeRollHandle;
+
+	//접근 달리기는 구르기보다 더 먼저 시작한다
+	FTimerHandle EvadeApproachHandle;
+
+	//그 달리기에 쓸 시간. BeginEvadeApproach가 꺼내 쓴다
+	float EvadeApproachSeconds = 0.f;
 
 	//이번 턴에 재생할 공격 연출. 피해 계산은 ResolveTurn에서 이미 끝났고 보여주기만 남았다.
 	//UObject를 들지 않으므로 UPROPERTY가 필요 없다

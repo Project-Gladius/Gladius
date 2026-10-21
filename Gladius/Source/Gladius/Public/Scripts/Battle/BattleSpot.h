@@ -19,9 +19,16 @@ class GLADIUS_API ABattleSpot : public AActor
 public:
 	ABattleSpot();
 
-	//이 자리가 속한 구역
+	//이 자리가 속한 구역. 경계 표식이면 '경계 바깥쪽 구역'을 뜻한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
 	EBattleLane Lane = EBattleLane::Mid;
+
+	//**자리가 아니라 구역 경계 표식이다.** 회피 구르기가 이 선에서 시작해 넘어간다.
+	//`Lane`을 Left로 두면 좌/중 경계, Right로 두면 중/우 경계다 (Mid는 어느 쪽인지
+	//알 수 없어 무시된다). 레벨에 둘만 놓으면 되고, 자리 수에는 세지 않는다.
+	//하나도 없으면 회피는 예전처럼 목표 자리에 내려놓는 식으로 돈다
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle")
+	bool bIsBoundary = false;
 
 private:
 	//액터 위치 = 플레이어의 발밑. 표식을 허리 높이만큼 띄우기 위한 빈 루트

@@ -156,6 +156,7 @@ void ABattleManager::StopBattle()
  }
  GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
 	GetWorldTimerManager().ClearTimer(EvadeRollHandle);
+	GetWorldTimerManager().ClearTimer(EvadeApproachHandle);
 
 	//공격 연출 타이머는 반복이라 따로 끄지 않으면 전투가 끝나도 계속 돈다
 	GetWorldTimerManager().ClearTimer(AttackCueHandle);
@@ -186,11 +187,27 @@ EMoveGait ABattleManager::ChooseGait(float Distance, float Seconds, float RunSpe
 	return EMoveGait::Roll;
 }
 
-float ABattleManager::AttackMotionSeconds(float SkillSeconds, int32 FeverStacks, float FeverAttackSeconds)
+float ABattleManager::AttackMotionSeconds(float SkillSeconds, float FlurrySeconds)
 {
-	//스킬 한 번 + 평타 FeverStacks회. 전원이 같은 순간에 끝나야 하므로
+	//스킬 한 번 + 평타 전부. 전원이 같은 순간에 끝나야 하므로
 	//이 길이를 BattleTime에서 빼면 곧 출발 시각이 된다
-	return SkillSeconds + FMath::Max(0, FeverStacks) * FMath::Max(0.f, FeverAttackSeconds);
+	return FMath::Max(0.f, SkillSeconds) + FMath::Max(0.f, FlurrySeconds);
+}
+
+float ABattleManager::FeverFlurrySeconds(const TArray<float>& SectionSeconds, int32 Hits)
+{
+	if (SectionSeconds.Num() == 0)
+	{
+		return 0.f;
+	}
+
+	//섹션이 평타 수보다 적으면 앞에서부터 다시 쓴다 (3개면 1,2,3,1,2,3…)
+	float Total = 0.f;
+	for (int32 Hit = 0; Hit < FMath::Max(0, Hits); ++Hit)
+	{
+		Total += FMath::Max(0.f, SectionSeconds[Hit % SectionSeconds.Num()]);
+	}
+	return Total;
 }
 
 int32 ABattleManager::FeverStacksFor(int32 Fever) const
@@ -242,9 +259,27 @@ void ABattleManager::GatherSpots()
 		Lane.Reset();
 	}
 
+	bHasBoundary[0] = bHasBoundary[1] = false;
+
 	//레벨에 놓인 것을 전부 자동으로 찾는다. 배열에 등록할 필요가 없다
 	for (TActorIterator<ABattleSpot> It(GetWorld()); It; ++It)
 	{
+		if (It->bIsBoundary)
+		{
+			//경계 표식은 자리가 아니다. Mid는 좌/중인지 중/우인지 알 수 없어 거른다
+			if (It->Lane == EBattleLane::Mid)
+			{
+				UE_LOG(LogTemp, Warning,
+					TEXT("[Battle] 경계 표식의 Lane이 Mid입니다 — 좌/중이면 Left, 중/우면 Right로 두세요"));
+				continue;
+			}
+
+			const int32 Index = It->Lane == EBattleLane::Left ? 0 : 1;
+			BoundaryPoints[Index] = It->GetActorLocation();
+			bHasBoundary[Index] = true;
+			continue;
+		}
+
 		Spots[(int32)It->Lane].Add(It->GetActorLocation());
 	}
 
@@ -265,8 +300,17 @@ void ABattleManager::GatherSpots()
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개 (좌 %d / 중 %d / 우 %d)"),
-		Total, Spots[0].Num(), Spots[1].Num(), Spots[2].Num());
+	UE_LOG(LogTemp, Log, TEXT("[Battle] BattleSpot %d개 (좌 %d / 중 %d / 우 %d) / 경계 표식 좌중 %s 중우 %s"),
+		Total, Spots[0].Num(), Spots[1].Num(), Spots[2].Num(),
+		bHasBoundary[0] ? TEXT("있음") : TEXT("없음"),
+		bHasBoundary[1] ? TEXT("있음") : TEXT("없음"));
+
+	if (!bHasBoundary[0] || !bHasBoundary[1])
+	{
+		//없어도 돌아가지만, 회피가 구역을 넘는 것처럼 보이지 않는다
+		UE_LOG(LogTemp, Warning,
+			TEXT("[Battle] 구역 경계 표식이 모자랍니다 — 회피 구르기가 경계를 넘지 않고 자리에 내려앉습니다"));
+	}
 
 	for (int32 i = 0; i < 3; ++i)
 	{
@@ -836,7 +880,7 @@ void ABattleManager::StartTurn()
 	//예고 자세. 플레이어가 자세만 보고도 피격 범위를 짐작할 수 있어야 한다
 	if (BossUnit)
 	{
-		BossUnit->OnBossTelegraph(TelegraphedAction.TelegraphMotionId, TelegraphedAction.TelegraphText);
+		BossUnit->OnBossTelegraph(TelegraphedAction.Id, TelegraphedAction.TelegraphText);
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / '%s' → %s"),
@@ -1119,7 +1163,8 @@ void ABattleManager::BeginMove()
 		const FCharacterMotionTimes& Motion = MotionTimesFor(P.ClassIndex);
 		const float SkillSeconds = (P.PendingAction == EBattleAction::Attack1)
 			? Motion.Skill1 : Motion.Skill2;
-		const float MotionSeconds = AttackMotionSeconds(SkillSeconds, FeverStacksFor(P.Fever), Motion.FeverAttack);
+		const float MotionSeconds = AttackMotionSeconds(SkillSeconds,
+			FeverFlurrySeconds(Motion.FeverAttacks, FeverStacksFor(P.Fever)));
 		const float MoveSecondsForMe = FMath::Max(MinMoveSeconds, BattleTime - MotionSeconds);
 
 		//근접만 보스에게 붙는다. 원거리는 제자리에서 쏘므로 자기 자리로만 간다
@@ -1228,6 +1273,8 @@ void ABattleManager::ResolveTurn()
 		FBattlePlayer& P = Pair.Value;
 		if (P.ReviveCountdown == 0)
 		{
+			//어느 경계를 넘어야 하는지는 '어디서 어디로'가 정한다. 지금 적어 둔다
+			P.LaneBeforeMove = P.Lane;
 			P.Lane = ApplyMove(P.PendingAction, P.Lane);
 		}
 	}
@@ -1317,12 +1364,31 @@ void ABattleManager::ResolveTurn()
 
 			//치명타는 플레이어마다 따로 굴린다. 공격의 기본 치명타 + 신전 강화분 (상한 적용)
 			const float Chance = FMath::Min(Attack.CritChance + P.CritChanceBonus, CritChanceCap);
+			const float CritDamage = Attack.CritDamage + P.CritDamageBonus;
+
+			//**스킬 피해에 피버는 들어가지 않는다.** 피버는 뒤이어 나가는 평타 횟수다
 			const bool bCrit = FMath::FRand() < Chance;
-			const int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, P.Fever, FeverDamageCoefficient,
-				Resist, bCrit, Attack.CritDamage + P.CritDamageBonus);
+			int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, Resist, bCrit, CritDamage);
+
+			Crits += bCrit ? 1 : 0;
+
+			//피버 한 칸이 평타 한 대다. 한 대는 고정 피해에 구역 내성이 걸리고,
+			//치명타는 **평타마다 따로** 굴린다 (스킬의 치명타 확률을 그대로 쓴다)
+			TArray<bool> FeverCrits;
+			const int32 FeverHits = FeverStacksFor(P.Fever);
+			FeverCrits.Reserve(FeverHits);
+
+			for (int32 Hit = 0; Hit < FeverHits; ++Hit)
+			{
+				const bool bFeverCrit = FMath::FRand() < Chance;
+				FeverCrits.Add(bFeverCrit);
+
+				//강화 공격력은 스킬에만 붙는다 — 평타는 고정값이다
+				Dealt += DamageToBoss(FeverAttackDamage, 0, Resist, bFeverCrit, CritDamage);
+				Crits += bFeverCrit ? 1 : 0;
+			}
 
 			TotalDealt += Dealt;
-			Crits += bCrit ? 1 : 0;
 
 			//모션은 지금 재생하지 않는다. 전원이 한 프레임에 때리면 누가 쳤는지 보이지 않아,
 			//아래에서 랜덤 순서로 조금씩 끊어 재생한다. 피해는 이미 여기서 확정됐다.
@@ -1334,6 +1400,7 @@ void ABattleManager::ResolveTurn()
 			Cue.Fever = P.Fever;
 			Cue.ClassIndex = P.ClassIndex;
 			Cue.Damage = Dealt;
+			Cue.FeverCrits = MoveTemp(FeverCrits);
 			AttackCues.Add(MoveTemp(Cue));
 
 			//Records는 방송 전체 누적이라 초기화되지 않는다. 판 단위 순위는 이쪽이다
@@ -1422,7 +1489,24 @@ void ABattleManager::ResolveTurn()
 
 	//한 묶음에 AttackCount명씩, AttackTerm 간격으로 나간다
 	const int32 Groups = FMath::DivideAndRoundUp(AttackCues.Num(), FMath::Max(1, AttackCount));
-	const float FlurrySeconds = Groups * FMath::Max(0.f, AttackTerm);
+	float FlurrySeconds = Groups * FMath::Max(0.f, AttackTerm);
+
+	//피버 평타까지 끝나야 보스가 친다. 묶음 간격만 보면 피버가 높은 사람의 연타가
+	//보스 공격 뒤까지 이어져, 맞고 쓰러지면서 때리는 그림이 나온다.
+	//공격 순서를 어떻게 끊든 가장 늦게 끝나는 사람을 기준으로 잡는다
+	for (int32 Index = 0; Index < AttackCues.Num(); ++Index)
+	{
+		const FAttackCue& Cue = AttackCues[Index];
+		const FCharacterMotionTimes& Motion = MotionTimesFor(Cue.ClassIndex);
+		const float SkillSeconds = Cue.AttackIndex == 1 ? Motion.Skill1 : Motion.Skill2;
+
+		//이 사람의 연출이 시작되는 시각 + 스킬 + 평타 전부
+		const float StartsAt = (Index / FMath::Max(1, AttackCount)) * FMath::Max(0.f, AttackTerm);
+		const float EndsAt = StartsAt + SkillSeconds
+			+ FeverFlurrySeconds(Motion.FeverAttacks, Cue.FeverCrits.Num());
+
+		FlurrySeconds = FMath::Max(FlurrySeconds, EndsAt);
+	}
 
 	if (Groups > 0)
 	{
@@ -1445,38 +1529,26 @@ void ABattleManager::ResolveTurn()
 	//피격 모션이 구르기를 곧바로 덮어, 구른 것은 안 보이고 미끄러지는 것만 보인다
 	const float RollAt = FMath::Max(0.f, BossDelay - RollLead);
 
-	//회피자는 **여기서야** 움직이기 시작한다. 구르기가 시작될 때까지의 시간을 꽉 채워
-	//구르기 한 번 거리만 남기고 달려가므로, 두 칸을 건너는 사람은 보스가 치는 순간
-	//가운데쯤에서 구르는 중이다. BeginMove에서 미리 보내면 회피하기도 전에 가 있게 된다
+	//회피자는 **여기서 바로 움직이지 않는다.** 구르기 직전에 달려가 구르기 시작점에
+	//도착해야 하므로, 달리기에 쓸 시간만큼 앞에서 출발한다.
+	//**BossDelay를 그대로 쓰면 안 된다** — 피버 연타가 길어지면 BossDelay가 20초까지
+	//늘어나는데, 그만큼을 이동에 주면 걸어가는 것처럼 기어간다
+	EvadeApproachSeconds = FMath::Min(MoveSeconds, RollAt);
+	const float ApproachAt = RollAt - EvadeApproachSeconds;
+
+	if (ApproachAt > KINDA_SMALL_NUMBER)
+	{
+		GetWorldTimerManager().SetTimer(EvadeApproachHandle, this, &ABattleManager::BeginEvadeApproach,
+			ApproachAt, false);
+	}
+	else
+	{
+		//기다릴 틈이 없으면 지금 출발한다
+		BeginEvadeApproach();
+	}
+
 	if (RollAt > KINDA_SMALL_NUMBER)
 	{
-		for (TPair<FString, FBattlePlayer>& Pair : Players)
-		{
-			FBattlePlayer& P = Pair.Value;
-			if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
-			{
-				continue;
-			}
-
-			const FVector From = P.Unit->GetActorLocation();
-			const float Total = FVector::Dist(From, P.TargetLocation);
-
-			//달려가 멈출 지점. '목표에서 구르기 거리만큼 앞'으로만 잡으면 거리가 멀 때
-			//그 지점이 이미 목적 구역 안이라, 다 와서 구르는 꼴이 된다.
-			//구역 경계가 보스 기준 부채꼴이라 좌표로 들고 있지 않으므로 **여정의 절반**을
-			//상한으로 쓴다 — 한 칸이면 경계 즈음, 두 칸이면 가운데 구역에서 구르기 시작이다
-			const float Lead = FMath::Min(Total * 0.5f, Total - RollDistance);
-
-			//구르기 한 번이면 닿는 거리다. 제자리에서 기다렸다가 구른다
-			if (Lead <= KINDA_SMALL_NUMBER)
-			{
-				continue;
-			}
-
-			const FVector Waypoint = FMath::Lerp(From, P.TargetLocation, Lead / Total);
-			P.Unit->MoveTo(Waypoint, RollAt, ChooseGait(Lead, RollAt, RunSpeed, RollSpeed));
-		}
-
 		GetWorldTimerManager().SetTimer(EvadeRollHandle, this, &ABattleManager::BeginEvadeRolls,
 			RollAt, false);
 	}
@@ -1499,6 +1571,14 @@ void ABattleManager::MarkFeverHighlights(TArray<FAttackCue>& Cues)
 	for (int32 i = 0; i < Cues.Num(); ++i)
 	{
 		const FAttackCue& Cue = Cues[i];
+
+		//피버를 쌓지 않은 사람은 후보가 아니다. 하한이 없으면 전원이 0일 때도
+		//첫 공격자가 뽑혀 평범한 공격에 특수 모션이 나간다
+		if (Cue.Fever <= 0.f)
+		{
+			continue;
+		}
+
 		const int32* Found = BestByClass.Find(Cue.ClassIndex);
 		if (!Found)
 		{
@@ -1536,6 +1616,15 @@ void ABattleManager::FlushAttackCues()
 			if (P->Unit)
 			{
 				P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
+
+				//평타는 스킬 모션이 끝난 뒤부터 이어진다. 그 길이를 AttackMotionSeconds가
+				//이미 BattleTime에서 예약해 뒀으므로, 마지막 대가 보스 공격과 맞물린다
+				if (Cue.FeverCrits.Num() > 0)
+				{
+					const FCharacterMotionTimes& Motion = MotionTimesFor(Cue.ClassIndex);
+					const float SkillSeconds = Cue.AttackIndex == 1 ? Motion.Skill1 : Motion.Skill2;
+					P->Unit->PlayFeverFlurry(Cue.FeverCrits, SkillSeconds, Motion.FeverAttacks);
+				}
 			}
 		}
 	}
@@ -1544,6 +1633,89 @@ void ABattleManager::FlushAttackCues()
 	{
 		GetWorldTimerManager().ClearTimer(AttackCueHandle);
 		AttackCues.Reset();
+	}
+}
+
+bool ABattleManager::TryGetLaneBoundary(EBattleLane From, EBattleLane To, FVector& OutBoundary) const
+{
+	if (From == To)
+	{
+		return false;
+	}
+
+	//목적 구역이 가장자리면 그 구역의 경계, 가운데면 들어온 쪽의 경계다.
+	//좌→우는 중/우 경계를 마지막으로 넘는다
+	const int32 Index =
+		To == EBattleLane::Left  ? 0 :
+		To == EBattleLane::Right ? 1 :
+		(From == EBattleLane::Left ? 0 : 1);
+
+	if (!bHasBoundary[Index])
+	{
+		return false;
+	}
+
+	OutBoundary = BoundaryPoints[Index];
+	return true;
+}
+
+void ABattleManager::BeginEvadeApproach()
+{
+	//구르기 시작점까지 달려간다. 도착하는 순간이 곧 BeginEvadeRolls다.
+	//회피 한 번은 세 토막으로 나뉜다 — 경계 앞까지 달리기 / 구르며 경계 넘기 /
+	//남은 거리를 걸어 자리로 (마지막은 EndTurn의 원위치 이동이 맡는다)
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		FBattlePlayer& P = Pair.Value;
+		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
+		{
+			continue;
+		}
+
+		const FVector From = P.Unit->GetActorLocation();
+		const FVector ToTarget = P.TargetLocation - From;
+		const float Total = ToTarget.Size();
+		if (Total <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector Dir = ToTarget / Total;
+
+		//넘어야 할 경계가 있으면 그 앞까지만 간다. 없으면(제자리 회피이거나
+		//레벨에 표식이 없으면) 예전처럼 구르기 한 번 거리를 남기고 간다.
+		//
+		//**경계는 점이 아니라 선이다.** 구역이 보스 중심 부채꼴이므로 경계선은
+		//보스에서 표식을 지나 뻗어나가는 선이고, 표식은 그 선 위 아무 곳에나 두면 된다.
+		//점으로만 보고 경로에 투영하면, 보스에서 먼 데서 건너는 사람의 경계가 어긋난다
+		FVector Boundary = FVector::ZeroVector;
+		float Lead = FMath::Max(0.f, Total - RollDistance);
+
+		if (TryGetLaneBoundary(P.LaneBeforeMove, P.Lane, Boundary))
+		{
+			const FVector Boss = BossLocation();
+			const FVector Along = (Boundary - Boss).GetSafeNormal2D();
+
+			//경계선의 법선. 경로와 이 선의 교점까지가 달려갈 거리다
+			const FVector Normal(-Along.Y, Along.X, 0.f);
+			const float Denom = FVector::DotProduct(Dir, Normal);
+
+			//경로가 경계선과 나란하면 교점이 없다. 그때는 기본값을 쓴다
+			if (!Along.IsNearlyZero() && FMath::Abs(Denom) > SMALL_NUMBER)
+			{
+				Lead = FMath::Clamp(FVector::DotProduct(Boss - From, Normal) / Denom, 0.f, Total);
+			}
+		}
+
+		//경계가 코앞이면 달려갈 것 없이 그 자리에서 구른다
+		if (Lead <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector Waypoint = From + Dir * Lead;
+		P.Unit->MoveTo(Waypoint, EvadeApproachSeconds,
+			ChooseGait(Lead, EvadeApproachSeconds, RunSpeed, RollSpeed));
 	}
 }
 
@@ -1563,8 +1735,8 @@ void ABattleManager::BeginEvadeRolls()
 		//구르기는 '남은 거리만큼'이 아니라 **정해진 거리**를 덮는다. 모션에 이동이
 		//실려 있어서 늘이고 줄일 수 없기 때문이다. 자리까지 모자라는 만큼은
 		//구른 뒤에 걷거나 뛰어서 마저 간다 (EndTurn의 원위치 이동이 그 역할을 한다)
-		//ponytail: 두 칸을 건너는 회피는 RollDistance로 못 덮어 늦게 들어간다.
-		//거슬리면 RollDistance를 올리거나 구르기를 두 번 잇는다
+		//출발점이 '경계에서 구르기 절반 앞'이므로, 여기서 RollDistance를 덮으면
+		//경계를 확실히 넘는다. 자리까지 모자라는 만큼만 걸어서 마저 간다
 		const FVector From = P.Unit->GetActorLocation();
 		const float Remaining = FVector::Dist(From, P.TargetLocation);
 		const float Covered = FMath::Min(RollDistance, Remaining);
@@ -1584,7 +1756,7 @@ void ABattleManager::BossAttackBeat()
 	//예고한 것과 같은 행동이므로 MotionId도 그때 보여준 것과 짝이 맞는다
 	if (BossUnit)
 	{
-		BossUnit->OnBossAttack(TelegraphedAction.AttackMotionId, TelegraphedAction.HitCount);
+		BossUnit->OnBossAttack(TelegraphedAction.Id, TelegraphedAction.HitCount);
 	}
 
 	//보스가 휘두르는 바로 이 순간에 맞는 쪽 반응이 나간다.
@@ -1774,6 +1946,13 @@ const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft, const FString
 			continue;
 		}
 
+		//**고르고 난 뒤에도 남은 턴을 딱 맞출 수 있어야 한다.** 패턴이 2·3턴뿐인데
+		//10턴에서 3+3+3을 고르면 1턴이 남아 아무것도 못 넣는 막다른 길이 된다
+		if (!Balance.CanFillExactly(TurnsLeft - Pattern->Steps.Num()))
+		{
+			continue;
+		}
+
 		Candidates.Add(Pattern);
 		Weights.Add(Entry.Weight);
 		Total += Entry.Weight;
@@ -1795,6 +1974,43 @@ const FBossPattern* ABattleManager::ChoosePattern(int32 TurnsLeft, const FString
 		}
 	}
 	return Candidates.Last();
+}
+
+namespace
+{
+	//target.mode가 randomOne인 상태는 후보 구역 중 **한 곳만** 친다.
+	//예고하기 전에 여기서 뽑아 두어야 예고와 판정이 같은 구역을 가리킨다 —
+	//판정 시점에 뽑으면 회피가 확률 찍기가 된다
+	void ResolveRandomTarget(FBossAction& Action)
+	{
+		if (Action.TargetMode != EBossTargetMode::RandomOne)
+		{
+			return;
+		}
+
+		TArray<int32, TInlineAllocator<3>> Candidates;
+		for (int32 Zone = 0; Zone < 3; ++Zone)
+		{
+			if (Action.DamageByZone[Zone] > 0)
+			{
+				Candidates.Add(Zone);
+			}
+		}
+
+		if (Candidates.Num() == 0)
+		{
+			return;
+		}
+
+		const int32 Picked = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
+		for (int32 Zone = 0; Zone < 3; ++Zone)
+		{
+			if (Zone != Picked)
+			{
+				Action.DamageByZone[Zone] = 0;
+			}
+		}
+	}
 }
 
 FBossAction ABattleManager::NextBossAction()
@@ -1821,7 +2037,9 @@ FBossAction ABattleManager::NextBossAction()
 		}
 
 		const FBossAction* Direct = Balance.FindAction(Balance.PresetDirectActions[Index]);
-		return Direct ? *Direct : FBossAction();
+		FBossAction DirectAction = Direct ? *Direct : FBossAction();
+		ResolveRandomTarget(DirectAction);
+		return DirectAction;
 	}
 
 	const FBossPattern* Pattern = Balance.FindPattern(CurrentPatternId);
@@ -1866,7 +2084,9 @@ FBossAction ABattleManager::NextBossAction()
 	const FBossAction* Action = Balance.FindAction(Pattern->Steps[PatternStep]);
 	++PatternStep;
 
-	return Action ? *Action : FBossAction();
+	FBossAction Chosen = Action ? *Action : FBossAction();
+	ResolveRandomTarget(Chosen);
+	return Chosen;
 }
 
 // ---------------- 표시 ----------------
@@ -2098,11 +2318,12 @@ FString ABattleManager::ZonesLabel(const FBossAction& Action)
 	return Label.IsEmpty() ? TEXT("Nothing") : Label;
 }
 
-int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus, int32 Fever, float FeverCoefficient,
+int32 ABattleManager::DamageToBoss(int32 BaseDamage, int32 DamageBonus,
 	float Resist, bool bCrit, float CritDamage)
 {
-	const float Raw = (BaseDamage + DamageBonus + Fever * FeverCoefficient)
-		* Resist * (1.f + (bCrit ? CritDamage : 0.f));
+	//피버는 여기 들어오지 않는다. 피버 한 칸은 평타 한 대이고,
+	//평타는 BaseDamage = FeverAttackDamage / DamageBonus = 0 으로 다시 들어온다
+	const float Raw = (BaseDamage + DamageBonus) * Resist * (1.f + (bCrit ? CritDamage : 0.f));
 
 	//파일의 attackDamageRounding: roundHalfUp
 	return FMath::Max(0, FMath::RoundToInt(Raw));
@@ -2196,15 +2417,31 @@ void ABattleManager::RunSelfTest()
 		check(ZonesLabel(FBossAction()) == TEXT("Nothing"));
 	}
 
-	//(기본 + 강화 + 피버×계수) * 내성 * (1 + 치명타 피해)
-	check(DamageToBoss(1, 0, 0, 1.f, 1.0f, false, 0.4f) == 1);
-	check(DamageToBoss(1, 2, 3, 1.f, 1.0f, false, 0.4f) == 6);
-	check(DamageToBoss(2, 0, 0, 1.f, 0.5f, false, 0.4f) == 1);
-	check(DamageToBoss(2, 0, 0, 1.f, 1.5f, false, 0.4f) == 3);
-	check(DamageToBoss(10, 0, 0, 1.f, 1.0f, true, 0.4f) == 14);
-	//피버 계수가 0이면 피버가 피해에 영향을 주지 않는다
-	check(DamageToBoss(10, 0, 5, 0.f, 1.0f, false, 0.f) == 10);
-	check(DamageToBoss(10, 0, 5, 2.f, 1.0f, false, 0.f) == 20);
+	//(기본 + 강화) * 내성 * (1 + 치명타 피해). **피버는 들어가지 않는다**
+	check(DamageToBoss(1, 0, 1.0f, false, 0.4f) == 1);
+	check(DamageToBoss(1, 2, 1.0f, false, 0.4f) == 3);
+	check(DamageToBoss(2, 0, 0.5f, false, 0.4f) == 1);
+	check(DamageToBoss(2, 0, 1.5f, false, 0.4f) == 3);
+	check(DamageToBoss(10, 0, 1.0f, true, 0.4f) == 14);
+
+	//피버 평타 — 고정 5에 구역 내성이 걸리고, 강화 공격력은 붙지 않는다
+	check(DamageToBoss(5, 0, 1.0f, false, 0.f) == 5);
+	check(DamageToBoss(5, 0, 1.5f, false, 0.f) == 8);   // 7.5 → 반올림
+	check(DamageToBoss(5, 0, 0.5f, false, 0.f) == 3);   // 2.5 → 반올림
+	check(DamageToBoss(5, 0, 1.0f, true, 0.4f) == 7);   // 5 * 1.4
+	//피버 상한 — 파일의 feverCap이 스택 수를 그대로 자른다
+	{
+		const float SavedCap = FeverCap;
+		FeverCap = 9.f;
+		check(FeverStacksFor(0.f) == 0);
+		check(FeverStacksFor(5.f) == 5);
+		check(FeverStacksFor(9.f) == 9);
+		check(FeverStacksFor(30.f) == 9);
+		//0이면 무제한이라는 뜻이다
+		FeverCap = 0.f;
+		check(FeverStacksFor(30.f) == 30);
+		FeverCap = SavedCap;
+	}
 
 	// ---- 연속 회피 피버 감소 (기획서 10절 검증 기준) ----
 
@@ -2405,10 +2642,16 @@ void ABattleManager::RunSelfTest()
 		MarkFeverHighlights(Same);
 		check(Same[1].bFeverHighlight && !Same[0].bFeverHighlight);
 
-		//한 명뿐이어도 뽑힌다. 아무도 없으면 아무 일도 없어야 한다
-		TArray<FAttackCue> One = { Make(TEXT("@a"), 0, 0.f, 0) };
+		//한 명뿐이어도 피버가 있으면 뽑힌다
+		TArray<FAttackCue> One = { Make(TEXT("@a"), 0, 3.f, 0) };
 		MarkFeverHighlights(One);
 		check(One[0].bFeverHighlight);
+
+		//**피버가 0이면 아무도 뽑히지 않는다.** 전원이 0인데 한 명이 뽑히면
+		//평범한 공격에 특수 모션이 나간다
+		TArray<FAttackCue> Flat = { Make(TEXT("@a"), 0, 0.f, 9), Make(TEXT("@b"), 0, 0.f, 4) };
+		MarkFeverHighlights(Flat);
+		check(!Flat[0].bFeverHighlight && !Flat[1].bFeverHighlight);
 
 		TArray<FAttackCue> None;
 		MarkFeverHighlights(None);
@@ -2448,15 +2691,28 @@ void ABattleManager::RunSelfTest()
 	// --- 공격 모션 길이 ---
 	{
 		//스킬 한 번 + 평타 N회
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 0, 0.35f), 1.f));
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 4, 0.5f), 3.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 0.f), 1.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 2.f), 3.f));
 
-		//음수 스택이나 음수 길이가 들어와도 줄어들지 않는다
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, -3, 0.5f), 1.f));
-		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, 4, -0.5f), 1.f));
+		//음수가 들어와도 줄어들지 않는다
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(1.f, -3.f), 1.f));
+		check(FMath::IsNearlyEqual(AttackMotionSeconds(-1.f, 2.f), 2.f));
+
+		//섹션 길이를 돌려 쓴다 — 세라의 실제 값 1.12 / 2.05 / 1.50
+		const TArray<float> Sections = { 1.12f, 2.05f, 1.5f };
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 0), 0.f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 1), 1.12f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 3), 4.67f));
+		//네 번째 대는 다시 1번 섹션
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 4), 5.79f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, 6), 9.34f));
+
+		//비어 있으면 0 — 연출이 안 나가는 것이지 시간을 먹지는 않는다
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(TArray<float>(), 5), 0.f));
+		check(FMath::IsNearlyEqual(FeverFlurrySeconds(Sections, -2), 0.f));
 
 		//피버가 높을수록 때릴 게 많아 이동에 쓸 시간이 줄어든다
-		check(AttackMotionSeconds(1.f, 9, 0.35f) > AttackMotionSeconds(1.f, 2, 0.35f));
+		check(FeverFlurrySeconds(Sections, 9) > FeverFlurrySeconds(Sections, 2));
 	}
 
 	// --- 돌진 좌표 ---
@@ -2500,6 +2756,34 @@ void ABattleManager::RunSelfTest()
 	}
 
 	//추첨 모드일 때만 반복 시행이 의미가 있다
+	//randomOne은 후보 중 **정확히 한 구역만** 남겨야 한다. 둘 이상 남으면
+	//예고한 것보다 넓게 맞고, 하나도 안 남으면 공격이 사라진다
+	{
+		FBossAction Fury;
+		Fury.TargetMode = EBossTargetMode::RandomOne;
+		Fury.DamageByZone[0] = Fury.DamageByZone[1] = Fury.DamageByZone[2] = 1;
+
+		bool bSeen[3] = { false, false, false };
+		for (int32 Trial = 0; Trial < 200; ++Trial)
+		{
+			FBossAction Rolled = Fury;
+			ResolveRandomTarget(Rolled);
+
+			int32 HitZones = 0;
+			int32 Which = INDEX_NONE;
+			for (int32 Zone = 0; Zone < 3; ++Zone)
+			{
+				if (Rolled.DamageByZone[Zone] > 0) { ++HitZones; Which = Zone; }
+			}
+
+			check(HitZones == 1);
+			bSeen[Which] = true;
+		}
+
+		//200회면 세 구역이 전부 한 번씩은 나와야 한다 (안 나올 확률은 사실상 0)
+		check(bSeen[0] && bSeen[1] && bSeen[2]);
+	}
+
 	if (Balance.bLoaded && Balance.PresetMode == EBossPresetMode::Random)
 	{
 		//에디터의 Turns는 아직 파일 값으로 덮이기 전일 수 있으므로 파일 쪽을 본다

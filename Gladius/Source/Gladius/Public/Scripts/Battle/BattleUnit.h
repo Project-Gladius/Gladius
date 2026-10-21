@@ -46,6 +46,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetDefending(bool bInDefending) { bDefending = bInDefending; }
 
+	//피버 평타를 FirstDelay 뒤부터 Crits.Num()회 재생한다.
+	//SectionSeconds는 섹션 길이들이고 **돌려 쓴다** — 섹션마다 길이가 달라
+	//고정 간격으로는 맞지 않는다. BattleManager가 한 번만 불러 주고
+	//이어 가는 것은 유닛이 스스로 한다 (공격자마다 평타 수가 다르다)
+	void PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay,
+		const TArray<float>& SectionSeconds);
+
 	//끊기면 안 되는 몬타주를 틀 때 블루프린트가 같이 부른다 (Seconds는 보통 Get Play Length).
 	//이 시간 동안 들어온 MoveTo는 **버리지 않고 미뤘다가** 끝난 뒤에 실행한다 —
 	//쓰러져 있는 동안 자리 재배치에 끌려가 미끄러지는 것을 막는 장치다.
@@ -88,6 +95,12 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
 
+	//피버 평타 한 대. 스킬 모션이 끝난 뒤 Count회 이어서 온다.
+	//Index는 0부터고, 마지막 대는 Index == Count - 1 이다 —
+	//마무리 연출을 붙이고 싶으면 그걸로 가른다
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnFeverAttack(int32 Index, int32 Count, bool bCrit);
+
 	//방어 자세를 잡는다. 피해 판정이 아니라 **행동 턴이 시작될 때** 불린다.
 	//막이 실제로 맞았는지는 뒤이어 오는 OnHit으로 알 수 있다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
@@ -106,10 +119,10 @@ public:
 
 	// ---- 보스 전용 훅 ----
 	//
-	//MotionId는 밸런스 파일(bosses.json)의 행동마다 적힌 값이 그대로 넘어온다.
-	//어떤 애니메이션을 틀지는 블루프린트가 그 id로 고른다.
-	//**비어 있으면 지금 자세를 유지하라는 뜻이다** — 기획서가 모션이 없는 행동
-	//(기 모으기, 단단해지기, 그로기)을 그렇게 처리하라고 한다
+	//StateId는 `bosses.json`의 `states[].id` 가 그대로 넘어온다 —
+	//`SingleStrikeLeft` · `AllStrike` · `Fury` · `Defense` · `Defenseless` 같은 값이다.
+	//어떤 애니메이션을 틀지는 블루프린트가 이 id로 고른다.
+	//**비어 있으면 지금 자세를 유지하라는 뜻이다** (밸런스 파일을 못 읽은 경우)
 
 	//플레이어가 행동을 고르는 동안의 대기 자세
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
@@ -118,7 +131,7 @@ public:
 	//다음 공격 예고. 플레이어가 피격 범위를 자세만 보고 짐작할 수 있어야 하므로
 	//공격마다 다른 자세를 연결한다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
-	void OnBossTelegraph(const FString& MotionId, const FString& TelegraphText);
+	void OnBossTelegraph(const FString& StateId, const FString& TelegraphText);
 
 	//플레이어들이 때리는 동안의 피격 상태. 때린 사람이 아무도 없으면 호출되지 않는다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
@@ -126,7 +139,7 @@ public:
 
 	//예고한 그 공격을 실제로 휘두르는 순간
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
-	void OnBossAttack(const FString& MotionId, int32 HitCount);
+	void OnBossAttack(const FString& StateId, int32 HitCount);
 
 	//스폰 시 스케일이 1로 덮이므로, 크기는 Mesh 컴포넌트 쪽에서 준다.
 	//그래서 액터 루트는 빈 SceneComponent로 두고 Mesh를 그 아래 붙인다
@@ -196,4 +209,14 @@ private:
 	FTimerHandle MotionHoldHandle;
 
 	void FlushPendingMove();
+
+	// ---- 피버 평타 ----
+	//미리 굴려 받은 치명타 결과. 앞에서부터 하나씩 꺼내 쓴다
+	TArray<bool> FlurryCrits;
+	int32 FlurryIndex = 0;
+	//섹션 길이. 평타 수보다 짧으면 앞에서부터 다시 쓴다
+	TArray<float> FlurrySections;
+	FTimerHandle FlurryHandle;
+
+	void FireNextFeverAttack();
 };

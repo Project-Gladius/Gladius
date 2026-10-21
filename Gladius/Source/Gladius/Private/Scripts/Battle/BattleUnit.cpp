@@ -1,4 +1,4 @@
-#include "Scripts/Battle/BattleUnit.h"
+﻿#include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/UnitNameplate.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -40,6 +40,58 @@ void ABattleUnit::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyLabel();
+}
+
+void ABattleUnit::PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay,
+	const TArray<float>& SectionSeconds)
+{
+	//앞 턴의 연타가 남아 있으면 버린다. 턴이 바뀌었으니 들고 있을 이유가 없다
+	GetWorldTimerManager().ClearTimer(FlurryHandle);
+
+	FlurryCrits = Crits;
+	FlurrySections = SectionSeconds;
+	FlurryIndex = 0;
+
+	//섹션 길이를 모르면 언제 다음 대를 띄울지 알 수 없다. 조용히 겹쳐 재생하지 않는다
+	if (FlurryCrits.Num() == 0 || FlurrySections.Num() == 0)
+	{
+		FlurryCrits.Reset();
+		return;
+	}
+
+	//스킬 모션이 도는 동안은 기다린다. 겹치면 스킬이 안 보인다
+	GetWorldTimerManager().SetTimer(FlurryHandle, this, &ABattleUnit::FireNextFeverAttack,
+		FMath::Max(KINDA_SMALL_NUMBER, FirstDelay), false);
+}
+
+void ABattleUnit::FireNextFeverAttack()
+{
+	if (!FlurryCrits.IsValidIndex(FlurryIndex))
+	{
+		GetWorldTimerManager().ClearTimer(FlurryHandle);
+		FlurryCrits.Reset();
+		return;
+	}
+
+	const int32 Index = FlurryIndex++;
+	OnFeverAttack(Index, FlurryCrits.Num(), FlurryCrits[Index]);
+
+	//마지막 대였으면 더 걸지 않는다
+	if (FlurryCrits.IsValidIndex(FlurryIndex))
+	{
+		//지금 재생한 섹션이 끝나는 순간이 다음 대의 시작이다. 섹션이 평타 수보다
+		//적으면 앞에서부터 다시 쓴다 (3개면 1,2,3,1,2,3…)
+		const float ThisSection = FlurrySections[Index % FlurrySections.Num()];
+
+		GetWorldTimerManager().SetTimer(FlurryHandle, this, &ABattleUnit::FireNextFeverAttack,
+			FMath::Max(KINDA_SMALL_NUMBER, ThisSection), false);
+	}
+	else
+	{
+		FlurryCrits.Reset();
+		FlurrySections.Reset();
+		FlurryIndex = 0;
+	}
 }
 
 void ABattleUnit::HoldMotion(float Seconds)
