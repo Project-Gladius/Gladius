@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -332,9 +332,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float RollLead = 0.5f;
 
-	//플레이어 공격과 보스 공격 모션에 쓰는 시간
+	//보스 공격 모션에 쓰는 시간의 **기본값**. 아래 맵에 없는 상태가 이 값을 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float BossActionSeconds = 1.5f;
+
+	//상태 id별 공격 모션 길이. 키는 `bosses.json`의 `states[].id` 다.
+	//좌우 단일 공격은 '돌기 → 때리기 → 되돌기'가 한 모션이라 8초를 넘고,
+	//가운데 공격은 3초도 안 된다 — 하나로 묶으면 긴 쪽이 잘리거나 짧은 쪽이 기다린다.
+	// ponytail: 밸런스 파일이 아니라 애셋에서 재어 넣는 값이라 에디터에 둔다
+	//(MotionTimesByCharacter와 같은 이유)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
+	TMap<FString, float> BossStrikeSecondsByState;
 
 	//판정 결과를 보여주는 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -648,6 +656,9 @@ private:
 
 	//예약해 둔 공격 연출을 AttackCount명씩 꺼내 재생한다. 다 쓰면 타이머를 끈다
 	void FlushAttackCues();
+
+	//이 상태의 공격 모션 길이. 맵에 없으면 BossActionSeconds
+	float BossStrikeSecondsFor(const FString& StateId) const;
 
 	//회피자가 구르기 시작점까지 달려간다. 도착하는 순간이 구르기 시작이다
 	void BeginEvadeApproach();

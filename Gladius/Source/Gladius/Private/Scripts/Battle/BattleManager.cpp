@@ -1,4 +1,4 @@
-#include "Scripts/Battle/BattleManager.h"
+﻿#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/BattleSpot.h"
 #include "Scripts/Battle/CutSceneApplier.h"
@@ -1659,6 +1659,16 @@ bool ABattleManager::TryGetLaneBoundary(EBattleLane From, EBattleLane To, FVecto
 	return true;
 }
 
+float ABattleManager::BossStrikeSecondsFor(const FString& StateId) const
+{
+	if (const float* Found = BossStrikeSecondsByState.Find(StateId))
+	{
+		return FMath::Max(0.f, *Found);
+	}
+	//공격 모션이 없는 상태(기 모으기 등)와 아직 애셋이 안 들어온 상태가 여기로 온다
+	return FMath::Max(0.f, BossActionSeconds);
+}
+
 void ABattleManager::BeginEvadeApproach()
 {
 	//구르기 시작점까지 달려간다. 도착하는 순간이 곧 BeginEvadeRolls다.
@@ -1787,7 +1797,9 @@ void ABattleManager::BossAttackBeat()
 		P.bDiedThisTurn = false;
 	}
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn, BossActionSeconds, false);
+	//공격 모션이 끝나야 다음 턴으로 간다. 상태마다 길이가 2.7초~8.4초로 갈린다
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn,
+		BossStrikeSecondsFor(TelegraphedAction.Id), false);
 }
 
 void ABattleManager::EndTurn()
