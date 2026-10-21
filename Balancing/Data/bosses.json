@@ -1,18 +1,28 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 1,
+  "kind": "gladius-boss-patterns",
+  "revision": 2,
   "name": "트루돈",
-  "damageRule": "totalDamage is the damage received by each target in a hit zone; do not divide it between zones.",
-  "states": [
+  "maxHp": 100,
+  "encounter": {
+    "turns": 10,
+    "patternFit": "remainingTurns"
+  },
+  "actions": [
     {
       "id": "SingleStrikeLeft",
-      "totalDamage": 1,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "left"
-        ]
+      "name": "SingleStrikeLeft",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 1,
+        "center": 0,
+        "right": 0
       },
-      "telegraphText": "test:왼쪽을 내려칠 준비를 합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "vulnerable",
@@ -26,18 +36,27 @@
           "physical": "enduring",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:왼쪽을 내려칠 준비를 합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "SingleStrikeCenter",
-      "totalDamage": 1,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "center"
-        ]
+      "name": "SingleStrikeCenter",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 1,
+        "right": 0
       },
-      "telegraphText": "test:중앙을 내려칠 준비를 합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "enduring",
@@ -51,18 +70,27 @@
           "physical": "enduring",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:중앙을 내려칠 준비를 합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "SingleStrikeRight",
-      "totalDamage": 1,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "right"
-        ]
+      "name": "SingleStrikeRight",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 1
       },
-      "telegraphText": "test:오른쪽을 내려칠 준비를 합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "enduring",
@@ -76,18 +104,27 @@
           "physical": "vulnerable",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:오른쪽을 내려칠 준비를 합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "StrongStrikeLeft",
-      "totalDamage": 2,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "left"
-        ]
+      "name": "StrongStrikeLeft",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 0,
+        "right": 0
       },
-      "telegraphText": "test:왼쪽에 강력한 번개 공격을 준비합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "vulnerable",
@@ -101,18 +138,27 @@
           "physical": "enduring",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:왼쪽에 강력한 번개 공격을 준비합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "StrongStrikeCenter",
-      "totalDamage": 2,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "center"
-        ]
+      "name": "StrongStrikeCenter",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 2,
+        "right": 0
       },
-      "telegraphText": "test:중앙에 강력한 번개 공격을 준비합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "enduring",
@@ -126,18 +172,27 @@
           "physical": "enduring",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:중앙에 강력한 번개 공격을 준비합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "StrongStrikeRight",
-      "totalDamage": 2,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "right"
-        ]
+      "name": "StrongStrikeRight",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 2
       },
-      "telegraphText": "test:오른쪽에 강력한 번개 공격을 준비합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "enduring",
@@ -151,19 +206,27 @@
           "physical": "vulnerable",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:오른쪽에 강력한 번개 공격을 준비합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "LeftMiddle",
-      "totalDamage": 1,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "left",
-          "center"
-        ]
+      "name": "LeftMiddle",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 1,
+        "center": 1,
+        "right": 0
       },
-      "telegraphText": "test:왼쪽과 중앙을 향해 무기를 들어 올립니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "vulnerable",
@@ -177,19 +240,27 @@
           "physical": "enduring",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:왼쪽과 중앙을 향해 무기를 들어 올립니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "RightMiddle",
-      "totalDamage": 1,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "center",
-          "right"
-        ]
+      "name": "RightMiddle",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 1,
+        "right": 1
       },
-      "telegraphText": "test:중앙과 오른쪽을 쓸어칠 준비를 합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "enduring",
@@ -203,19 +274,27 @@
           "physical": "vulnerable",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:중앙과 오른쪽을 쓸어칠 준비를 합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "LeftRight",
-      "totalDamage": 1,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "left",
-          "right"
-        ]
+      "name": "LeftRight",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 1,
+        "center": 0,
+        "right": 1
       },
-      "telegraphText": "test:왼쪽과 오른쪽을 공격할 준비를 합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "vulnerable",
@@ -229,16 +308,27 @@
           "physical": "vulnerable",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:왼쪽과 오른쪽을 공격할 준비를 합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "Defense",
-      "totalDamage": 0,
-      "target": {
-        "mode": "none",
-        "zones": []
+      "name": "Defense",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 0
       },
-      "telegraphText": "test:트루돈이 기를 모읍니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "enduring",
@@ -252,20 +342,27 @@
           "physical": "enduring",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:트루돈이 기를 모읍니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "AllStrike",
-      "totalDamage": 2,
-      "target": {
-        "mode": "fixed",
-        "zones": [
-          "left",
-          "center",
-          "right"
-        ]
+      "name": "AllStrike",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 2,
+        "right": 2
       },
-      "telegraphText": "test:모든 구역을 향해 강력한 공격을 준비합니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "vulnerable",
@@ -279,16 +376,27 @@
           "physical": "vulnerable",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:모든 구역을 향해 강력한 공격을 준비합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "Defenseless",
-      "totalDamage": 0,
-      "target": {
-        "mode": "none",
-        "zones": []
+      "name": "Defenseless",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 0,
+        "center": 0,
+        "right": 0
       },
-      "telegraphText": "test:트루돈이 쓰러져 무방비 상태가 됩니다.",
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
       "resistanceByZone": {
         "left": {
           "physical": "vulnerable",
@@ -302,11 +410,46 @@
           "physical": "vulnerable",
           "magical": "normal"
         }
-      }
+      },
+      "telegraph": {
+        "text": "test:트루돈이 쓰러져 무방비 상태가 됩니다.",
+        "motionId": ""
+      },
+      "attackMotionId": ""
     },
     {
       "id": "Fury",
-      "totalDamage": 1,
+      "name": "Fury",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 1,
+        "center": 1,
+        "right": 1
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "test:트루돈이 무작위 구역에 공격을 준비합니다.",
+        "motionId": ""
+      },
+      "attackMotionId": "",
       "target": {
         "mode": "randomOne",
         "zones": [
@@ -314,159 +457,292 @@
           "center",
           "right"
         ]
-      },
-      "telegraphText": "test:트루돈이 무작위 구역에 공격을 준비합니다.",
-      "resistanceByZone": {
-        "left": {
-          "physical": "normal",
-          "magical": "normal"
-        },
-        "center": {
-          "physical": "normal",
-          "magical": "normal"
-        },
-        "right": {
-          "physical": "normal",
-          "magical": "normal"
-        }
       }
     }
   ],
   "patterns": [
     {
+      "id": "pattern_01",
       "name": "좌, 중, 우",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "SingleStrikeLeft",
         "SingleStrikeCenter",
         "SingleStrikeRight"
       ]
     },
     {
+      "id": "pattern_02",
       "name": "우, 중, 좌",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "SingleStrikeRight",
         "SingleStrikeCenter",
         "SingleStrikeLeft"
       ]
     },
     {
+      "id": "pattern_03",
       "name": "좌, 좌중, 우",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "SingleStrikeLeft",
         "LeftMiddle",
         "SingleStrikeRight"
       ]
     },
     {
+      "id": "pattern_04",
       "name": "우, 우중, 좌",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "SingleStrikeRight",
         "RightMiddle",
         "SingleStrikeLeft"
       ]
     },
     {
+      "id": "pattern_05",
       "name": "중, 좌중",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeCenter",
         "LeftMiddle"
       ]
     },
     {
+      "id": "pattern_06",
       "name": "중, 우중",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeCenter",
         "RightMiddle"
       ]
     },
     {
+      "id": "pattern_07",
       "name": "좌, 우 강공격",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeLeft",
         "StrongStrikeRight"
       ]
     },
     {
+      "id": "pattern_08",
       "name": "우, 좌 강공격",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeRight",
         "StrongStrikeLeft"
       ]
     },
     {
+      "id": "pattern_09",
       "name": "좌, 중 강공격",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeLeft",
         "StrongStrikeCenter"
       ]
     },
     {
+      "id": "pattern_10",
       "name": "우, 중 강공격",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeRight",
         "StrongStrikeCenter"
       ]
     },
     {
+      "id": "pattern_11",
       "name": "중, 좌 강공격",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeCenter",
         "StrongStrikeLeft"
       ]
     },
     {
+      "id": "pattern_12",
       "name": "중, 우 강공격",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "SingleStrikeCenter",
         "StrongStrikeRight"
       ]
     },
     {
+      "id": "pattern_13",
       "name": "중, 좌, 우",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "SingleStrikeCenter",
         "SingleStrikeLeft",
         "SingleStrikeRight"
       ]
     },
     {
+      "id": "pattern_14",
       "name": "중, 우, 좌",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "SingleStrikeCenter",
         "SingleStrikeRight",
         "SingleStrikeLeft"
       ]
     },
     {
+      "id": "pattern_15",
       "name": "Fury 연속 2번",
-      "turns": 2,
-      "sequence": [
+      "steps": [
         "Fury",
         "Fury"
       ]
     },
     {
+      "id": "pattern_16",
       "name": "Defense -> AllStrike -> Defenseless",
-      "turns": 3,
-      "sequence": [
+      "steps": [
         "Defense",
         "AllStrike",
         "Defenseless"
       ]
+    },
+    {
+      "id": "pattern_17",
+      "name": "좌",
+      "steps": [
+        "SingleStrikeLeft"
+      ]
+    },
+    {
+      "id": "pattern_18",
+      "name": "중",
+      "steps": [
+        "SingleStrikeCenter"
+      ]
+    },
+    {
+      "id": "pattern_19",
+      "name": "우",
+      "steps": [
+        "SingleStrikeRight"
+      ]
+    },
+    {
+      "id": "pattern_20",
+      "name": "좌중",
+      "steps": [
+        "LeftMiddle"
+      ]
+    },
+    {
+      "id": "pattern_21",
+      "name": "중우",
+      "steps": [
+        "RightMiddle"
+      ]
+    },
+    {
+      "id": "pattern_22",
+      "name": "좌우",
+      "steps": [
+        "LeftRight"
+      ]
     }
-  ]
+  ],
+  "selection": {
+    "mode": "weightedRandom",
+    "allowImmediateRepeat": true,
+    "pool": [
+      {
+        "patternId": "pattern_01",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_02",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_03",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_04",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_05",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_06",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_07",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_08",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_09",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_10",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_11",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_12",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_13",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_14",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_15",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_16",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_17",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_18",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_19",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_20",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_21",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_22",
+        "weight": 1
+      }
+    ]
+  },
+  "preset": {
+    "mode": "random",
+    "seed": 20261018,
+    "customPatterns": [
+      "pattern_01"
+    ],
+    "directActions": [
+      "SingleStrikeLeft",
+      "SingleStrikeCenter",
+      "SingleStrikeRight"
+    ]
+  }
 }

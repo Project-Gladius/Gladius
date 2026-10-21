@@ -55,10 +55,7 @@ void ATempleCycleController::BeginPlay()
 		UE_LOG(LogTemp, Error, TEXT("TempleCycleController: Goddess를 찾지 못했습니다."));
 	}
 
-	CurrentTurn = 1;
 	CreateStatusWidget();
-	OnTurnStarted.Broadcast(CurrentTurn);
-	GetWorldTimerManager().SetTimer(TurnTimerHandle, this, &ATempleCycleController::HandleTurnTimer, FMath::Max(TurnTime, 1.0f), true);
 
 	//진입 후 CycleSeconds가 지나면 첫 조회, 이후 CycleSeconds마다 반복
 	GetWorldTimerManager().SetTimer(CycleTimerHandle, this, &ATempleCycleController::HandleCycleTimer, FMath::Max(CycleSeconds, 1.0f), true);
@@ -67,7 +64,6 @@ void ATempleCycleController::BeginPlay()
 void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
-	GetWorldTimerManager().ClearTimer(TurnTimerHandle);
 	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
  if (BoundGoddess.IsValid()) BoundGoddess->OnEnhanceExecuted.RemoveDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);
 	if (BoundDispatcher.IsValid()) BoundDispatcher->OnTempleCombatCommand.RemoveAll(this);
@@ -164,19 +160,19 @@ void ATempleCycleController::HandleCycleTimer()
 
 void ATempleCycleController::HandleChatFetchFinished(bool bSuccess)
 {
-	//조회에 실패해도 그동안 쌓인 명령으로 사이클은 진행 (턴 시간이 밀리지 않도록)
+	//조회에 실패해도 그동안 쌓인 명령으로 사이클은 진행 (사이클이 멈추지 않도록)
 	if (!bLeavingTemple) StartCycle();
 }
 
 void ATempleCycleController::StartCycle()
 {
 	if (bLeavingTemple) return;
-	++CompletedTurns;
+	++CompletedCycles;
 
 	//큐잉 종료: 이번 사이클에 처리할 명령을 가져가고 다음 사이클 큐잉 시작
 	FTempleCycleCommands Commands = CommandQueue->TakeSnapshot();
 
-	UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d 시작: 대화 %d건"), CompletedTurns, Commands.Talks.Num());
+	UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d 시작: 대화 %d건"), CompletedCycles, Commands.Talks.Num());
 
 	ActiveTalks = Commands.Talks;
 	ActiveBatchId.Reset();
@@ -242,13 +238,6 @@ void ATempleCycleController::HandleBatchFailed(const FString& BatchId, const FSt
 	Goddess->SetNoTalks();
 }
 
-void ATempleCycleController::HandleTurnTimer()
-{
-	if (bLeavingTemple) return;
-	++CurrentTurn;
-	OnTurnStarted.Broadcast(CurrentTurn);
-}
-
 void ATempleCycleController::HandleCombatCommand()
 {
 	// 채팅 목록 처리 콜백을 빠져나온 다음 프레임에 이동합니다.
@@ -267,7 +256,6 @@ void ATempleCycleController::RequestCombatTravel()
 	}
 	bLeavingTemple = true;
 	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
-	GetWorldTimerManager().ClearTimer(TurnTimerHandle);
 	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
 	ActiveBatchId.Reset();
 	if (BatchClient) BatchClient->CancelActiveBatch();

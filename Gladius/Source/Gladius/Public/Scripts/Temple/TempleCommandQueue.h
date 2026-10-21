@@ -22,6 +22,10 @@ public:
 	//지금까지 쌓인 명령을 넘기고 큐를 비움 (다음 사이클 큐잉 시작)
 	FTempleCycleCommands TakeSnapshot();
 
+	// 유저당 신전에서 선택 가능한 축복 횟수
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|Blessing", meta = (ClampMin = "0"))
+	int32 AvailableBless = 3;
+
 	// ===== 대화 큐잉 제한 (Temple AI 서버의 배치 요청 제한과 동일) =====
 	int32 MaxTalkMessageLength = 200;
 	int32 MaxTalksPerCycle = 30;
@@ -37,6 +41,7 @@ private:
 	FDelegateHandle TalkHandle;
 
 	FTempleCycleCommands Current;
+	TMap<FString, int32> BlessSelectionsByUser;
 
 	//이번 사이클에 이미 대화를 넣은 유저 (사이클당 유저 1건)
 	TSet<FString> CurrentTalkUserIds;

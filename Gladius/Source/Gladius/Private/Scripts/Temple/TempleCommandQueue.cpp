@@ -60,7 +60,9 @@ void UTempleCommandQueue::AddEnhance(const FString& UserId, const FString& Usern
 		return;
 	}
 
-	//같은 유저의 중복 강화도 모두 허용
+	int32& Selections = BlessSelectionsByUser.FindOrAdd(UserId);
+	if (Selections >= AvailableBless) return;
+	++Selections;
 	FParsedCommand Command;
 	Command.CommandType = static_cast<ECommandType>(static_cast<uint8>(ECommandType::Enhance1) + Tier - 1);
 	Command.UserId = UserId;

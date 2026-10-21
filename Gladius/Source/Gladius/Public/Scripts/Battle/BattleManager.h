@@ -10,7 +10,7 @@ class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
 
-//BattleStart -> Prepare -> Collect -> CutScenes -> Move -> BossAction -> Resolve.
+//BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
 enum class EBattlePhase : uint8
 {
@@ -24,7 +24,6 @@ enum class EBattlePhase : uint8
 	BossAction,
 	//결과 표시
 	Resolve,
-	CutScenes = 7,
 	BattleEnd = 8
 };
 
@@ -470,7 +469,19 @@ public:
  float BattleStartSeconds = 0.1f;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|CutScenes")
- TArray<FName> CutSceneIds = { TEXT("GladiusRun"), TEXT("GladiusSkill1") };
+ bool bEnableTurnCutScenes = true;
+
+ // Computed from the one selected participant when the Move phase begins.
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle|CutScenes")
+ TArray<FName> CutSceneIds;
+
+ UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle|CutScenes")
+ FString CutSceneUserId;
+
+ static TArray<FName> CutSceneIdsFor(const FString& ClassId, EBattleAction Action);
+ static FString SelectTurnCutSceneUser(const TMap<FString, FBattlePlayer>& Candidates,
+  const TArray<FCharacterDef>& CharacterClasses, const FString& PreviousClassId,
+  const TSet<FString>& PreviouslySelectedUsers, FRandomStream& Random);
 
  UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Battle|CutScenes")
  TObjectPtr<ACutSceneApplier> CutSceneApplier;
@@ -593,8 +604,12 @@ private:
  }
  bool bBattleRunning = false;
  TArray<FName> ActiveCutSceneIds;
+ FString PreviousCutSceneClassId;
+ TSet<FString> SelectedCutSceneUsers;
+ FRandomStream CutSceneRandom;
  int32 CutSceneIndex = 0;
- void BeginCutScenes();
+ void StartMoveCutScenes();
+ void StopTurnCutScenes();
  void PlayNextCutScene();
  UFUNCTION()
  void HandleCutSceneEnded(FName Type, bool bInterrupted);

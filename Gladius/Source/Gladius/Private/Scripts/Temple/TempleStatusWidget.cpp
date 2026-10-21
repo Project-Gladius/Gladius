@@ -86,9 +86,6 @@ void UTempleStatusWidget::BuildDefaultWidgetTree()
 	UBorder* ControlPanel = AddPanel(WidgetTree, Canvas, TEXT("ControlPanel"), FAnchors(0.02f, 0.12f, 0.30f, 0.25f), 0.85f);
 	UVerticalBox* Controls = WidgetTree->ConstructWidget<UVerticalBox>();
 	ControlPanel->SetContent(Controls);
-	TurnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TurnText"));
-	SetFontSize(TurnText, 18);
-	Controls->AddChildToVerticalBox(TurnText);
 	CombatButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CombatButton"));
 	UTextBlock* ButtonText = WidgetTree->ConstructWidget<UTextBlock>();
 	ButtonText->SetText(FText::FromString(TEXT("전투 씬으로 이동")));
@@ -223,27 +220,18 @@ void UTempleStatusWidget::BindToController(ATempleCycleController* InController)
 {
 	if (Controller.IsValid())
 	{
-		Controller->OnTurnStarted.RemoveDynamic(this, &UTempleStatusWidget::HandleTurnStarted);
 		Controller->OnCombatRequested.RemoveDynamic(this, &UTempleStatusWidget::HandleCombatRequested);
 	}
 	Controller = InController;
 	if (InController)
 	{
-		InController->OnTurnStarted.AddUniqueDynamic(this, &UTempleStatusWidget::HandleTurnStarted);
 		InController->OnCombatRequested.AddUniqueDynamic(this, &UTempleStatusWidget::HandleCombatRequested);
-		HandleTurnStarted(InController->GetCurrentTurn());
 	}
 }
 
 void UTempleStatusWidget::HandleCombatClicked()
 {
 	if (Controller.IsValid()) Controller->RequestCombatTravel();
-}
-
-void UTempleStatusWidget::HandleTurnStarted(int32 TurnNumber)
-{
-	if (TurnText && Controller.IsValid())
-		TurnText->SetText(FText::FromString(FString::Printf(TEXT("신전 %d턴 · 턴 길이 %.0f초"), TurnNumber, Controller->TurnTime)));
 }
 
 void UTempleStatusWidget::HandleCombatRequested()

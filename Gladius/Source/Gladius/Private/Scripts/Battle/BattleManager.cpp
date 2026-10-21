@@ -116,6 +116,12 @@ void ABattleManager::StartBattle()
  StopBattle();
  bBattleRunning = true;
  Phase = EBattlePhase::BattleStart;
+ PreviousCutSceneClassId.Reset();
+ SelectedCutSceneUsers.Reset();
+ CutSceneUserId.Reset();
+ CutSceneIds.Reset();
+ ActiveCutSceneIds.Reset();
+ CutSceneRandom.Initialize(FMath::Rand());
  for (auto& Pair : Players) { if (IsValid(Pair.Value.Unit)) Pair.Value.Unit->Destroy(); }
  Players.Reset();
  if (IsValid(BossUnit)) BossUnit->Destroy();
@@ -142,11 +148,7 @@ void ABattleManager::StopBattle()
  if (bBattleRunning) SaveRecords();
  bBattleRunning = false;
  Phase = EBattlePhase::BattleEnd;
- if (IsValid(CutSceneApplier))
- {
-  CutSceneApplier->OnCutSceneEnded.RemoveDynamic(this, &ABattleManager::HandleCutSceneEnded);
-  CutSceneApplier->CancelCutScene();
- }
+ StopTurnCutScenes();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
  {
   Chat->SetCombatAutoPollingEnabled(false);
@@ -783,6 +785,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 void ABattleManager::StartTurn()
 {
  if (!bBattleRunning) return;
+ StopTurnCutScenes();
  ++TurnIndex;
  Phase = EBattlePhase::Prepare;
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
@@ -865,41 +868,105 @@ void ABattleManager::BeginCollect()
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 수집 — %.1f초"), TurnIndex, CollectSeconds);
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCutScenes, FMath::Max(0.001f, CollectSeconds), false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginMove, FMath::Max(0.001f, CollectSeconds), false);
 }
 
-void ABattleManager::BeginCutScenes()
+TArray<FName> ABattleManager::CutSceneIdsFor(const FString& ClassId, EBattleAction Action)
 {
- if (!bBattleRunning) return;
- Phase = EBattlePhase::CutScenes;
+ if (Action != EBattleAction::Attack1 && Action != EBattleAction::Attack2) return {};
+ if (ClassId == TEXT("gladius"))
+  return {TEXT("GladiusRun"), Action == EBattleAction::Attack1 ? FName(TEXT("GladiusSkill1")) : FName(TEXT("GladiusSkill2"))};
+ if (ClassId == TEXT("sera"))
+  return {Action == EBattleAction::Attack1 ? FName(TEXT("SeraSkill1")) : FName(TEXT("SeraSkill2"))};
+ return {};
+}
+
+FString ABattleManager::SelectTurnCutSceneUser(const TMap<FString, FBattlePlayer>& Candidates,
+ const TArray<FCharacterDef>& CharacterClasses, const FString& PreviousClassId,
+ const TSet<FString>& PreviouslySelectedUsers, FRandomStream& Random)
+{
+ TArray<FString> Ids;
+ int32 HighestFever = MIN_int32;
+ for (const auto& Pair : Candidates)
+ {
+  const FBattlePlayer& P = Pair.Value;
+  if (P.HP <= 0 || P.ReviveCountdown > 0 || !IsValid(P.Unit) || !CharacterClasses.IsValidIndex(P.ClassIndex)
+   || CutSceneIdsFor(CharacterClasses[P.ClassIndex].Id, P.PendingAction).IsEmpty()) continue;
+  if (P.Fever > HighestFever) { HighestFever = P.Fever; Ids.Reset(); }
+  if (P.Fever == HighestFever) Ids.Add(Pair.Key);
+ }
+ if (Ids.IsEmpty()) return FString();
+ // Fever is the first priority; class preference breaks ties in that top group.
+ TArray<FString> Preferred;
+ for (const FString& Id : Ids)
+ {
+  const FString& ClassId = CharacterClasses[Candidates.FindChecked(Id).ClassIndex].Id;
+  if (PreviousClassId.IsEmpty() ? ClassId == TEXT("gladius") : ClassId != PreviousClassId) Preferred.Add(Id);
+ }
+ if (!Preferred.IsEmpty()) Ids = MoveTemp(Preferred);
+ TArray<FString> Unseen;
+ for (const FString& Id : Ids) if (!PreviouslySelectedUsers.Contains(Id)) Unseen.Add(Id);
+ if (!Unseen.IsEmpty()) Ids = MoveTemp(Unseen);
+ Ids.Sort();
+ return Ids[Random.RandRange(0, Ids.Num()-1)];
+}
+
+void ABattleManager::StartMoveCutScenes()
+{
+ if (!bBattleRunning || Phase != EBattlePhase::Move) return;
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
  {
   Chat->SetCombatAutoPollingEnabled(false);
   Chat->CancelPendingChatFetch();
  }
+ CutSceneUserId.Reset();
+ CutSceneIds.Reset();
+ ActiveCutSceneIds.Reset();
+ CutSceneIndex = 0;
+ if (!bEnableTurnCutScenes) return;
+ CutSceneUserId = SelectTurnCutSceneUser(Players, Classes, PreviousCutSceneClassId, SelectedCutSceneUsers, CutSceneRandom);
+ const FBattlePlayer* Selected = Players.Find(CutSceneUserId);
+ if (!Selected) return;
+ const FString ClassId = Classes[Selected->ClassIndex].Id;
+ CutSceneIds = CutSceneIdsFor(ClassId, Selected->PendingAction);
+ ActiveCutSceneIds = CutSceneIds;
+ PreviousCutSceneClassId = ClassId;
+ SelectedCutSceneUsers.Add(CutSceneUserId);
  if (!IsValid(CutSceneApplier))
   CutSceneApplier = Cast<ACutSceneApplier>(UGameplayStatics::GetActorOfClass(this, ACutSceneApplier::StaticClass()));
- if (!IsValid(CutSceneApplier) && !CutSceneIds.IsEmpty())
-  CutSceneApplier = GetWorld()->SpawnActor<ACutSceneApplier>();
- ActiveCutSceneIds = CutSceneIds;
- CutSceneIndex = 0;
+ if (!IsValid(CutSceneApplier)) CutSceneApplier = GetWorld()->SpawnActor<ACutSceneApplier>();
  if (IsValid(CutSceneApplier))
  {
   CutSceneApplier->BattleManager = this;
+  CutSceneApplier->EnsureDefaultCutScenes();
+  CutSceneApplier->OnCutSceneEnded.RemoveDynamic(this, &ABattleManager::HandleCutSceneEnded);
+  CutSceneApplier->CancelCutScene();
+  if (!bBattleRunning || Phase != EBattlePhase::Move) return;
   CutSceneApplier->OnCutSceneEnded.AddUniqueDynamic(this, &ABattleManager::HandleCutSceneEnded);
  }
+
  PlayNextCutScene();
 }
 
 void ABattleManager::PlayNextCutScene()
 {
- if (!bBattleRunning || Phase != EBattlePhase::CutScenes) return;
+ if (!bBattleRunning || (Phase != EBattlePhase::Move && Phase != EBattlePhase::BossAction)) return;
  while (IsValid(CutSceneApplier) && CutSceneIndex < ActiveCutSceneIds.Num())
  {
   const FName Id = ActiveCutSceneIds[CutSceneIndex++];
-  if (CutSceneApplier->ApplyCutScene(ECutSceneCharacterStrategy::DefaultGladius, Id)) return;
+  if (CutSceneApplier->ApplyCutSceneForUser(CutSceneUserId, Id)) return;
  }
- BeginMove();
+}
+
+void ABattleManager::StopTurnCutScenes()
+{
+ if (IsValid(CutSceneApplier))
+ {
+  CutSceneApplier->OnCutSceneEnded.RemoveDynamic(this, &ABattleManager::HandleCutSceneEnded);
+  CutSceneApplier->CancelCutScene();
+ }
+ ActiveCutSceneIds.Reset();
+ CutSceneIndex = 0;
 }
 
 void ABattleManager::HandleCutSceneEnded(FName Type, bool bInterrupted)
@@ -1002,6 +1069,8 @@ const FCharacterMotionTimes& ABattleManager::MotionTimesFor(int32 ClassIndex) co
 
 void ABattleManager::BeginMove()
 {
+ if (!bBattleRunning) return;
+ StopTurnCutScenes();
 	Phase = EBattlePhase::Move;
 
 	//**회피자의 구역은 아직 바꾸지 않는다.** 실제로 넘어가는 것은 보스 공격 직전이고,
@@ -1062,7 +1131,8 @@ void ABattleManager::BeginMove()
 			ChooseGait(Distance, MoveSecondsForMe, RunSpeed, RollSpeed));
 	}
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, MoveSeconds, false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, FMath::Max(0.001f, MoveSeconds), false);
+ StartMoveCutScenes();
 }
 
 void ABattleManager::AssignSlots()
@@ -1550,6 +1620,7 @@ void ABattleManager::BossAttackBeat()
 
 void ABattleManager::EndTurn()
 {
+ StopTurnCutScenes();
 	Phase = EBattlePhase::Resolve;
 
 	//기획서 M2의 마지막 단계 — 돌진했던 캐릭터가 자기 자리로 돌아간다.

@@ -43,13 +43,13 @@ function exportBoss(b){
  return out;
 }
 function syncState(a){
- if(!a.target)return;
+ if(!a.target||!a.vulnerabilityByZone)return;
  a.hitCount=1;
  for(const z of zones){a.damageByZone[z]=a.target.zones.includes(z)?a.totalDamage:0;const v=a.vulnerabilityByZone[z]==='resistant'?'enduring':a.vulnerabilityByZone[z];a.resistanceByZone[z]={physical:v,magical:v};}
 }
 function attackVariants(a){
  if(!a.target||!['randomOne','selectOne'].includes(a.target.mode))return [a];
- return a.target.zones.map(z=>({...a,damageByZone:Object.fromEntries(zones.map(k=>[k,k===z?a.totalDamage:0]))}));
+ return a.target.zones.map(z=>({...a,damageByZone:Object.fromEntries(zones.map(k=>[k,k===z?(a.totalDamage??a.damageByZone[k]):0]))}));
 }
 function validate(data){
  if(data.bosses?.states)data.bosses=importBoss(data.bosses);
@@ -68,6 +68,7 @@ function validate(data){
  unique(a.characters,'캐릭터');assert(a.characters.some(c=>c.id==='gladius')&&a.characters.some(c=>c.id==='sera'),'글라디우스와 세라가 필요합니다.');
  a.characters.forEach(c=>{number(c.baseHp,1,1000,c.name+' HP',true);number(c.defenseDamageRatio,0,1,c.name+' 방어 시 피해 비율');assert(c.skills?.length===2,'캐릭터마다 공격 2개가 필요합니다.');unique(c.skills,'공격');c.skills.forEach(s=>{number(s.baseDamage,0,10000,'공격력');number(s.critChance,0,1,'치명타 확률');number(s.critBonus,0,10,'치명타 추가 피해');assert(['physical','magical'].includes(s.attribute),'공격 속성 오류');});});
  for(const k of ['hp','damage','critChance','critBonus']){number(e.perLevel?.[k],0,k.startsWith('crit')?1:100,'강화 증가량',k==='hp');number(e.initialLevels?.[k],0,100,'강화 단계',true);}number(e.critChanceCap,0,1,'치명타 상한');
+ for(const a of b.actions||[]){if(a.target&&!a.vulnerabilityByZone){assert(['randomOne','selectOne'].includes(a.target.mode),'지원하지 않는 선택 타격 방식');assert(Array.isArray(a.target.zones)&&a.target.zones.length>0&&a.target.zones.every(z=>zones.includes(z))&&new Set(a.target.zones).size===a.target.zones.length,'선택 타격 후보 구역 오류');}}
  const ids=unique(b.actions,'보스 공격'),pids=unique(b.patterns,'보스 패턴');assert(b.actions.length<=100&&b.patterns.length<=100,'공격과 패턴은 각각 최대 100개입니다.');number(b.maxHp,1,1e9,'보스 HP');number(b.encounter?.turns,1,10,'전투 구간 턴 수',true);assert(b.encounter.patternFit==='remainingTurns','남은 턴에 맞춘 패턴 선택이 필요합니다.');
  for(const x of b.actions){number(x.hitCount,1,10,'타격 횟수',true);for(const z of zones){number(x.damageByZone?.[z],0,100,'보스 피해',true);assert(['physical','magical'].includes(x.attributeByZone?.[z]),'보스 공격 속성 오류');for(const at of ['physical','magical'])assert(['enduring','normal','vulnerable'].includes(x.resistanceByZone?.[z]?.[at]),'구역별 내성을 모두 입력하세요.');}}
  for(const p of b.patterns){assert(Array.isArray(p.steps)&&p.steps.length>=1&&p.steps.length<=4,'패턴은 1~4개의 공격으로 구성됩니다: '+p.name);p.steps.forEach(id=>assert(ids.has(id),'없는 공격 ID: '+id));}

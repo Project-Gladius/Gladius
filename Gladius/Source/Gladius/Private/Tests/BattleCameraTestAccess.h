@@ -19,7 +19,7 @@ struct FBattleCameraTestAccess
  static void UsePath(ABattleManager* Manager, const FString& Path) { Manager->TestRecordPath=Path; }
  static void BeginPrepared(ABattleManager* Manager)
  {
-  Manager->CutSceneIds.Reset();
+  Manager->bEnableTurnCutScenes = false;
   Manager->StartBattle();
   Manager->GetWorldTimerManager().ClearTimer(Manager->PhaseTimerHandle);
   Manager->StartTurn();
@@ -29,7 +29,7 @@ struct FBattleCameraTestAccess
  {
   Manager->TestRecordPath = FPaths::ProjectSavedDir() / TEXT("Automation") / (FGuid::NewGuid().ToString() + TEXT(".json"));
   IFileManager::Get().MakeDirectory(*FPaths::GetPath(Manager->TestRecordPath), true);
-  Manager->CutSceneIds.Reset();
+  Manager->bEnableTurnCutScenes = false;
   Manager->bRandomizeTestPlayers = false;
   Manager->StartBattle();
   Manager->GetWorldTimerManager().ClearTimer(Manager->PhaseTimerHandle);

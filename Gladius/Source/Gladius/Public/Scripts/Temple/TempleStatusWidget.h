@@ -52,13 +52,8 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Temple Status", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> CombatButton;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Temple Status", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TurnText;
-
 	UFUNCTION()
 	void HandleCombatClicked();
-	UFUNCTION()
-	void HandleTurnStarted(int32 TurnNumber);
 	UFUNCTION()
 	void HandleCombatRequested();
 

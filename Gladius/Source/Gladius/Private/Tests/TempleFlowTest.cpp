@@ -13,13 +13,13 @@
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Temple/Goddess.h"
 #include "Scripts/Temple/TempleCycleController.h"
+#include "Scripts/Temple/TempleCommandQueue.h"
 
 struct FTempleFlowTestAccess
 {
  static void Cycle(ATempleCycleController* C) { C->HandleCycleTimer(); }
- static void Turn(ATempleCycleController* C) { C->HandleTurnTimer(); }
+ static void AllowAllBlessings(ATempleCycleController* C) { C->CommandQueue->AvailableBless = 4; }
  static bool Leaving(ATempleCycleController* C) { return C->bLeavingTemple; }
- static double TurnRate(ATempleCycleController* C) { return C->GetWorldTimerManager().GetTimerRate(C->TurnTimerHandle); }
 };
 namespace
 {
@@ -83,24 +83,16 @@ public:
  }
 };
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleManualFlowTest,"Gladius.Temple.Flow.UnlimitedCyclesAndTurns",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleManualFlowTest,"Gladius.Temple.Flow.UnlimitedCycles",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FTempleManualFlowTest::RunTest(const FString& Parameters)
 {
  FTempleTestWorld T;
- TestEqual(TEXT("Default turn duration is ten minutes"),T.Controller->TurnTime,600.0f);
- TestEqual(TEXT("Independent turn timer is armed"),FTempleFlowTestAccess::TurnRate(T.Controller),600.0);
- TestEqual(TEXT("Starts on turn one"),T.Controller->GetCurrentTurn(),1);
  for(int32 I=0;I<8;++I)FTempleFlowTestAccess::Cycle(T.Controller);
- TestEqual(TEXT("More than five cycles can run"),T.Controller->GetCompletedTurns(),8);
+ TestEqual(TEXT("More than five cycles can run"),T.Controller->GetCompletedCycles(),8);
  TestFalse(TEXT("Cycles never request combat automatically"),FTempleFlowTestAccess::Leaving(T.Controller));
- FTempleFlowTestAccess::Turn(T.Controller);
- TestEqual(TEXT("Turn deadline advances the turn"),T.Controller->GetCurrentTurn(),2);
- TestEqual(TEXT("Turn transition does not reset cycles"),T.Controller->GetCompletedTurns(),8);
  T.Controller->RequestCombatTravel();
  TestTrue(TEXT("Manager takeover request pauses temple"),FTempleFlowTestAccess::Leaving(T.Controller));
- FTempleFlowTestAccess::Cycle(T.Controller);FTempleFlowTestAccess::Turn(T.Controller);
- TestEqual(TEXT("Cycles stop after manual request"),T.Controller->GetCompletedTurns(),8);
- TestEqual(TEXT("Turn timer stops after manual request"),T.Controller->GetCurrentTurn(),2);
+ TestEqual(TEXT("Cycles stop after manual request"),T.Controller->GetCompletedCycles(),8);
  return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleCommandTest,"Gladius.Temple.Flow.CombatCommand",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
@@ -194,12 +186,33 @@ bool FTempleEnhancementIntegrationTest::RunTest(const FString& Parameters)
  R.MaxHPBonus=2;R.DamageBonus=0;R.CurrentHealth=T->Records->MaxHPFor(R)-2;
  T->Records->SaveRecords();
  T->Chat->MaxAllowedComments=100;
+ FTempleFlowTestAccess::AllowAllBlessings(T->Controller);
  for(int32 Tier=1;Tier<=4;++Tier)
   T->Chat->OnReceiveYouTubeCommentWithUsername(FString::Printf(TEXT("blessing-%d"),Tier),TEXT("temple-viewer"),TEXT("Temple user"),FString::Printf(TEXT("!강화 %d"),Tier));
  TestEqual(TEXT("Queueing alone does not apply strength"),R.DamageBonus,0);
  T->Goddess->BlessingDurations.Init(0.01f,4);
  FTempleFlowTestAccess::Cycle(T->Controller);
  ADD_LATENT_AUTOMATION_COMMAND(FTempleEnhancementAssertions(T,this));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleBlessLimitTest,"Gladius.Temple.Flow.BlessingSelectionLimit",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTempleBlessLimitTest::RunTest(const FString& Parameters)
+{
+ auto* D=NewObject<UCommandDispatcher>(); D->Initialize();
+ auto* Q=NewObject<UTempleCommandQueue>(); Q->Bind(D);
+ TestEqual(TEXT("Default blessing allowance"),Q->AvailableBless,3);
+ auto Select=[D](const TCHAR* User,int32 Tier) { D->OnEnhanceCommand.Broadcast(User,User,FString::FromInt(Tier)); };
+ Select(TEXT("A"),1); Select(TEXT("A"),1); Select(TEXT("A"),3); Select(TEXT("A"),4);
+ auto First=Q->TakeSnapshot();
+ TestEqual(TEXT("Repeated choices count"),First.EnhanceTiers[0].Commands.Num(),2);
+ TestEqual(TEXT("Third choice accepted"),First.EnhanceTiers[2].Commands.Num(),1);
+ TestTrue(TEXT("Fourth choice ignored"),First.EnhanceTiers[3].Commands.IsEmpty());
+ Select(TEXT("A"),2); Select(TEXT("B"),2);
+ auto Next=Q->TakeSnapshot();
+ TestEqual(TEXT("Allowance survives cycles and is independent per user"),Next.EnhanceTiers[1].Commands.Num(),1);
+ TestEqual(TEXT("Only second user accepted"),Next.EnhanceTiers[1].Commands[0].UserId,FString(TEXT("B")));
+ Q->Unbind();
  return true;
 }
 

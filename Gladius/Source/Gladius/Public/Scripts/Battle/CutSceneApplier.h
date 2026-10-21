@@ -76,6 +76,12 @@ public:
     bool ApplyCutScene(ECutSceneCharacterStrategy Strategy = ECutSceneCharacterStrategy::DefaultGladius,
         FName CutSceneType = NAME_None);
 
+    // Explicit subject: the scheduler's selected user remains the subject of every shot.
+    UFUNCTION(BlueprintCallable, Category = "CutScene")
+    bool ApplyCutSceneForUser(const FString& UserId, FName CutSceneType);
+
+    void EnsureDefaultCutScenes();
+
     UFUNCTION(BlueprintCallable, Category = "CutScene")
     void CancelCutScene();
 
@@ -107,6 +113,7 @@ protected:
 
 private:
     ABattleManager* ResolveBattleManager() const;
+    bool ApplyCutSceneToSubject(ABattleUnit* Subject, FName CutSceneType);
     bool StartShot(ABattleUnit* Subject, ABattleUnit* Boss);
     void FinishCutScene(bool bInterrupted, bool bNotify = true);
 

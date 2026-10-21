@@ -18,6 +18,7 @@
 #include "MovieScene.h"
 #include "MovieSceneTimeController.h"
 #include "TimerManager.h"
+#include "Misc/PackageName.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCutSceneApplier, Log, All);
 
@@ -31,6 +32,22 @@ ACutSceneApplier::ACutSceneApplier()
     FCutSceneDefinition GladiusSkill1;
     GladiusSkill1.CameraClass = AGladiusSkill1Camera::StaticClass();
     CutScenes.Add(TEXT("GladiusSkill1"), GladiusSkill1);
+    EnsureDefaultCutScenes();
+}
+
+void ACutSceneApplier::EnsureDefaultCutScenes()
+{
+    // Existing designer-assigned sequences/cameras always win.
+    for (const TCHAR* Id : {TEXT("GladiusSkill2"), TEXT("SeraSkill1"), TEXT("SeraSkill2")})
+    {
+        FCutSceneDefinition& Def = CutScenes.FindOrAdd(FName(Id));
+        if (IsValid(Def.Sequence) || Def.CameraClass) continue;
+        const FString Package = FString(TEXT("/Game/Cinematics/Battle/LS_")) + Id;
+        if (FPackageName::DoesPackageExist(Package))
+            Def.Sequence = LoadObject<ULevelSequence>(nullptr, *(Package + TEXT(".LS_") + Id));
+        Def.WorldTimeScale = 1.f;
+        Def.SubjectBindingTag = Def.BossBindingTag = NAME_None;
+    }
 }
 
 ABattleUnit* ACutSceneApplier::GetCurrentSubject() const { return ActiveSubject.Get(); }
@@ -142,6 +159,19 @@ FTransform ACutSceneApplier::MakeOrigin(const AActor& Subject, const AActor& Bos
 
 bool ACutSceneApplier::ApplyCutScene(ECutSceneCharacterStrategy Strategy, FName CutSceneType)
 {
+    return ApplyCutSceneToSubject(FindCharacter(Strategy), CutSceneType);
+}
+
+bool ACutSceneApplier::ApplyCutSceneForUser(const FString& UserId, FName CutSceneType)
+{
+    const ABattleManager* Manager = ResolveBattleManager();
+    const FBattlePlayer* Player = Manager ? Manager->GetBattlePlayers().Find(UserId) : nullptr;
+    if (!Player || Player->HP <= 0 || Player->ReviveCountdown > 0 || !IsValid(Player->Unit)) return false;
+    return ApplyCutSceneToSubject(Player->Unit, CutSceneType);
+}
+
+bool ACutSceneApplier::ApplyCutSceneToSubject(ABattleUnit* Subject, FName CutSceneType)
+{
     if (bApplying || bFinishing || bEndingPlay || !GetWorld() || !GetWorld()->IsGameWorld()) { return false; }
     // 시간 배율/카메라는 월드 공용이므로 다른 Applier와 중복 소유하지 않는다.
     for (TActorIterator<ACutSceneApplier> It(GetWorld()); It; ++It)
@@ -152,6 +182,8 @@ bool ACutSceneApplier::ApplyCutScene(ECutSceneCharacterStrategy Strategy, FName 
     TGuardValue<bool> ApplyingGuard(bApplying, true);
     const FCutSceneDefinition* Definition = CutScenes.Find(CutSceneType);
     ABattleManager* Manager = ResolveBattleManager();
+    if (Definition && !Definition->Sequence && !Definition->CameraClass
+        && (CutSceneType == TEXT("GladiusSkill2") || CutSceneType == TEXT("SeraSkill1") || CutSceneType == TEXT("SeraSkill2"))) return false;
     if (!Definition || !Manager
         || (IsValid(Definition->Sequence) == (Definition->CameraClass != nullptr))
         || !FMath::IsFinite(Definition->WorldTimeScale)
@@ -164,8 +196,7 @@ bool ACutSceneApplier::ApplyCutScene(ECutSceneCharacterStrategy Strategy, FName 
     }
     ABattleUnit* Boss = Manager->GetBossUnit();
     if (!IsValid(Boss)) { return false; }
-    ABattleUnit* Subject = FindCharacter(Strategy);
-    if (!Subject) { return false; }
+    if (!IsValid(Subject)) { return false; }
 
     // 시간 배율을 바꾸기 전에 재생에 필요한 데이터를 먼저 확인한다.
     if (Definition->Sequence)

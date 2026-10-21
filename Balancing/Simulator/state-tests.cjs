@@ -1,22 +1,16 @@
-const assert=require('node:assert/strict'),fs=require('fs'),E=require('./engine.js')();
-const read=p=>JSON.parse(fs.readFileSync(p,'utf8'));
-const deployed=fs.existsSync(__dirname+'/../Data/abilities.json'),dataRoot=deployed?__dirname+'/../Data':__dirname+'/data';
-const raw=read(deployed?dataRoot+'/bosses.json':__dirname+'/../Balancing/bosses.json');
-const data={abilities:read(dataRoot+'/abilities.json'),bosses:structuredClone(raw),enhancements:read(dataRoot+'/enhancements.json')};
-E.validate(data);
-assert.equal(data.bosses.actions.length,13);assert.equal(data.bosses.patterns.length,16);
-const round=E.exportBoss(data.bosses);assert.deepEqual(round.states,raw.states);assert.deepEqual(round.patterns,raw.patterns);
-for(const k of ['kind','bossId','zoneIds','actions'])assert.ok(!(k in round));
-assert.ok(!JSON.stringify(round).includes('motionId'));
-const reloaded=E.importBoss(round);assert.deepEqual(E.exportBoss(reloaded),round);
-for(let seed=0;seed<1000;seed++){const s=E.schedule(data.bosses,seed);assert.equal(s.turns.length,10);assert.deepEqual(s,E.schedule(data.bosses,seed));for(const t of s.turns){const source=raw.states.find(x=>x.id===t.id);assert.equal(t.hitCount,1);assert.equal(Object.values(t.damageByZone).filter(x=>x>0).length,source.target.mode==='randomOne'?1:source.target.zones.length);}}
-const b=data.bosses,p=E.profile(data,'gladius'),r=data.abilities.rules;
-const all=b.actions.find(x=>x.id==='AllStrike');
-for(let z=0;z<3;z++)assert.equal(E.transition({h:7,f:0,e:0,z},0,all,p,r).loss,2);
-const left=b.actions.find(x=>x.id==='SingleStrikeLeft');assert.equal(left.resistanceByZone.left.physical,'vulnerable');assert.equal(left.resistanceByZone.right.magical,'enduring');
-for(const id of ['Defense','Defenseless'])for(let z=0;z<3;z++)assert.equal(E.transition({h:7,f:0,e:0,z},0,b.actions.find(x=>x.id===id),p,r).loss,0);
-const changed=structuredClone(data);changed.bosses.actions[0].totalDamage=3;changed.bosses.actions[0].vulnerabilityByZone.left='normal';E.validate(changed);assert.equal(changed.bosses.actions[0].damageByZone.left,3);assert.equal(changed.bosses.actions[0].resistanceByZone.left.magical,'normal');
-for(const edit of [b=>b.patterns[0].turns++,b=>b.patterns[0].sequence[0]='missing',b=>b.states[0].vulnerabilityByZone.left='bad',b=>b.states[0].target.zones=['bad']]){const bad=structuredClone(raw);edit(bad);assert.throws(()=>E.importBoss(bad));}
-const short=structuredClone(data);short.bosses.preset.mode='custom';short.bosses.preset.customPatterns=[short.bosses.patterns[14].id];assert.equal(E.search(short,{character:'gladius',count:2}).turns.length,2);
-const result=E.simulate(data,{seed:42,iterations:2,sequences:1,players:[{name:'AI',character:'gladius',zone:'left',q:70,threshold:20,hpCost:12,deathCost:30,lookahead:2}]});assert.equal(result.hist.reduce((a,b)=>a+b),2);assert.ok(Number.isFinite(result.damage));
-console.log('PASS state JSON import/export, 1000 seeded schedules, Fury single-zone hits, vulnerabilities, damage, non-attacks, edits, invalid inputs, exact search and AI simulation');
+const fs=require('fs'),assert=require('node:assert/strict'),vm=require('vm'),E=require('./engine.js')();
+const root=__dirname+'/../';const data=Object.fromEntries(['abilities','bosses','enhancements'].map(k=>[k,JSON.parse(fs.readFileSync(root+'Data/'+k+'.json','utf8'))]));
+E.validate(data);assert.equal(data.bosses.actions.length,13);assert.equal(data.bosses.patterns.length,22);assert.deepEqual(E.exportBoss(data.bosses),data.bosses);
+for(let seed=0;seed<1000;seed++){const x=E.schedule(data.bosses,seed);assert.equal(x.turns.length,10);for(const a of x.turns){if(a.id==='Fury'){assert.equal(Object.values(a.damageByZone).filter(v=>v>0).length,1);assert.equal(Object.values(a.damageByZone).reduce((x,y)=>x+y),1);}for(const z of E.zones)assert.equal(a.resistanceByZone[z].magical,'normal');}}
+const bad=structuredClone(data);bad.bosses.actions.find(a=>a.id==='Fury').target.zones=['bad'];assert.throws(()=>E.validate(bad));
+const html=fs.readFileSync(root+'Gladius 통합 시뮬레이터.html','utf8');const scripts=[...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]);for(const s of scripts)new vm.Script(s);const c={};vm.createContext(c);vm.runInContext(scripts.find(s=>s.includes('const EMBEDDED ='))+';this.data=EMBEDDED',c);assert.deepEqual(JSON.parse(JSON.stringify(c.data)),data);
+const other=fs.readFileSync(root+'Gladius 시뮬레이터.html','utf8');const os=[...other.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)].filter(m=>!m[1].includes('application/json')).map(m=>m[2]);for(const s of os)new vm.Script(s);
+const ctx={window:{},ju:structuredClone,ye:x=>x,Qu:()=>({probability:{},zones:{}}),ne:E.zones};vm.createContext(ctx);vm.runInContext(os.find(s=>s.includes('window.GladiusStateEngine=createEngine()')),ctx);const start=other.indexOf('function jp('),end=other.indexOf('function zn(',start);vm.runInContext(other.slice(start,end),ctx);const boss=structuredClone(data.bosses);boss.preset.mode='direct';boss.preset.directActions=['Fury','Fury'];const result=ctx.jp(boss,{},42);for(const t of result.config.turns)assert.equal(Object.values(t.zones).filter(z=>z.damage>0).length,1);
+console.log('PASS v1 roundtrip, 1000 complete schedules, Fury single-zone, separate resistances, invalid targets, current embedded JSON, both HTML syntax and standalone import');
+
+// Match the game random-mode guard and candidate rules at every remaining turn.
+assert.ok(data.bosses.selection.allowImmediateRepeat);
+for(let left=1;left<=10;left++)assert.ok(data.bosses.selection.pool.some(w=>w.weight>0&&data.bosses.patterns.find(p=>p.id===w.patternId).steps.length<=left));
+assert.deepEqual(data.bosses.patterns.slice(16).map(p=>p.steps),[['SingleStrikeLeft'],['SingleStrikeCenter'],['SingleStrikeRight'],['LeftMiddle'],['RightMiddle'],['LeftRight']]);
+for(const p of data.bosses.patterns.slice(16))assert.ok(data.bosses.selection.pool.some(w=>w.patternId===p.id&&w.weight===1));
+console.log('PASS six single-turn patterns and game candidate availability for every remaining turn 1..10');

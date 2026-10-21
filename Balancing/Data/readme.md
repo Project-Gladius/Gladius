@@ -12,7 +12,7 @@
 
 ## 읽는 방법과 공통 항목
 
-- `characters[]`, `states[]`처럼 `[]`가 붙은 표기는 배열의 각 항목을 뜻합니다. 실제 JSON 키에는 `[]`가 없습니다.
+- `characters[]`, `actions[]`처럼 `[]`가 붙은 표기는 배열의 각 항목을 뜻합니다. 실제 JSON 키에는 `[]`가 없습니다.
 - 비율은 **1 = 100%**로 저장합니다. `0.25`는 25%, `0.5`는 50%입니다. 치명타 **추가** 피해 50%는 최종 피해 **1.5배**를 뜻합니다.
 - `left` / `center` / `right`는 플레이어 화면 기준 **좌 / 중 / 우**입니다.
 - `physical` / `magical`은 **물리 / 마법**입니다.
@@ -23,9 +23,9 @@
 
 | 항목            | 뜻                      | 현재값 / 사용법                                                           |
 | --------------- | ----------------------- | ------------------------------------------------------------------------- |
-| `schemaVersion` | JSON 구조의 버전        | 능력치·강화는 `1`, 보스는 `2`. 세부 필드도 로더와 일치해야 합니다.        |
-| `kind`          | 파일 종류 식별자        | 능력치: `gladius-abilities`, 강화: `gladius-enhancements`. 보스에는 없음. |
-| `revision`      | 데이터 내용의 개정 번호 | 능력치 `1`, 강화 `2`. 보스에는 없음.                                      |
+| `schemaVersion` | JSON 구조의 버전        | 모두 `1`. 확장 필드의 실행 지원 여부도 확인해야 합니다.        |
+| `kind`          | 파일 종류 식별자        | 능력치: `gladius-abilities`, 보스: `gladius-boss-patterns`, 강화: `gladius-enhancements`. |
+| `revision`      | 데이터 내용의 개정 번호 | 능력치 `1`, 보스 `2`, 강화 `2`.                                      |
 
 ## 1. abilities.json — 초기 능력치와 전투 규칙
 
@@ -120,89 +120,63 @@
 | `physical` | 이 턴의 보스 물리 내성                                          | `normal`                              |
 | `magical`  | 이 턴의 보스 마법 내성                                          | `normal`                              |
 
-## 2. bosses.json — 보스 상태와 패턴
+## 2. bosses.json — 보스 행동과 패턴 (2026-10-21 갱신)
 
-### 2-1. 기본 구조
+버전 2의 상태·패턴 내용을 보존하고 기존 버전 1 구조로 되돌렸습니다. 트루돈의 행동 13개와 패턴 22개를 유지합니다. `states`, `sequence`, `turns`, `totalDamage`, `telegraphText`, `simulation`은 저장하지 않습니다.
 
-현재 보스는 **트루돈**, `schemaVersion`은 **2**입니다. `states`에 13개 상태, `patterns`에 16개 패턴을 저장합니다. `kind`, `revision`, `bossId`, `zoneIds`는 사용하지 않습니다.
+### 2-1. 기본 정보
 
-| 항목            | 의미                                                                                     |
-| --------------- | ---------------------------------------------------------------------------------------- |
-| `schemaVersion` | 상태·패턴 형식 버전. 현재 `2`.                                                           |
-| `name`          | 보스 이름. 현재 `트루돈`.                                                                |
-| `damageRule`    | `totalDamage`는 타격 구역에 있는 각 대상이 받는 피해이며 구역 수로 나누지 않는다는 규칙. |
-| `states`        | 한 턴에 실행할 상태 사전.                                                                |
-| `patterns`      | 상태 ID를 순서대로 묶은 패턴 목록.                                                       |
+`schemaVersion`은 `1`, `kind`는 `gladius-boss-patterns`, `revision`은 1턴 패턴을 추가한 개정인 `2`입니다. `name`은 트루돈, `maxHp`는 100입니다. `bossId`, `zoneIds`는 사용하지 않습니다.
 
-### 2-2. states[] — 한 턴에 한 상태
+### 2-2. actions[] — 한 턴의 행동
 
-한 턴에는 언제나 상태 하나만 존재합니다. 상태는 여러 패턴에서 재사용할 수 있습니다. 개별 모션·카메라워크는 상태 ID에 별도 스크립트로 연결할 예정이므로 JSON에 모션 ID를 저장하지 않습니다.
+한 행동은 한 턴의 상태입니다. 공격뿐 아니라 `Defense`, `Defenseless`도 포함합니다.
 
-| 항목               | 의미 / 규칙                                                                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`               | 고유 상태 ID. 예: `SingleStrikeLeft`. 영문 대소문자·숫자·밑줄 사용.                                                                         |
-| `totalDamage`      | 타격 구역의 각 대상이 받는 총 피해 정수. `AllStrike`와 `StrongStrikeLeft/Center/Right`는 2, 나머지 공격은 1, `Defense`와 `Defenseless`는 0. |
-| `target.mode`      | `fixed`: 지정 구역 모두 타격. `randomOne`: 후보 중 한 구역만 타격. `none`: 비공격.                                                          |
-| `target.zones`     | `left`, `center`, `right` 중 타격 구역 또는 무작위 선택 후보. 비공격은 빈 배열.                                                             |
-| `telegraphText`    | 예고 텍스트. 현재 `test:텍스트` 형식의 임시 문구.                                                                                           |
-| `resistanceByZone` | 세 구역 각각의 보스 물리·마법 내성. 플레이어가 보스에게 주는 피해에 적용.                                                                   |
+| 필드 | 의미 |
+|---|---|
+| `id` | 기존 상태 ID를 그대로 유지한 행동 ID. |
+| `name` | 표시 이름. 별도 이름이 없던 상태는 ID를 사용. |
+| `hitCount` | 한 턴 안의 타격 횟수. 현재 모두 1. |
+| `damageByZone` | `left`, `center`, `right`의 1타당 피해. 기존 총 피해를 타격 구역마다 그대로 기록하고 나머지는 0. 구역 수로 나누지 않음. |
+| `attributeByZone` | 구역별 보스 공격 속성. 기존 변환 방식대로 모두 `physical`. |
+| `resistanceByZone` | 구역별 보스 `physical`·`magical` 내성. 물리 값은 이전 데이터를 유지하고 마법은 모두 `normal`. |
+| `telegraph.text` | 기존 `test:` 예고 문구를 그대로 이동. |
+| `telegraph.motionId`, `attackMotionId` | 기존 형식 호환용 빈 문자열. 연출은 추후 행동 ID를 통해 별도 스크립트로 연결. |
 
-`resistanceByZone`은 이전 버전의 물리·마법 분리 형식을 사용합니다. 각 구역에 `physical`, `magical`을 모두 기록합니다. 값은 `enduring`(견딤), `normal`(보통), `vulnerable`(취약)이며 현재 능력치 JSON의 배율은 각각 0.5, 1, 1.5입니다.
+내성 값은 `enduring`(견딤), `normal`(보통), `vulnerable`(취약)입니다. 현재 능력치 JSON에서 각각 0.5, 1, 1.5배이며, 플레이어가 보스에게 주는 피해에 적용합니다.
 
-기존 구역별 취약도는 **물리 내성에 그대로 유지**합니다. 이전 `vulnerabilityByZone`의 `resistant`는 같은 의미의 `enduring`으로 옮겼습니다. **마법 내성은 모든 상태·구역에서 항상 `normal`**입니다. `vulnerabilityByZone`은 더 이상 저장하지 않습니다.
+`AllStrike`와 세 `StrongStrike`의 타격 구역 피해는 2, 나머지 공격은 1, 비공격 상태는 모든 구역 0입니다.
 
-```json
-{
-  "id": "SingleStrikeLeft",
-  "totalDamage": 1,
-  "target": { "mode": "fixed", "zones": ["left"] },
-  "telegraphText": "test:왼쪽을 내려칠 준비를 합니다.",
-  "resistanceByZone": {
-    "left": { "physical": "vulnerable", "magical": "normal" },
-    "center": { "physical": "normal", "magical": "normal" },
-    "right": { "physical": "enduring", "magical": "normal" }
-  }
-}
-```
+**Fury의 데이터 보존 확장:** Fury에는 `target: {"mode":"randomOne","zones":["left","center","right"]}`를 남겼습니다. `damageByZone`의 각 1은 해당 구역이 선택되었을 때의 피해입니다. 의도된 실행은 세 구역 중 하나만 선택하는 것입니다. 현재 게임의 버전 1 로더는 이 추가 필드를 읽지 않아 그대로 실행하면 세 구역 모두 피해 1로 처리합니다. 시뮬레이터는 무작위 단일 구역 적용을 지원하며, 게임 코드의 후속 대응은 필요합니다. 버전 번호 복귀만으로 이 동작이 구현된 것은 아닙니다.
 
-공격 상태는 `SingleStrikeLeft/Center/Right`, `StrongStrikeLeft/Center/Right`, `LeftMiddle`, `RightMiddle`, `LeftRight`, `AllStrike`, `Fury`입니다. `Fury`는 세 구역 중 하나를 무작위로 타격합니다. `Defense`, `Defenseless`는 비공격 상태입니다. 피격 구역과 보스 내성은 독립된 설정입니다.
+### 2-3. patterns[] — 여러 행동의 순서
 
-### 2-3. patterns[] — 상태의 실행 순서
+| 필드 | 의미 |
+|---|---|
+| `id` | `pattern_01`부터 `pattern_22`까지 부여한 고유 ID. 선택 설정에서 참조. |
+| `name` | 기존 패턴 이름 그대로 유지. |
+| `steps` | 기존 `sequence`를 그대로 옮긴 행동 ID 배열. 한 원소가 한 턴. |
 
-| 항목       | 의미 / 규칙                                                              |
-| ---------- | ------------------------------------------------------------------------ |
-| `name`     | 패턴 이름.                                                               |
-| `turns`    | 소요 턴 수. 반드시 `sequence.length`와 동일해야 합니다.                  |
-| `sequence` | 실행 순서대로 나열한 상태 ID 배열. 모든 ID는 `states`에 존재해야 합니다. |
+소요 턴 수는 `steps.length`로 계산하며 별도의 `turns`는 저장하지 않습니다. 기존 16개 패턴은 2~3턴이며, 좌·중·우·좌중·중우·좌우의 1턴 패턴 6개를 추가해 총 22개입니다. 행동 ID와 패턴 순서는 변경하지 않았습니다.
 
 ```json
 {
+  "id": "pattern_01",
   "name": "좌, 중, 우",
-  "turns": 3,
-  "sequence": ["SingleStrikeLeft", "SingleStrikeCenter", "SingleStrikeRight"]
+  "steps": ["SingleStrikeLeft", "SingleStrikeCenter", "SingleStrikeRight"]
 }
 ```
 
-현재는 2~3턴 패턴 16개입니다. `좌, 중, 우`, `좌, 좌중, 우`, `중, 좌중`, `좌, 우 강공격`, `좌, 중 강공격`, `중, 좌 강공격`, `중, 좌, 우` 및 각각의 좌우반전 패턴 14개에 `Fury 연속 2번`, `Defense → AllStrike → Defenseless`가 추가되어 있습니다. `id`, `steps`는 패턴의 저장 필드가 아닙니다.
+### 2-4. 실행 설정
 
-### 2-4. 선택적 simulation 설정과 HTML 호환성
+- `encounter`: `turns: 10`, `patternFit: "remainingTurns"`.
+- `selection`: `mode: "weightedRandom"`, `allowImmediateRepeat: true`. `pool`에 22개 패턴 ID와 각각 가중치 1을 기록합니다.
+- `preset`: `mode: "random"`, `seed: 20261018`. 모드 전환용 `customPatterns`는 첫 패턴 ID, `directActions`는 첫 패턴의 행동 순서를 보관합니다.
+- 게임에서 `custom`·`direct` 모드로 전환할 때는 해당 목록의 총 턴 수와 `encounter.turns`를 일치시켜야 합니다.
 
-현재 원본 JSON에는 `simulation`이 없습니다. 기존 통합 시뮬레이터는 상태 형식을 내부 공격 형식으로 변환할 때 기본 설정을 만들며, 보스 JSON을 저장할 때 다음 설정을 `simulation` 아래 추가합니다.
+현재 게임은 랜덤 모드에서 양의 가중치인 1턴 패턴을 요구합니다. 추가한 6개 패턴은 각각 가중치 1이며 연속 선택도 허용하므로, 남은 1~10턴 모두에서 선택 가능한 후보가 존재합니다. 기존 2~3턴 패턴과 함께 총 10턴을 채웁니다.
 
-| 항목                          | 기본값 / 의미                                                      |
-| ----------------------------- | ------------------------------------------------------------------ |
-| `maxHp`                       | 100. 현재 분석에서 보스 처치 종료에 쓰지 않는 보관값.              |
-| `encounter`                   | `{ "turns": 10, "patternFit": "remainingTurns" }`. 랜덤 구간 길이. |
-| `allowImmediateRepeat`        | `true`. 같은 패턴 연속 선택 허용.                                  |
-| `weights`                     | 패턴 배열 순서에 대응하는 가중치. 기본 모두 1, 0이면 선택 제외.    |
-| `preset.mode`                 | 기본 `random`. `custom`, `direct`도 지원.                          |
-| `preset.seed`                 | 기본 20261018.                                                     |
-| `preset.customPatternIndices` | 기본 `[0]`. 0부터 시작하는 패턴 배열 인덱스의 실행 순서.           |
-| `preset.directActions`        | 기본 첫 패턴의 상태 ID 순서.                                       |
-
-랜덤 선택은 남은 턴·가중치·연속 선택 제한을 확인하고, 선택 후에도 남은 턴을 끝까지 채울 수 있는 패턴만 후보로 삼습니다. 사용자 지정은 선택한 패턴의 총 길이, 직접 지정은 상태 목록 길이가 실행 턴 수입니다.
-
-**2026-10-18 호환성 주의:** 이번 변경은 JSON과 문서에만 적용했습니다. 현재 두 HTML의 상태 로더는 아직 `vulnerabilityByZone`을 요구하며, 이를 물리·마법 양쪽에 동일하게 적용합니다. 따라서 새 `resistanceByZone` 형식의 보스 JSON은 현재 HTML에서 불러오기 검증에 실패합니다. HTML 로더·편집기·내보내기를 새 형식에 맞추는 후속 수정이 필요합니다. 위 `simulation` 설명은 기존 구현의 동작 설명입니다.
+2026-10-21 시뮬레이터 갱신: 통합 HTML은 현재 JSON 3종을 내장하며 버전 1 행동·다중 턴 패턴·Fury의 무작위 단일 구역 타격·분리된 내성을 지원합니다. 일반 HTML도 현재 보스 JSON을 불러와 턴으로 펼칠 수 있습니다. 일반 HTML의 능력치·강화 JSON 개별 불러오기는 지원하지 않습니다. 축복 정의는 통합 HTML에서 보존하지만 효과 계산은 아직 연결하지 않았습니다.
 
 ## 3. enhancements.json — 강화 수치와 축복 정의
 
@@ -302,7 +276,7 @@
 
 실제 공격은 12 또는 18의 정수 피해입니다. **기대 피해나 반복 실험 평균이 소수인 것은 반올림 누락이 아닙니다.** 일반·치명타 피해를 각각 반올림한 뒤 평균을 냅니다.
 
-이전 공격 형식의 계산 예로, 보스 피해 3, `hitCount=2`, 방어 시 피해 비율 50%라면 (현재 상태 JSON에는 `hitCount`가 없으며 한 상태의 총 피해를 사용):
+이전 공격 형식의 계산 예로, 보스 피해 3, `hitCount=2`, 방어 시 피해 비율 50%라면 (현재 행동은 모두 `hitCount=1`):
 
 ```text
 방어 피격 피해 = 올림(3 × 0.5) × 2 = 2 × 2 = 4
@@ -314,9 +288,9 @@
 ## 5. 편집 시 참고
 
 - 숫자는 따옴표 없이, 비율은 소수로 입력합니다. JSON에는 주석을 넣지 않습니다.
-- 상태 ID를 바꾸면 패턴의 `sequence`와 선택적 `simulation.preset.directActions` 참조도 수정합니다. 패턴 순서를 바꾸면 `weights`, `customPatternIndices`의 대응도 확인합니다.
+- 행동 ID를 바꾸면 `patterns[].steps`, `preset.directActions`도 수정합니다. 패턴 ID를 바꾸면 `selection.pool[].patternId`, `preset.customPatterns`도 수정합니다.
 - 구역별 객체는 `left`, `center`, `right`를 모두 유지하고, 내성 객체에는 `physical`, `magical`을 모두 지정합니다.
-- 기존 시뮬레이터의 지원 범위는 상태·패턴 각각 최대 100개, 패턴당 1~4턴입니다. `turns`와 `sequence` 길이를 일치시키세요. 새 내성 형식은 2-4절의 후속 호환 작업이 필요합니다.
+- 행동·패턴은 각각 최대 100개, 패턴의 `steps`는 1~4개입니다. 현재 `hitCount`는 모두 1입니다.
 - 저장한 JSON을 사용하려면 통합 HTML에서 **Data 폴더 연결** 또는 **JSON 3개 불러오기**를 사용합니다. HTML을 더블클릭하기만 하면 빌드 당시 포함된 데이터 복사본으로 시작합니다.
 - 화면의 **JSON 직접 편집 → 검증·적용**은 메모리에 적용합니다. 파일에도 반영하려면 저장 버튼을 사용합니다.
 
