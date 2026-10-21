@@ -8,6 +8,8 @@
 class USkeletalMeshComponent;
 class UWidgetComponent;
 class UCurveFloat;
+class UBattlePlayerNameplate;
+struct FBattlePlayerUIData;
 
 //전투에 등장하는 유닛. 메시·크기·이름표 위치는 블루프린트에서 지정한다.
 //BattleManager가 PlayerUnitClass / BossUnitClass로 어떤 블루프린트를 쓸지 고른다
@@ -27,6 +29,11 @@ public:
 	//보스는 체력이 없어 받은 피해만 보여준다
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetLabelText(const FString& Text);
+
+	// Install and update the temporary player HUD on the existing screen-space nameplate.
+	void SetPlayerUI(const FBattlePlayerUIData& Data);
+	void SetPlayerUIVisible(bool bVisible);
+	void UpdatePlayerUIScale(const FVector& CameraLocation);
 
 	//Duration 동안 Target으로 미끄러져 간다. 0 이하면 즉시 이동한다.
 	//이동하는 동안만 Tick이 돌고 도착하면 다시 꺼진다.
@@ -152,6 +159,10 @@ public:
 	//Mesh가 아니라 Root에 붙는다. 메시 크기와 무관하게 높이를 직접 정할 수 있다
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
 	TObjectPtr<UWidgetComponent> Nameplate;
+
+	// Temporary C++ widget by default; replace with a derived WBP when art is ready.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Battle|UI")
+	TSubclassOf<UBattlePlayerNameplate> PlayerUIClass;
 
 	//이동 가감속 곡선. 비워두면 등속으로 간다.
 	//가로축 0~1이 이동 구간 전체, 세로축 0~1이 진행도다

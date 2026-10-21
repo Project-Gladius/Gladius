@@ -1,5 +1,6 @@
 ﻿#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
+#include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Scripts/Battle/BattleSpot.h"
 #include "Scripts/Battle/CutSceneApplier.h"
 #include "Scripts/Backend/ChatCommandParser.h"
@@ -148,6 +149,7 @@ void ABattleManager::StopBattle()
  if (bBattleRunning) SaveRecords();
  bBattleRunning = false;
  Phase = EBattlePhase::BattleEnd;
+ RefreshPlayerUI();
  StopTurnCutScenes();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
  {
@@ -820,6 +822,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 	{
 		Player->Unit->OnActionSelected(Action);
 	}
+	RefreshPlayerUI();
 
 	return true;
 }
@@ -888,6 +891,7 @@ void ABattleManager::StartTurn()
 		*TelegraphedAction.Name, *ZonesLabel(TelegraphedAction));
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, FMath::Max(0.001f, TelegraphSeconds), false);
+	RefreshPlayerUI();
 }
 
 void ABattleManager::BeginInput()
@@ -913,6 +917,7 @@ void ABattleManager::BeginCollect()
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 수집 — %.1f초"), TurnIndex, CollectSeconds);
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginMove, FMath::Max(0.001f, CollectSeconds), false);
+	RefreshPlayerUI();
 }
 
 TArray<FName> ABattleManager::CutSceneIdsFor(const FString& ClassId, EBattleAction Action)
@@ -998,8 +1003,13 @@ void ABattleManager::PlayNextCutScene()
  while (IsValid(CutSceneApplier) && CutSceneIndex < ActiveCutSceneIds.Num())
  {
   const FName Id = ActiveCutSceneIds[CutSceneIndex++];
-  if (CutSceneApplier->ApplyCutSceneForUser(CutSceneUserId, Id)) return;
+  if (CutSceneApplier->ApplyCutSceneForUser(CutSceneUserId, Id))
+  {
+   RefreshPlayerUI();
+   return;
+  }
  }
+ RefreshPlayerUI();
 }
 
 void ABattleManager::StopTurnCutScenes()
@@ -1178,6 +1188,7 @@ void ABattleManager::BeginMove()
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, FMath::Max(0.001f, MoveSeconds), false);
  StartMoveCutScenes();
+ RefreshPlayerUI();
 }
 
 void ABattleManager::AssignSlots()
@@ -1265,6 +1276,7 @@ void ABattleManager::ResolveTurn()
 {
 	//이동이 끝났고 이제 공격 모션이 도는 구간이다
 	Phase = EBattlePhase::BossAction;
+	RefreshPlayerUI();
 
 	//turnOrder의 첫 항목 — 회피 이동. 여기서야 구역이 바뀐다.
 	//BeginMove에서 미리 바꾸면 아직 떠나지도 않은 자리를 남이 배정받는다
@@ -2139,8 +2151,53 @@ void ABattleManager::UpdateVisuals()
 		//사망 중에는 자리만 잡아두고 숨긴다
 		P.Unit->SetActorHiddenInGame(P.ReviveCountdown > 0);
 
-		//위치는 이동 단계가 옮긴다. 여기서는 이름표만 갱신한다
-		P.Unit->SetLabel(P.DisplayName, P.HP, P.MaxHP);
+	}
+	RefreshPlayerUI();
+}
+
+void ABattleManager::RefreshPlayerUI()
+{
+	const bool bCutScenePlaying = Phase == EBattlePhase::Move
+		&& IsValid(CutSceneApplier) && CutSceneApplier->IsPlaying();
+	const bool bShowInPhase = Phase != EBattlePhase::BattleStart && Phase != EBattlePhase::BattleEnd;
+
+	for (const TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		const FBattlePlayer& Player = Pair.Value;
+		if (!IsValid(Player.Unit)) continue;
+
+		FBattlePlayerUIData Data;
+		Data.DisplayName = Player.DisplayName;
+		Data.HP = Player.HP;
+		Data.MaxHP = Player.MaxHP;
+		Data.Fever = Player.Fever;
+		Data.Action = (Phase == EBattlePhase::Prepare || Phase == EBattlePhase::Collect)
+			? Player.PendingAction : EBattleAction::Idle;
+
+		if (Classes.IsValidIndex(Player.ClassIndex))
+		{
+			const FCharacterDef& Character = Classes[Player.ClassIndex];
+			Data.DefenseReduction = 1.f - Character.DefenseDamageRatio;
+			if (Data.Action == EBattleAction::Attack1 || Data.Action == EBattleAction::Attack2)
+			{
+				const FAttackDef& Attack = Character.Attacks[Data.Action == EBattleAction::Attack1 ? 0 : 1];
+				Data.BaseDamage = Attack.BaseDamage;
+				Data.BonusDamage = FMath::RoundToInt(Player.DamageBonus + Player.Fever * FeverDamageCoefficient);
+				Data.CritChance = FMath::Min(Attack.CritChance + Player.CritChanceBonus, CritChanceCap);
+				Data.CritDamage = Attack.CritDamage + Player.CritDamageBonus;
+			}
+		}
+
+		if (Data.Action == EBattleAction::AvoidL || Data.Action == EBattleAction::AvoidM
+			|| Data.Action == EBattleAction::AvoidR)
+		{
+			Data.bFeverWillDrop = DecayFever(Player.Fever, Player.EvadeStreak + 1,
+				EvadeStreakN, EvadeFeverReduction, EvadeRepeatMode, FeverRounding) < Player.Fever;
+		}
+
+		Player.Unit->SetPlayerUI(Data);
+		Player.Unit->SetPlayerUIVisible(bShowInPhase && Player.ReviveCountdown == 0
+			&& (!bCutScenePlaying || Pair.Key == CutSceneUserId));
 	}
 }
 
@@ -2196,6 +2253,23 @@ void ABattleManager::Tick(float DeltaTime)
 	}
 
 	StatusText->SetText(FText::FromString(Header + TEXT("\n") + Body));
+
+	// Screen-space widgets keep a constant pixel size unless we scale them explicitly.
+	PlayerUIScaleElapsed += DeltaTime;
+	if (PlayerUIScaleElapsed >= 0.1f)
+	{
+		PlayerUIScaleElapsed = 0.f;
+		if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+		{
+			FVector CameraLocation;
+			FRotator CameraRotation;
+			PC->GetPlayerViewPoint(CameraLocation, CameraRotation);
+			for (const TPair<FString, FBattlePlayer>& Pair : Players)
+			{
+				if (IsValid(Pair.Value.Unit)) Pair.Value.Unit->UpdatePlayerUIScale(CameraLocation);
+			}
+		}
+	}
 }
 
 // ---------------- 입력 ----------------

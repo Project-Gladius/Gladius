@@ -707,6 +707,8 @@ private:
 
 	void SpawnBoss();
 	void UpdateVisuals();
+	void RefreshPlayerUI();
+	float PlayerUIScaleElapsed = 0.f;
 	void BindActionKeys();
 
 	//투기장 테두리와 레인 경계선. 표시만 하고 통행은 막지 않는다

@@ -1,5 +1,6 @@
 ﻿#include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/UnitNameplate.h"
+#include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Curves/CurveFloat.h"
@@ -34,6 +35,7 @@ ABattleUnit::ABattleUnit()
 
 	//블루프린트에서 Widget Class를 바꾸면 그쪽이 우선한다
 	Nameplate->SetWidgetClass(UUnitNameplate::StaticClass());
+	PlayerUIClass = UBattlePlayerNameplate::StaticClass();
 }
 
 void ABattleUnit::BeginPlay()
@@ -275,6 +277,38 @@ void ABattleUnit::SetLabelText(const FString& Text)
 {
 	PendingLabel = Text;
 	ApplyLabel();
+}
+
+void ABattleUnit::SetPlayerUI(const FBattlePlayerUIData& Data)
+{
+	UClass* DesiredClass = PlayerUIClass
+		? PlayerUIClass.Get() : UBattlePlayerNameplate::StaticClass();
+	if (Nameplate->GetWidgetClass() != DesiredClass)
+	{
+		Nameplate->SetWidgetClass(DesiredClass);
+		Nameplate->SetPivot(FVector2D(0.5f, 1.f));
+		Nameplate->InitWidget();
+	}
+	if (UBattlePlayerNameplate* Widget = Cast<UBattlePlayerNameplate>(Nameplate->GetUserWidgetObject()))
+	{
+		Widget->SetDisplayData(Data);
+	}
+}
+
+void ABattleUnit::SetPlayerUIVisible(bool bVisible)
+{
+	Nameplate->SetVisibility(bVisible);
+}
+
+void ABattleUnit::UpdatePlayerUIScale(const FVector& CameraLocation)
+{
+	if (UBattlePlayerNameplate* Widget = Cast<UBattlePlayerNameplate>(Nameplate->GetUserWidgetObject()))
+	{
+		const float Distance = FVector::Dist(CameraLocation, Nameplate->GetComponentLocation());
+		const float Scale = FMath::Clamp(2400.f / FMath::Max(Distance, 1.f), 0.70f, 1.20f);
+		Widget->SetRenderTransformPivot(FVector2D(0.5f, 1.f));
+		Widget->SetRenderScale(FVector2D(Scale, Scale));
+	}
 }
 
 void ABattleUnit::ApplyLabel()
