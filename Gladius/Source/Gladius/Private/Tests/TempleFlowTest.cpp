@@ -177,6 +177,17 @@ public:
   Test->TestEqual(TEXT("Strength increases damage level once"),R.DamageBonus,1);
   Test->TestEqual(TEXT("Agility increases crit chance level once"),R.CritChanceBonus,1);
   Test->TestEqual(TEXT("Sharpness increases crit damage level once"),R.CritDamageBonus,1);
+  const TArray<FChatLogEntry>& Entries=T->Instance->GetSubsystem<UChatLogSubsystem>()->GetEntries();
+  Test->TestEqual(TEXT("Only applied blessings enter the chat log"),Entries.Num(),4);
+  if(Entries.Num()==4)
+  {
+   for(int32 Index=0;Index<4;++Index)
+   {
+    Test->TestEqual(TEXT("Blessing appears in tier order"),Entries[Index].EnhancementTier,Index+1);
+    Test->TestEqual(TEXT("Blessing is a temple result, not a raw command"),Entries[Index].Speaker,EChatLogSpeaker::Temple);
+    Test->TestFalse(TEXT("Raw command prefix is hidden"),Entries[Index].Message.Contains(TEXT("!강화")));
+   }
+  }
   FString Json;FFileHelper::LoadFileToString(Json,*FBattleCameraTestAccess::Path(T->Records));
   FPlayerRecordFile Saved;FJsonObjectConverter::JsonObjectStringToUStruct(Json,&Saved);
   Test->TestEqual(TEXT("Completed blessings persisted one user"),Saved.Records.Num(),1);
@@ -219,6 +230,7 @@ bool FTempleEnhancementIntegrationTest::RunTest(const FString& Parameters)
  for(int32 Tier=1;Tier<=4;++Tier)
   T->Chat->OnReceiveYouTubeCommentWithUsername(FString::Printf(TEXT("blessing-%d"),Tier),TEXT("temple-viewer"),TEXT("Temple user"),FString::Printf(TEXT("!강화 %d"),Tier));
  TestEqual(TEXT("Queueing alone does not apply strength"),R.DamageBonus,0);
+ TestEqual(TEXT("Pending commands are not shown as applied"),T->Instance->GetSubsystem<UChatLogSubsystem>()->GetEntries().Num(),0);
  T->Goddess->BlessingDurations.Init(0.01f,4);
  FTempleFlowTestAccess::Cycle(T->Controller);
  ADD_LATENT_AUTOMATION_COMMAND(FTempleEnhancementAssertions(T,this));

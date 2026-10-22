@@ -154,7 +154,7 @@ void UChatLogWidget::AppendEntry(const FChatLogEntry& Entry)
 
 	const FLinearColor NameColor = Entry.Speaker == EChatLogSpeaker::Goddess
 		? FLinearColor(1.0f, 0.62f, 0.78f)
-		: Entry.Speaker == EChatLogSpeaker::Admin
+		: Entry.Speaker == EChatLogSpeaker::Admin || Entry.Speaker == EChatLogSpeaker::Temple
 			? FLinearColor(1.0f, 0.82f, 0.32f)
 			: FLinearColor(0.28f, 0.82f, 1.0f);
 	UBorder* Row = WidgetTree->ConstructWidget<UBorder>();

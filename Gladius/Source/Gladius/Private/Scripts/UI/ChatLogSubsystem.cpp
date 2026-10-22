@@ -32,6 +32,22 @@ void UChatLogSubsystem::AddGoddessMessage(const FString& Message)
 	AddEntry(MoveTemp(Entry));
 }
 
+void UChatLogSubsystem::AddTempleEnhancement(const FString& UserId, const FString& DisplayName, int32 Tier)
+{
+	if (Tier < 1 || Tier > 4) return;
+	static const TCHAR* EffectNames[] = { TEXT("체력 회복"), TEXT("공격력 증가"),
+		TEXT("치명타 확률 증가"), TEXT("치명타 피해량 증가") };
+	FChatLogEntry Entry;
+	Entry.UserId = UserId;
+	Entry.DisplayName = TEXT("신전");
+	Entry.Message = FString::Printf(TEXT("%s: 강화 %d 적용 (%s)"),
+		DisplayName.IsEmpty() ? *UserId : *DisplayName, Tier, EffectNames[Tier - 1]);
+	Entry.Speaker = EChatLogSpeaker::Temple;
+	Entry.EnhancementTier = Tier;
+	Entry.CreatedAt = FDateTime::UtcNow();
+	AddEntry(MoveTemp(Entry));
+}
+
 void UChatLogSubsystem::AddEntry(FChatLogEntry Entry)
 {
 	Entry.Message.TrimStartAndEndInline();

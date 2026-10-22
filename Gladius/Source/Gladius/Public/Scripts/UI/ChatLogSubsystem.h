@@ -9,7 +9,8 @@ enum class EChatLogSpeaker : uint8
 {
 	Viewer,
 	Admin,
-	Goddess
+	Goddess,
+	Temple
 };
 
 USTRUCT(BlueprintType)
@@ -22,6 +23,8 @@ struct FChatLogEntry
 	UPROPERTY(BlueprintReadOnly, Category = "Chat Log") FString DisplayName;
 	UPROPERTY(BlueprintReadOnly, Category = "Chat Log") FString Message;
 	UPROPERTY(BlueprintReadOnly, Category = "Chat Log") EChatLogSpeaker Speaker = EChatLogSpeaker::Viewer;
+	// 0이면 일반 채팅/대화, 1~4이면 실제 적용된 신전 강화 단계.
+	UPROPERTY(BlueprintReadOnly, Category = "Chat Log") int32 EnhancementTier = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "Chat Log") FDateTime CreatedAt;
 };
 
@@ -45,6 +48,7 @@ public:
 		const FString& Message, bool bAdmin, const FDateTime& CreatedAt);
 	void AddTempleQuestion(const FString& DisplayName, const FString& Message);
 	void AddGoddessMessage(const FString& Message);
+	void AddTempleEnhancement(const FString& UserId, const FString& DisplayName, int32 Tier);
 
 	void SetYouTubeSource(const FString& InApiKey, const FString& InVideoId, const TSet<FString>& InAdminUserIds);
 	bool GetYouTubeSource(FString& OutApiKey, FString& OutVideoId, TSet<FString>& OutAdminUserIds) const;

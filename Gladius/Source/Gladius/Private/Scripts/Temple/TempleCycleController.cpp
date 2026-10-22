@@ -299,5 +299,9 @@ void ATempleCycleController::HandleEnhanceExecuted(const FString& UserId, const 
 {
  if (bLeavingTemple) return;
  if (!IsValid(BattleManager)) ResolveReferences();
- if (IsValid(BattleManager)) BattleManager->ApplyTempleEnhancement(UserId, Username, Tier);
+ if (IsValid(BattleManager) && BattleManager->ApplyTempleEnhancement(UserId, Username, Tier))
+ {
+  if (UGameInstance* Instance = GetGameInstance())
+   Instance->GetSubsystem<UChatLogSubsystem>()->AddTempleEnhancement(UserId, Username, Tier);
+ }
 }
