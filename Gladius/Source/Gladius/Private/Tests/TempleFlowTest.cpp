@@ -14,6 +14,7 @@
 #include "Scripts/Temple/Goddess.h"
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Scripts/Temple/TempleCommandQueue.h"
+#include "Scripts/UI/ChatLogSubsystem.h"
 
 struct FTempleFlowTestAccess
 {
@@ -107,6 +108,34 @@ bool FTempleCommandTest::RunTest(const FString& Parameters)
  D->GetGameStateDelegate.BindLambda([](){return EGameState::Temple;});D->Execute(C);
  D->GetGameStateDelegate.BindLambda([](){return EGameState::Combat;});D->Execute(C);
  TestEqual(TEXT("Command is only active in temple"),Calls,1);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FChatLogIntegrationTest,"Gladius.Temple.Flow.ChatLogIntegration",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FChatLogIntegrationTest::RunTest(const FString& Parameters)
+{
+ FTempleTestWorld T;
+ T.Chat->MaxAllowedComments=100;
+ UChatLogSubsystem* Log=T.Instance->GetSubsystem<UChatLogSubsystem>();
+ T.Chat->OnReceiveYouTubeCommentWithUsername(TEXT("normal-1"),TEXT("viewer-1"),TEXT("시청자"),TEXT("안녕하세요"));
+ T.Chat->OnReceiveYouTubeCommentWithUsername(TEXT("command-1"),TEXT("viewer-1"),TEXT("시청자"),TEXT("!대화 오늘 어때요?"));
+ TestEqual(TEXT("Only ordinary chat appears immediately"),Log->GetEntries().Num(),1);
+ if(Log->GetEntries().Num()!=1)return false;
+ TestEqual(TEXT("Display name comes from YouTube"),Log->GetEntries()[0].DisplayName,FString(TEXT("시청자")));
+
+ FGoddessStateContext Reading;
+ Reading.Username=TEXT("시청자");Reading.Text=TEXT("오늘 어때요?");
+ T.Goddess->OnStateChanged.Broadcast(EGoddessState::Reading,Reading);
+ FGoddessStateContext Speaking;
+ Speaking.Username=TEXT("시청자");Speaking.Text=TEXT("좋은 하루예요.");
+ T.Goddess->OnStateChanged.Broadcast(EGoddessState::Speaking,Speaking);
+ TestEqual(TEXT("Question and AI answer follow the ordinary chat"),Log->GetEntries().Num(),3);
+ if(Log->GetEntries().Num()==3)
+ {
+  TestEqual(TEXT("The command prefix is hidden"),Log->GetEntries()[1].Message,FString(TEXT("오늘 어때요?")));
+  TestEqual(TEXT("AI response uses the goddess name"),Log->GetEntries()[2].DisplayName,FString(TEXT("아우렐리아")));
+  TestEqual(TEXT("AI response text is preserved"),Log->GetEntries()[2].Message,FString(TEXT("좋은 하루예요.")));
+ }
  return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleBlessingTest,"Gladius.Temple.Flow.RequestedBlessingsOnly",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)

@@ -7,7 +7,11 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/UI/ChatLogWidget.h"
+#include "Scripts/UI/ChatLogSubsystem.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Components/InputComponent.h"
@@ -26,6 +30,7 @@ static const FString DebugDisplayName = TEXT("테스터00");
 ABattleManager::ABattleManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	ChatLogWidgetClass = UChatLogWidget::StaticClass();
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
@@ -77,8 +82,36 @@ void ABattleManager::BeginPlay()
   SetActorTickEnabled(false);
   return;
  }
- if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
-  Chat->GetCommandDispatcher()->BindBattleManager(this);
+ AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass()));
+ if (!Chat)
+ {
+  if (UGameInstance* Instance = GetGameInstance())
+  {
+   FString ApiKey, VideoId;
+   TSet<FString> AdminIds;
+   if (Instance->GetSubsystem<UChatLogSubsystem>()->GetYouTubeSource(ApiKey, VideoId, AdminIds))
+   {
+    Chat = GetWorld()->SpawnActorDeferred<AYouTubeChatManager>(AYouTubeChatManager::StaticClass(), FTransform::Identity);
+    if (Chat)
+    {
+     Chat->ApiKey = MoveTemp(ApiKey);
+     Chat->VideoId = MoveTemp(VideoId);
+     Chat->AdminUserIds = MoveTemp(AdminIds);
+     Chat->FinishSpawning(FTransform::Identity);
+    }
+   }
+  }
+ }
+ if (Chat) Chat->GetCommandDispatcher()->BindBattleManager(this);
+ if (ChatLogWidgetClass)
+ {
+  ChatLogWidget = CreateWidget<UChatLogWidget>(GetWorld(), ChatLogWidgetClass);
+  if (ChatLogWidget)
+  {
+   ChatLogWidget->SetExpansionAllowed(false);
+   ChatLogWidget->AddToViewport(1);
+  }
+ }
  GatherSpots();
 
 	for (const FCharacterDef& Class : Classes)
@@ -104,6 +137,7 @@ void ABattleManager::BeginPlay()
 
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+ if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->GetCommandDispatcher()->UnbindBattleManager(this);
  StopBattle();

@@ -5,8 +5,10 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "GameFramework/Actor.h" 
+#include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpResponse.h"
@@ -36,6 +38,10 @@ void AYouTubeChatManager::BeginPlay()
 	}
 
 	GetCommandDispatcher();
+	if (UGameInstance* Instance = GetGameInstance())
+	{
+		Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(ApiKey, VideoId, AdminUserIds);
+	}
 
 	IgnoreMessagesBefore = FDateTime::UtcNow();
 
@@ -131,7 +137,7 @@ void AYouTubeChatManager::OnReceiveYouTubeCommentWithUsername(FString CommentId,
 	ProcessComment(CommentId, UserId, Username, Content, FDateTime::UtcNow());
 }
 
-void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Content, const FDateTime& PostedAt)
+void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Content, const FDateTime& PostedAt, bool bYouTubeAdmin)
 {
 	//여러 채팅을 한 번에 처리해도 도배 판정이 실제 채팅 시각 기준으로 되도록 처리 시각 대신 채팅이 올라온 시각을 사용
 	const FDateTime Now = PostedAt;
@@ -173,6 +179,18 @@ void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString
 
 	FCommentLog Log{ CommentId, UserId, Now, CleanContent };
 	CommentLogs.Add(Log);
+
+	// 명령은 기존 디스패처에 그대로 전달하고, 로그에는 일반 채팅만 표시한다.
+	if (!CleanContent.IsEmpty() && !CleanContent.StartsWith(TEXT("!")))
+	{
+		if (UGameInstance* Instance = GetGameInstance())
+		{
+			const bool bAdmin = bYouTubeAdmin || AdminUserIds.Contains(UserId)
+				|| User->UserClass.Equals(TEXT("Admin"), ESearchCase::IgnoreCase);
+			Instance->GetSubsystem<UChatLogSubsystem>()->AddViewerMessage(
+				CommentId, UserId, Username, CleanContent, bAdmin, Now);
+		}
+	}
 
 	ExecuteGameCommand(CommentId, UserId, Username, CleanContent);
 }
@@ -349,7 +367,12 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 		FString UserId = AuthorObj->GetStringField(TEXT("channelId")); //채팅을 친 id를 가져오기
 		FString Username = AuthorObj->GetStringField(TEXT("displayName")); //채팅을 친 유저의 표시명 가져오기 (AI 쿼리의 username)
 
-		ProcessComment(CommentId, UserId, Username, Content, PostedAt);
+		bool bModerator = false;
+		bool bOwner = false;
+		AuthorObj->TryGetBoolField(TEXT("isChatModerator"), bModerator);
+		AuthorObj->TryGetBoolField(TEXT("isChatOwner"), bOwner);
+		const bool bYouTubeAdmin = bModerator || bOwner;
+		ProcessComment(CommentId, UserId, Username, Content, PostedAt, bYouTubeAdmin);
 	}
 
 	//UE_LOG(LogTemp, Log, TEXT(">>> [%.1f초] 뒤에 다음 채팅을 요청합니다. (NextPageToken: %s)"), NextPollDelay, *NextPageToken); //디버깅용

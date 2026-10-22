@@ -9,6 +9,7 @@
 class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
+class UChatLogWidget;
 
 //BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
@@ -469,6 +470,9 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
  bool bAutoStartBattle = true;
 
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
+
  // HPGen for the temple recovery blessing; adjustable until design fixes the value.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Temple", meta = (ClampMin = "0"))
  int32 BlessingHealAmount = 1;
@@ -615,6 +619,8 @@ public:
 	FVector GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const;
 
 private:
+ UPROPERTY(Transient)
+ TObjectPtr<UChatLogWidget> ChatLogWidget;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
  bool bRecordLoadFailed = false;

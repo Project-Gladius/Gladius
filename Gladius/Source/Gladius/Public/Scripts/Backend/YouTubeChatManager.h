@@ -52,6 +52,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
 	FString VideoId;
 
+	// 관리자 채널 ID를 수동으로 지정할 때 사용. YouTube 관리자/방송 소유자 플래그도 자동 인식한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API")
+	TSet<FString> AdminUserIds;
+
 	//채팅 수신 시작 함수 (LiveChatId 조회. 전투상태면 이후 자동으로 주기 조회)
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void StartFetchingChat();
@@ -131,7 +135,7 @@ private:
 	void FinishFetch(bool bSuccess, float NextPollDelay);
 
 	//채팅 한 건 처리. PostedAt: 채팅이 올라온 시각 (도배 판정 기준)
-	void ProcessComment(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Content, const FDateTime& PostedAt);
+	void ProcessComment(const FString& CommentId, const FString& UserId, const FString& Username, const FString& Content, const FDateTime& PostedAt, bool bYouTubeAdmin = false);
 
 	FString PreprocessCommand(const FString& Input);
 	bool IsSpamming(const FString& UserId, const FString& Content, const FDateTime& CurrentTime);

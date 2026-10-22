@@ -5,6 +5,8 @@
 #include "Scripts/Temple/TempleAIBatchClient.h"
 #include "Scripts/Temple/TempleCommandQueue.h"
 #include "Scripts/Temple/TempleStatusWidget.h"
+#include "Scripts/UI/ChatLogWidget.h"
+#include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/Backend/GameManager.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Blueprint/UserWidget.h"
@@ -12,11 +14,13 @@
 #include "TimerManager.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/GameInstance.h"
 
 ATempleCycleController::ATempleCycleController()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	StatusWidgetClass = UTempleStatusWidget::StaticClass();
+	ChatLogWidgetClass = UChatLogWidget::StaticClass();
 }
 
 void ATempleCycleController::BeginPlay()
@@ -28,6 +32,7 @@ void ATempleCycleController::BeginPlay()
  {
   BoundGoddess = Goddess;
   Goddess->OnEnhanceExecuted.AddUniqueDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);
+  Goddess->OnStateChanged.AddUniqueDynamic(this, &ATempleCycleController::HandleGoddessStateChanged);
  }
 
 	CommandQueue = NewObject<UTempleCommandQueue>(this);
@@ -66,6 +71,7 @@ void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
 	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
  if (BoundGoddess.IsValid()) BoundGoddess->OnEnhanceExecuted.RemoveDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);
+	if (BoundGoddess.IsValid()) BoundGoddess->OnStateChanged.RemoveDynamic(this, &ATempleCycleController::HandleGoddessStateChanged);
 	if (BoundDispatcher.IsValid()) BoundDispatcher->OnTempleCombatCommand.RemoveAll(this);
 
 	if (ChatManager)
@@ -89,6 +95,7 @@ void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			PC->SetInputMode(FInputModeGameOnly());
 		}
 	}
+	if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -124,6 +131,15 @@ void ATempleCycleController::ResolveReferences()
 
 void ATempleCycleController::CreateStatusWidget()
 {
+	if (ChatLogWidgetClass)
+	{
+		ChatLogWidget = CreateWidget<UChatLogWidget>(GetWorld(), ChatLogWidgetClass);
+		if (ChatLogWidget)
+		{
+			ChatLogWidget->SetExpansionAllowed(true);
+			ChatLogWidget->AddToViewport(1);
+		}
+	}
 	if (!StatusWidgetClass)
 	{
 		return;
@@ -141,6 +157,21 @@ void ATempleCycleController::CreateStatusWidget()
 			PC->bShowMouseCursor = true;
 			PC->SetInputMode(FInputModeGameAndUI());
 		}
+	}
+}
+
+void ATempleCycleController::HandleGoddessStateChanged(EGoddessState NewState, const FGoddessStateContext& Context)
+{
+	UGameInstance* Instance = GetGameInstance();
+	if (!Instance) return;
+	UChatLogSubsystem* Log = Instance->GetSubsystem<UChatLogSubsystem>();
+	if (NewState == EGoddessState::Reading)
+	{
+		Log->AddTempleQuestion(Context.Username, Context.Text);
+	}
+	else if (NewState == EGoddessState::Speaking)
+	{
+		Log->AddGoddessMessage(Context.Text);
 	}
 }
 

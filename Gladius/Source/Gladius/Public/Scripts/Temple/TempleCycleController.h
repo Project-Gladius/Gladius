@@ -15,6 +15,7 @@ class ABattleManager;
 class UTempleCommandQueue;
 class UTempleAIBatchClient;
 class UTempleStatusWidget;
+class UChatLogWidget;
 
 // 신전 씬의 사이클 진행자
 // CycleSeconds마다: 채팅 조회 -> 큐잉 종료(스냅샷) -> 여신 사이클 시작 + 대화 배치를 AI 서버로 전송
@@ -52,6 +53,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|UI")
 	TSubclassOf<UTempleStatusWidget> StatusWidgetClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|UI")
+	TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
+
 	UFUNCTION(BlueprintPure, Category = "Temple|Cycle")
 	int32 GetCompletedCycles() const { return CompletedCycles; }
 
@@ -76,6 +80,8 @@ private:
  TWeakObjectPtr<AGoddess> BoundGoddess;
  UFUNCTION()
  void HandleEnhanceExecuted(const FString& UserId, const FString& Username, int32 Tier);
+	UFUNCTION()
+	void HandleGoddessStateChanged(EGoddessState NewState, const FGoddessStateContext& Context);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTempleCommandQueue> CommandQueue;
@@ -85,6 +91,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTempleStatusWidget> StatusWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UChatLogWidget> ChatLogWidget;
 
 	FTimerHandle CycleTimerHandle;
 	FTimerHandle TravelTimerHandle;

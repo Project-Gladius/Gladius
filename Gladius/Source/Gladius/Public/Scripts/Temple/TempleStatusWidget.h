@@ -11,10 +11,8 @@ class AGoddess;
 class UScrollBox;
 class UTextBlock;
 
-// 신전 텍스트 UI. 세 영역으로 구성됨
-//  - StateText    : 여신 상태 (좌상단)
-//  - LogText      : 상태 로그 (우측, 넓고 작은 글씨로 최대한 많은 로그 표시. 여신 대사도 모두 여기에 기록)
-//  - DialogueText : 여신 대사 (하단 중앙, 큰 글씨)
+// 신전 텍스트 UI. 기본 레이아웃에는 상태와 여신 대사만 표시한다.
+// 채팅은 별도의 UChatLogWidget이 담당하며, 기존 WBP의 LogText는 선택 사항이다.
 // C++에서 기본 레이아웃을 만들어 에셋 없이 동작하며, WBP로 상속해 같은 이름의 위젯을 배치하면 그 레이아웃을 사용함
 UCLASS()
 class GLADIUS_API UTempleStatusWidget : public UUserWidget

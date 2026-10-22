@@ -92,19 +92,8 @@ void UTempleStatusWidget::BuildDefaultWidgetTree()
 	CombatButton->SetContent(ButtonText);
 	Controls->AddChildToVerticalBox(CombatButton);
 
-	//상태 로그: 우측 넓게, 작은 글씨
-	UBorder* LogPanel = AddPanel(WidgetTree, Canvas, TEXT("LogPanel"), FAnchors(0.34f, 0.03f, 0.98f, 0.70f), 0.75f);
-	LogScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("LogScrollBox"));
-	LogPanel->SetContent(LogScrollBox);
-
-	LogText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LogText"));
-	LogText->SetAutoWrapText(true);
-	LogText->SetColorAndOpacity(FSlateColor(FLinearColor(0.78f, 0.82f, 0.88f)));
-	SetFontSize(LogText, 10);
-	LogScrollBox->AddChild(LogText);
-
-	//여신 대사: 하단 중앙, 큰 글씨
-	UBorder* DialoguePanel = AddPanel(WidgetTree, Canvas, TEXT("DialoguePanel"), FAnchors(0.12f, 0.76f, 0.88f, 0.96f), 0.85f);
+	//여신 대사: 채팅 로그와 겹치지 않게 좌측에 배치
+	UBorder* DialoguePanel = AddPanel(WidgetTree, Canvas, TEXT("DialoguePanel"), FAnchors(0.04f, 0.76f, 0.64f, 0.96f), 0.85f);
 	DialoguePanel->SetPadding(FMargin(28.0f, 18.0f));
 	DialoguePanel->SetVerticalAlignment(VAlign_Center);
 	DialogueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DialogueText"));
