@@ -103,6 +103,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle")
 	void SetFacingTarget(const FVector& WorldLocation);
 
+	//바라보고 있는 곳. 플레이어에게는 곧 보스의 위치다 —
+	//원거리 공격이 어디로 날아가야 하는지를 이걸로 안다.
+	//지정된 적이 없으면 자기 위치를 돌려주어, 쏘더라도 제자리에 떨어진다
+	UFUNCTION(BlueprintPure, Category = "Battle")
+	FVector GetFacingTarget() const { return bHasFaceTarget ? FaceTarget : GetActorLocation(); }
+
 	// ---- 블루프린트 훅 ----
 	//
 	//모션이 준비되면 블루프린트에서 이 이벤트들에 애니메이션을 연결한다.
