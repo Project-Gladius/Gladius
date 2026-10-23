@@ -26,6 +26,13 @@ struct FBattleUnificationTestAccess
  static void Move(ABattleManager* B) { B->GetWorldTimerManager().ClearTimer(B->PhaseTimerHandle); B->BeginMove(); }
  static float PhaseRemaining(ABattleManager* B) { return B->GetWorldTimerManager().GetTimerRemaining(B->PhaseTimerHandle); }
  static void Resolve(ABattleManager* B) { B->ResolveTurn(); }
+ static FString StartedCutSceneAttack(ABattleManager* B) { return B->CutSceneAttackUserId; }
+ static void FlushOneAttack(ABattleManager* B) { B->AttackCount = 1; B->FlushAttackCues(); }
+ static void SelectedAttackLast(ABattleManager* B)
+ {
+  B->AttackCues.Sort([B](const FAttackCue& A, const FAttackCue& C)
+  { return A.UserId != B->CutSceneUserId && C.UserId == B->CutSceneUserId; });
+ }
  static void EndTurn(ABattleManager* B) { B->EndTurn(); }
  static void Fever(ABattleManager* B, const FString& Id, int32 Value) { B->Players.FindChecked(Id).Fever = Value; }
  static const FPlayerRecord* Record(ABattleManager* B, const FString& Id) { return B->Records.Find(Id); }
@@ -400,8 +407,9 @@ bool FTurnCutSceneSubjectChainTest::RunTest(const FString& Parameters)
  FUnifiedBattleWorld T;auto* B=T.Battle;
  B->bEnableTurnCutScenes=true;B->StartBattle();FBattleUnificationTestAccess::Prepare(B);
  auto* Applier=T.World->SpawnActor<ACutSceneApplier>();B->CutSceneApplier=Applier;
+ Applier->EnsureDefaultCutScenes();
  for(const TCHAR* Id:{TEXT("GladiusSkill2"),TEXT("SeraSkill1"),TEXT("SeraSkill2")})
-  TestTrue(TEXT("Missing shots have saved blank sequence assets"),IsValid(Applier->CutScenes.FindChecked(FName(Id)).Sequence));
+  TestTrue(TEXT("Default shot assets load on demand"),IsValid(Applier->CutScenes.FindChecked(FName(Id)).Sequence));
  for(const TCHAR* Id:{TEXT("GladiusRun"),TEXT("GladiusSkill1"),TEXT("GladiusSkill2"),TEXT("SeraSkill1"),TEXT("SeraSkill2")})
  {
   ULevelSequence* Seq=NewObject<ULevelSequence>(Applier);Seq->Initialize();Seq->GetMovieScene()->SetPlaybackRange(0,24000);
@@ -431,6 +439,18 @@ bool FTurnCutSceneSubjectChainTest::RunTest(const FString& Parameters)
  FBattleUnificationTestAccess::Move(B);
  TestEqual(TEXT("Next turn prefers other class"),B->CutSceneUserId,FString(TEXT("S")));
  TestTrue(TEXT("Sera skill-two list"),B->CutSceneIds==TArray<FName>({TEXT("SeraSkill2")}));
+ TestTrue(TEXT("Sera camera starts immediately during movement"),Applier->IsPlaying());
+ TestEqual(TEXT("Camera starts selected Sera skill before attack dispatch"),FBattleUnificationTestAccess::StartedCutSceneAttack(B),FString(TEXT("S")));
+ FBattleUnificationTestAccess::Resolve(B);
+ TestTrue(TEXT("Camera is already playing before attack dispatch"),Applier->IsPlaying());
+ FBattleUnificationTestAccess::SelectedAttackLast(B);
+ FBattleUnificationTestAccess::FlushOneAttack(B);
+ TestTrue(TEXT("First unrelated attack does not delay Sera camera"),Applier->IsPlaying());
+ FBattleUnificationTestAccess::FlushOneAttack(B);
+ TestTrue(TEXT("Second unrelated attack does not delay Sera camera"),Applier->IsPlaying());
+ FBattleUnificationTestAccess::FlushOneAttack(B);
+ TestTrue(TEXT("Selected Sera attack keeps existing camera playback"),Applier->IsPlaying());
+ TestEqual(TEXT("Early skill remains marked to prevent duplicate playback"),FBattleUnificationTestAccess::StartedCutSceneAttack(B),FString(TEXT("S")));
  TestEqual(TEXT("Sera is explicit subject"),Applier->GetCurrentSubject(),B->GetBattlePlayers().FindChecked(TEXT("S")).Unit.Get());
  Applier->CancelCutScene();
  FBattleUnificationTestAccess::Prepare(B);
@@ -456,6 +476,7 @@ bool FTurnCutSceneSubjectChainTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("New battle resets class/user history"),B->CutSceneUserId,FString(TEXT("G1")));
  B->StopBattle();
  TestFalse(TEXT("Stop cancels selected-user cutscene"),Applier->IsPlaying());
+ TestTrue(TEXT("Stop clears early skill state"),FBattleUnificationTestAccess::StartedCutSceneAttack(B).IsEmpty());
  return true;
 }
 
@@ -467,6 +488,7 @@ bool FCollectStartsMoveCutSceneTest::RunTest(const FString& Parameters)
  B->bEnableTurnCutScenes=true;B->StartBattle();FBattleUnificationTestAccess::Prepare(B);
  T.Dispatch(TEXT("A"),TEXT("!공격 1"));
  auto* Applier=T.World->SpawnActor<ACutSceneApplier>();B->CutSceneApplier=Applier;
+ Applier->EnsureDefaultCutScenes();
  auto* Seq=NewObject<ULevelSequence>(Applier);Seq->Initialize();Seq->GetMovieScene()->SetPlaybackRange(0,24000);
  FCutSceneDefinition& Def=Applier->CutScenes.FindOrAdd(TEXT("GladiusRun"));
  Def.Sequence=Seq;Def.CameraClass=nullptr;Def.WorldTimeScale=1.f;

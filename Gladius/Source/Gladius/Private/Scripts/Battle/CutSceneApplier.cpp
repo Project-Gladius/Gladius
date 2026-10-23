@@ -32,7 +32,13 @@ ACutSceneApplier::ACutSceneApplier()
     FCutSceneDefinition GladiusSkill1;
     GladiusSkill1.CameraClass = AGladiusSkill1Camera::StaticClass();
     CutScenes.Add(TEXT("GladiusSkill1"), GladiusSkill1);
-    EnsureDefaultCutScenes();
+    // Keep editable entries available without loading camera templates during CDO construction.
+    for (const TCHAR* Id : {TEXT("GladiusSkill2"), TEXT("SeraSkill1"), TEXT("SeraSkill2")})
+    {
+        FCutSceneDefinition& Def = CutScenes.Add(FName(Id));
+        Def.WorldTimeScale = 1.f;
+        Def.SubjectBindingTag = Def.BossBindingTag = NAME_None;
+    }
 }
 
 void ACutSceneApplier::EnsureDefaultCutScenes()
@@ -180,6 +186,7 @@ bool ACutSceneApplier::ApplyCutSceneToSubject(ABattleUnit* Subject, FName CutSce
     }
     // 이전 컷신의 종료 콜백이 교체 도중 또 다른 요청을 끼워 넣지 않도록 한다.
     TGuardValue<bool> ApplyingGuard(bApplying, true);
+    EnsureDefaultCutScenes();
     const FCutSceneDefinition* Definition = CutScenes.Find(CutSceneType);
     ABattleManager* Manager = ResolveBattleManager();
     if (Definition && !Definition->Sequence && !Definition->CameraClass
