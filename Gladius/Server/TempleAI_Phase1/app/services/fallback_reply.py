@@ -2,6 +2,7 @@ import hashlib
 from dataclasses import dataclass
 
 from app.moderation import normalize_for_policy_check
+from app.prompts import build_user_message_orders
 from app.schemas import Emotion, ModelReply, TempleBatchRequest, TempleRequest
 
 
@@ -201,14 +202,25 @@ def build_fallback_reply(request: TempleRequest) -> ModelReply:
     )
 
 
+# Priority removed for each repeated message from the same player in one batch,
+# mirroring the repeated-player rule in the batch prompt.
+REPEAT_PRIORITY_PENALTY = 20
+
+
 def build_batch_fallback_replies(request: TempleBatchRequest) -> list[ModelReply]:
-    return [
-        build_fallback_reply(
+    replies: list[ModelReply] = []
+    for item, order in zip(request.messages, build_user_message_orders(request)):
+        reply = build_fallback_reply(
             TempleRequest(
                 uid=item.uid,
                 username=item.username,
                 message=item.message,
             )
         )
-        for item in request.messages
-    ]
+        if order > 1:
+            penalty = REPEAT_PRIORITY_PENALTY * (order - 1)
+            reply = reply.model_copy(
+                update={"priority": max(0, reply.priority - penalty)}
+            )
+        replies.append(reply)
+    return replies

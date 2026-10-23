@@ -1,7 +1,11 @@
 import pytest
 
-from app.schemas import Emotion, TempleRequest
-from app.services.fallback_reply import build_fallback_reply
+from app.schemas import Emotion, TempleBatchRequest, TempleRequest
+from app.services.fallback_reply import (
+    REPEAT_PRIORITY_PENALTY,
+    build_batch_fallback_replies,
+    build_fallback_reply,
+)
 
 
 @pytest.mark.parametrize(
@@ -43,3 +47,25 @@ def test_different_questions_receive_contextual_answers() -> None:
 
     assert len(replies) == len(questions)
     assert "목소리를 들었노라" not in replies
+
+
+def test_batch_fallback_lowers_priority_of_repeated_player_messages() -> None:
+    message = "무엇을 조심해야 하나요?"
+    request = TempleBatchRequest.model_validate(
+        {
+            "schemaVersion": 1,
+            "batchId": "batch-fallback",
+            "windowStartedAt": "2026-10-10T12:00:00Z",
+            "windowEndedAt": "2026-10-10T12:00:40Z",
+            "messages": [
+                {"uid": "m-1", "userId": "u-1", "username": "A", "message": message},
+                {"uid": "m-2", "userId": "u-2", "username": "B", "message": message},
+                {"uid": "m-3", "userId": "u-1", "username": "A", "message": message},
+            ],
+        }
+    )
+
+    first, other_player, repeat = build_batch_fallback_replies(request)
+
+    assert other_player.priority == first.priority
+    assert repeat.priority == max(0, first.priority - REPEAT_PRIORITY_PENALTY)

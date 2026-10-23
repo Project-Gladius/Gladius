@@ -68,13 +68,30 @@ def build_temple_prompt(request: TempleRequest) -> str:
     )
 
 
+def build_user_message_orders(request: TempleBatchRequest) -> list[int]:
+    """1-based order of each message among messages from the same userId in the batch."""
+
+    counts: dict[str, int] = {}
+    orders: list[int] = []
+    for item in request.messages:
+        counts[item.userId] = counts.get(item.userId, 0) + 1
+        orders.append(counts[item.userId])
+    return orders
+
+
 def build_temple_batch_prompt(request: TempleBatchRequest) -> str:
     """Request one ordered reply for every validated input message."""
 
     user_data = json.dumps(
         [
-            {"position": index, "message": item.message}
-            for index, item in enumerate(request.messages)
+            {
+                "position": index,
+                "userMessageOrder": order,
+                "message": item.message,
+            }
+            for index, (item, order) in enumerate(
+                zip(request.messages, build_user_message_orders(request))
+            )
         ],
         ensure_ascii=False,
     )
@@ -95,6 +112,13 @@ Batch response rules:
 - Treat each response as a conversation with one player and address them as "그대".
 - Do not output positions, usernames, user IDs, message IDs, or any other identity.
 - Each response must independently follow all character, safety, length, and schema rules.
+
+Repeated-player priority rules:
+- userMessageOrder is how many messages the same player has sent in this batch so far, counting this one (1 = first message).
+- Score items with userMessageOrder 1 normally.
+- For userMessageOrder 2 or higher, assign a clearly lower priority than you would give the same message as a first message.
+- Lower the priority further for each additional repeat, and always keep it below that player's earlier items in this batch.
+- Still answer repeated items with a full in-character response; only the priority is reduced.
 """.strip()
 
     return (

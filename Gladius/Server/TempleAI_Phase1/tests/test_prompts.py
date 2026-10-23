@@ -81,3 +81,30 @@ def test_batch_prompt_requires_one_ordered_reply_per_input() -> None:
     assert "Return exactly 2 responses" in prompt
     assert "same order" in prompt
     assert "username" not in payload[0]
+
+
+def test_batch_prompt_marks_repeated_messages_from_same_player() -> None:
+    request = TempleBatchRequest.model_validate(
+        {
+            "schemaVersion": 1,
+            "batchId": "batch-2",
+            "windowStartedAt": "2026-10-10T12:00:00Z",
+            "windowEndedAt": "2026-10-10T12:00:40Z",
+            "messages": [
+                {"uid": "m-1", "userId": "u-1", "username": "A", "message": "무엇을 조심할까요?"},
+                {"uid": "m-2", "userId": "u-2", "username": "B", "message": "강화해도 될까요?"},
+                {"uid": "m-3", "userId": "u-1", "username": "A", "message": "제국은 어떤 곳인가요?"},
+                {"uid": "m-4", "userId": "u-1", "username": "A", "message": "마수는 강한가요?"},
+            ],
+        }
+    )
+
+    prompt = build_temple_batch_prompt(request)
+    payload_text = prompt.split("<UNTRUSTED_USER_DATA>\n", 1)[1].split(
+        "\n</UNTRUSTED_USER_DATA>", 1
+    )[0]
+    payload = json.loads(payload_text)
+
+    assert [item["userMessageOrder"] for item in payload] == [1, 1, 2, 3]
+    assert "userId" not in payload[0]
+    assert "Repeated-player priority rules" in prompt

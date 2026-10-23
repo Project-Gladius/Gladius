@@ -43,9 +43,6 @@ private:
 	FTempleCycleCommands Current;
 	TMap<FString, int32> BlessSelectionsByUser;
 
-	//이번 사이클에 이미 대화를 넣은 유저 (사이클당 유저 1건)
-	TSet<FString> CurrentTalkUserIds;
-
 	//이미 처리한 채팅 Id (같은 채팅 중복 처리 방지)
 	TSet<FString> ProcessedTalkUids;
 
