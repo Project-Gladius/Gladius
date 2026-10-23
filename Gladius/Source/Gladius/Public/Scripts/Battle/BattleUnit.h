@@ -44,6 +44,37 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsMoving() const { return bMoving; }
 
+	// ---- ABP가 읽어 가는 상태 ----
+	//
+	//**애님 블루프린트는 이것들을 BlueprintUpdateAnimation에서 직접 읽는다.**
+	//캐릭터 블루프린트가 ABP로 캐스팅해 변수를 밀어 넣던 방식을 대체한 것이다 —
+	//직업군이 늘어도 같은 배선을 다시 만들 필요가 없고, 캐릭터 BP에는
+	//'어떤 몬타주를 트는가'만 남는다
+
+	//이번 턴에 고른 행동. 무입력이면 Idle이다
+	UFUNCTION(BlueprintPure, Category = "Battle")
+	EBattleAction GetSelectedAction() const { return SelectedAction; }
+
+	//무입력이 아니면 준비 자세를 잡는다
+	UFUNCTION(BlueprintPure, Category = "Battle")
+	bool IsReady() const { return SelectedAction != EBattleAction::Idle; }
+
+	//마지막 이동의 걸음걸이가 걷기보다 빠른가
+	UFUNCTION(BlueprintPure, Category = "Battle")
+	bool IsRunning() const { return LastGait != EMoveGait::Walk; }
+
+	UFUNCTION(BlueprintPure, Category = "Battle")
+	bool IsDead() const { return bDead; }
+
+	// ---- BattleManager가 부르는 알림 ----
+	//
+	//상태를 적어 두고 같은 이름의 블루프린트 훅을 이어서 띄운다.
+	//매니저가 훅만 부르면 상태 갱신을 빠뜨리므로 한 함수로 묶었다
+
+	void NotifyActionSelected(EBattleAction Action);
+	void NotifyDied();
+	void NotifyRevived();
+
 	//막을 들고 버티는 중인가. BattleManager가 켜고 끄며, ABP가 이것을 읽어
 	//Defense 상태로 들어간다 — IsMoving과 같은 방식이다.
 	//버티는 자세를 몬타주가 아니라 상태로 두어야 앞뒤 모션과 블렌드된다
@@ -190,6 +221,11 @@ private:
 	void ApplyLabel();
 
 	bool bDefending = false;
+	bool bDead = false;
+
+	//이번 턴에 고른 행동과 마지막 이동의 걸음걸이. ABP가 읽어 간다
+	EBattleAction SelectedAction = EBattleAction::Idle;
+	EMoveGait LastGait = EMoveGait::Walk;
 
 	// ---- 이동 상태 ----
 	bool bMoving = false;

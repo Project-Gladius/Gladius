@@ -854,7 +854,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 	//여기서 공격 모션을 틀면 중복으로 때리는 것처럼 보인다
 	if (Player->Unit && Player->ReviveCountdown == 0)
 	{
-		Player->Unit->OnActionSelected(Action);
+		Player->Unit->NotifyActionSelected(Action);
 	}
 	RefreshPlayerUI();
 
@@ -884,7 +884,7 @@ void ABattleManager::StartTurn()
 		//여기서 Idle을 한 번 쏴 줘야 지난 턴 자세로 계속 서 있지 않는다
 		if (Pair.Value.Unit && Pair.Value.ReviveCountdown == 0)
 		{
-			Pair.Value.Unit->OnActionSelected(EBattleAction::Idle);
+			Pair.Value.Unit->NotifyActionSelected(EBattleAction::Idle);
 
 			//보스가 그 구역을 치지 않아 OnHit이 오지 않은 방어자가 있다.
 			//여기서 풀지 않으면 다음 턴까지 막을 들고 서 있는다
@@ -908,7 +908,7 @@ void ABattleManager::StartTurn()
 				//유닛은 끝까지 '무입력'으로 알고 준비 자세를 잡지 않는다
 				if (Pair.Value.Unit)
 				{
-					Pair.Value.Unit->OnActionSelected(Pair.Value.PendingAction);
+					Pair.Value.Unit->NotifyActionSelected(Pair.Value.PendingAction);
 				}
 			}
 		}
@@ -1129,7 +1129,7 @@ bool ABattleManager::SetPlayerHealth(const FString& UserId, int32 CurrentHealth)
  {
   Player->ReviveCountdown = 0;
   Player->bDiedThisTurn = false;
-  if (IsValid(Player->Unit)) Player->Unit->OnRevived();
+  if (IsValid(Player->Unit)) Player->Unit->NotifyRevived();
  }
  SaveRecords();
  return true;
@@ -1390,7 +1390,7 @@ void ABattleManager::ResolveTurn()
 
 				if (P.Unit)
 				{
-					P.Unit->OnRevived();
+					P.Unit->NotifyRevived();
 				}
 			}
 			continue;
@@ -1835,7 +1835,7 @@ void ABattleManager::BossAttackBeat()
 			}
 			if (P.bDiedThisTurn)
 			{
-				P.Unit->OnDied();
+				P.Unit->NotifyDied();
 			}
 		}
 

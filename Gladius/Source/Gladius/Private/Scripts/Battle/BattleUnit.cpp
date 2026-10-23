@@ -44,6 +44,24 @@ void ABattleUnit::BeginPlay()
 	ApplyLabel();
 }
 
+void ABattleUnit::NotifyActionSelected(EBattleAction Action)
+{
+	SelectedAction = Action;
+	OnActionSelected(Action);
+}
+
+void ABattleUnit::NotifyDied()
+{
+	bDead = true;
+	OnDied();
+}
+
+void ABattleUnit::NotifyRevived()
+{
+	bDead = false;
+	OnRevived();
+}
+
 void ABattleUnit::PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay,
 	const TArray<float>& SectionSeconds)
 {
@@ -158,6 +176,8 @@ void ABattleUnit::MoveTo(const FVector& Target, float Duration, EMoveGait Gait)
 		SetActorLocation(Target);
 		return;
 	}
+
+	LastGait = Gait;
 
 	MoveStart = GetActorLocation();
 	MoveTarget = Target;
