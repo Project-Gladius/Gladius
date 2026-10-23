@@ -1,4 +1,4 @@
-﻿#include "Scripts/Battle/BattleUnit.h"
+#include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/UnitNameplate.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -6,6 +6,7 @@
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "UObject/ConstructorHelpers.h"
 
 ABattleUnit::ABattleUnit()
 {
@@ -35,7 +36,8 @@ ABattleUnit::ABattleUnit()
 
 	//블루프린트에서 Widget Class를 바꾸면 그쪽이 우선한다
 	Nameplate->SetWidgetClass(UUnitNameplate::StaticClass());
-	PlayerUIClass = UBattlePlayerNameplate::StaticClass();
+	static ConstructorHelpers::FClassFinder<UBattlePlayerNameplate> DesignerUI(TEXT("/Game/Blueprints/UI/MyBattlePlayerNameplate"));
+	PlayerUIClass = DesignerUI.Class;
 }
 
 void ABattleUnit::BeginPlay()
@@ -301,8 +303,11 @@ void ABattleUnit::SetLabelText(const FString& Text)
 
 void ABattleUnit::SetPlayerUI(const FBattlePlayerUIData& Data)
 {
-	UClass* DesiredClass = PlayerUIClass
-		? PlayerUIClass.Get() : UBattlePlayerNameplate::StaticClass();
+	UClass* DesiredClass = PlayerUIClass.Get();
+	// Old unit BPs may still explicitly reference the former native-only widget.
+	if (!DesiredClass || DesiredClass == UBattlePlayerNameplate::StaticClass())
+		DesiredClass = GetDefault<ABattleUnit>()->PlayerUIClass.Get();
+	if (!DesiredClass) return;
 	if (Nameplate->GetWidgetClass() != DesiredClass)
 	{
 		Nameplate->SetWidgetClass(DesiredClass);
@@ -325,7 +330,7 @@ void ABattleUnit::UpdatePlayerUIScale(const FVector& CameraLocation)
 	if (UBattlePlayerNameplate* Widget = Cast<UBattlePlayerNameplate>(Nameplate->GetUserWidgetObject()))
 	{
 		const float Distance = FVector::Dist(CameraLocation, Nameplate->GetComponentLocation());
-		const float Scale = FMath::Clamp(2400.f / FMath::Max(Distance, 1.f), 0.70f, 1.20f);
+		const float Scale = Widget->GetDistanceScale(Distance);
 		Widget->SetRenderTransformPivot(FVector2D(0.5f, 1.f));
 		Widget->SetRenderScale(FVector2D(Scale, Scale));
 	}

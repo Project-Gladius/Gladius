@@ -302,9 +302,26 @@ bool FUnifiedHealthPersistenceTest::RunTest(const FString& Parameters)
  const FString Legacy=TEXT("{\"records\":[{\"userId\":\"Legacy\",\"characterId\":\"gladius\",\"maxHPBonus\":3,\"damageBonus\":2,\"totalDamageDealt\":123}]}");
  FFileHelper::SaveStringToFile(Legacy,*T.Path);
  B->LoadRecords();
- TestEqual(TEXT("Legacy migration initializes current HP"),ReadHealth(),B->Classes[0].BaseHP + 3 * B->HPPerBonus);
+ TestEqual(TEXT("Legacy migration initializes current HP"),ReadHealth(),FMath::Clamp(B->Classes[0].BaseHP + 3 * B->HPPerBonus, 5, 6));
  const FPlayerRecord* R=FBattleUnificationTestAccess::Record(B,TEXT("Legacy"));
  TestTrue(TEXT("Migration keeps other progression"),R && R->DamageBonus==2 && R->TotalDamageDealt==123);
+ return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerHealthCapTest, "Gladius.BattleUnified.PlayerHealthCap", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPlayerHealthCapTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* B = T.Battle;
+ B->Classes[0].BaseHP = 5;
+ B->StartBattle();
+ FBattleUnificationTestAccess::Prepare(B);
+ B->SubmitAction(TEXT("Five"), TEXT("Five"), EBattleAction::Attack1, B->Classes[0].Id);
+ TestEqual(TEXT("Base five HP remains five"), B->GetBattlePlayers().FindChecked(TEXT("Five")).MaxHP, 5);
+ B->Classes[0].BaseHP = 7;
+ B->SubmitAction(TEXT("Capped"), TEXT("Capped"), EBattleAction::Attack1, B->Classes[0].Id);
+ TestEqual(TEXT("Legacy base seven HP caps at six"), B->GetBattlePlayers().FindChecked(TEXT("Capped")).MaxHP, 6);
+ B->SetPlayerHealth(TEXT("Capped"), 100);
+ TestEqual(TEXT("Healing cannot exceed cap"), B->GetBattlePlayers().FindChecked(TEXT("Capped")).HP, 6);
  return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FYouTubeBattleSubscriptionTest, "Gladius.BattleUnified.YouTubeReceiveSubscription",

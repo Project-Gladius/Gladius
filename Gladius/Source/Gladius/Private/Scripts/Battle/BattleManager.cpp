@@ -1,4 +1,4 @@
-﻿#include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Scripts/Battle/BattleSpot.h"
@@ -567,7 +567,8 @@ void ABattleManager::LoadRecords()
 
 int32 ABattleManager::MaxHPFor(const FPlayerRecord& Record) const
 {
-	return Classes[ClassIndexFor(Record.CharacterId)].BaseHP + Record.MaxHPBonus * HPPerBonus;
+	return static_cast<int32>(FMath::Clamp<int64>(static_cast<int64>(Classes[ClassIndexFor(Record.CharacterId)].BaseHP)
+		+ static_cast<int64>(Record.MaxHPBonus) * HPPerBonus, 5, 6));
 }
 
 void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const
@@ -2211,6 +2212,7 @@ void ABattleManager::RefreshPlayerUI()
 		if (Classes.IsValidIndex(Player.ClassIndex))
 		{
 			const FCharacterDef& Character = Classes[Player.ClassIndex];
+			Data.CharacterId = Character.Id;
 			Data.DefenseReduction = 1.f - Character.DefenseDamageRatio;
 			if (Data.Action == EBattleAction::Attack1 || Data.Action == EBattleAction::Attack2)
 			{
@@ -2712,17 +2714,17 @@ void ABattleManager::RunSelfTest()
 	{
 		FPlayerRecord R;
 		R.CharacterId = Classes[0].Id;
-		check(MaxHPFor(R) == Classes[0].BaseHP);
+		check(MaxHPFor(R) == FMath::Clamp(Classes[0].BaseHP, 5, 6));
 		R.MaxHPBonus = 3;
 		R.CurrentHealth = 1;
-		check(MaxHPFor(R) == Classes[0].BaseHP + 3 * HPPerBonus);
+		check(MaxHPFor(R) == FMath::Clamp(Classes[0].BaseHP + 3 * HPPerBonus, 5, 6));
 
 		//강화 수치가 전투용 스냅샷으로 옮겨지는지
 		R.DamageBonus = 2;
 		R.CritChanceBonus = 1;
 		FBattlePlayer P;
 		ApplyRecordToPlayer(R, P);
-		check(P.MaxHP == Classes[0].BaseHP + 3 * HPPerBonus);
+		check(P.MaxHP == FMath::Clamp(Classes[0].BaseHP + 3 * HPPerBonus, 5, 6));
 		check(P.DamageBonus == 2 * DamagePerBonus);
 		check(FMath::IsNearlyEqual(P.CritChanceBonus, CritChancePerBonus));
 	}

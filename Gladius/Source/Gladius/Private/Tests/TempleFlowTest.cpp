@@ -205,7 +205,7 @@ public:
   Test->TestTrue(TEXT("Next battle can join with temple result"),Next->SubmitAction(TEXT("temple-viewer"),TEXT("Temple user"),EBattleAction::Attack1));
   if(const FBattlePlayer* P=Next->GetBattlePlayers().Find(TEXT("temple-viewer")))
   {
-   Test->TestEqual(TEXT("Next battle maximum includes MaxHPBonus"),P->MaxHP,Next->Classes[0].BaseHP+2*Next->HPPerBonus);
+   Test->TestEqual(TEXT("Next battle maximum includes MaxHPBonus"),P->MaxHP,FMath::Clamp(Next->Classes[0].BaseHP+2*Next->HPPerBonus, 5, 6));
    Test->TestEqual(TEXT("Next battle starts with stored healed HP"),P->HP,R.CurrentHealth);
    Test->TestEqual(TEXT("Next battle applies strength"),P->DamageBonus,Next->DamagePerBonus);
    Test->TestEqual(TEXT("Next battle applies agility"),P->CritChanceBonus,Next->CritChancePerBonus);

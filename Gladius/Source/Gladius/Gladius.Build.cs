@@ -16,6 +16,11 @@ public class Gladius : ModuleRules
 		// 유닛 머리 위 이름표(UMG)에 필요
 		PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 		
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor" });
+		}
+
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
 
