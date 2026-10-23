@@ -145,10 +145,11 @@ def create_app(gateway: Optional[ModelGateway] = None) -> FastAPI:
                 return cached_response
 
             accepted_messages = []
+            # The same player may send several messages per batch; the prompt lowers
+            # the priority of their repeats instead of rejecting them.
             seen_uids: set[str] = set()
-            seen_users: set[str] = set()
             for message in request.messages:
-                if message.uid in seen_uids or message.userId in seen_users:
+                if message.uid in seen_uids:
                     continue
                 seen_uids.add(message.uid)
                 if (
@@ -159,7 +160,6 @@ def create_app(gateway: Optional[ModelGateway] = None) -> FastAPI:
                     is not None
                 ):
                     continue
-                seen_users.add(message.userId)
                 accepted_messages.append(message)
 
             if not accepted_messages:

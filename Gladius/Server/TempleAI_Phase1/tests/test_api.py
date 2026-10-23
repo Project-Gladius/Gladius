@@ -204,7 +204,7 @@ def test_batch_returns_one_ordered_response_per_accepted_message() -> None:
     assert gateway.batch_calls == 1
 
 
-def test_batch_filters_bad_and_duplicate_user_messages_individually() -> None:
+def test_batch_filters_bad_messages_but_keeps_repeated_user_messages() -> None:
     gateway = BatchGateway()
     client = TestClient(create_app(gateway=gateway))
     payload = make_batch_payload()
@@ -232,11 +232,14 @@ def test_batch_filters_bad_and_duplicate_user_messages_individually() -> None:
     response = client.post("/temple/respond-batch", json=payload)
 
     assert response.status_code == 200
-    assert response.json()["acceptedCount"] == 1
-    assert response.json()["rejectedCount"] == 2
-    assert response.json()["responses"][0]["uid"] == "good-1"
+    assert response.json()["acceptedCount"] == 2
+    assert response.json()["rejectedCount"] == 1
+    assert [item["uid"] for item in response.json()["responses"]] == [
+        "good-1",
+        "good-2",
+    ]
     assert gateway.last_batch is not None
-    assert [item.uid for item in gateway.last_batch.messages] == ["good-1"]
+    assert [item.uid for item in gateway.last_batch.messages] == ["good-1", "good-2"]
 
 
 def test_batch_retry_uses_cached_individual_responses() -> None:

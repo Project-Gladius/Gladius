@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ClaudeCodeEditorTabs">
-    <option name="activeSessionId" value="0b9a6184-2231-4eb5-9a0d-2907df8c244a" />
+    <option name="activeSessionId" value="e070f493-7d5c-4756-b291-572578fca204" />
     <option name="openSessionIds">
       <list>
         <option value="0b9a6184-2231-4eb5-9a0d-2907df8c244a" />
+        <option value="e070f493-7d5c-4756-b291-572578fca204" />
       </list>
     </option>
     <option name="sessionPaths">
       <map>
         <entry key="0b9a6184-2231-4eb5-9a0d-2907df8c244a" value="/sessions/23f99454-deca-46cb-b5e8-55df5cb6f7ba" />
+        <entry key="e070f493-7d5c-4756-b291-572578fca204" value="/sessions/new" />
       </map>
     </option>
     <option name="sessionTitles">
       <map>
         <entry key="0b9a6184-2231-4eb5-9a0d-2907df8c244a" value="언리얼 엔진이 처음인데, 언리얼 엔진 프로젝트의 구조를 알려줘" />
+        <entry key="e070f493-7d5c-4756-b291-572578fca204" value="Claude Code" />
       </map>
     </option>
   </component>

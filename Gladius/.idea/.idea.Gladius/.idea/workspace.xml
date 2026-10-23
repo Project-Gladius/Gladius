@@ -15,22 +15,22 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="d9d411c6-142d-4de4-9930-1b2560173707" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/claudeCodeEditorTabs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/indexLayout.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/projectSettingsUpdater.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Content/Asset/Battle/COLOSEUM/Collosseum_Diffuse_01.uasset" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Asset/Battle/COLOSEUM/Collosseum_Diffuse_01.uasset" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Content/Asset/Battle/COLOSEUM/Colosseum_Specular_01.uasset" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Asset/Battle/COLOSEUM/Colosseum_Specular_01.uasset" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Content/Levels/Main/MainStore.umap" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Levels/Main/MainStore.umap" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Gladius.Build.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Gladius.Build.cs" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Backend/CommandDispatcher.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Backend/CommandDispatcher.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Backend/GameManager.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Backend/GameManager.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Backend/YouTubeChatManager.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Backend/YouTubeChatManager.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/GladiusTypes.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/GladiusTypes.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Backend/CommandDispatcher.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Backend/CommandDispatcher.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Backend/GameManager.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Backend/GameManager.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Backend/YouTubeChatManager.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Backend/YouTubeChatManager.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/claudeCodeEditorTabs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/claudeCodeEditorTabs.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/EdSplash.uasset" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/EdSplash.uasset" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/Splash.uasset" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/Splash.uasset" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Content/Levels/Main/MainTemple.umap" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Levels/Main/MainTemple.umap" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudio.dll" beforeDir="false" afterPath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudio.dll" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudioEditor.dll" beforeDir="false" afterPath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudioEditor.dll" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Plugins/FMODStudioNiagara/Binaries/Win64/UnrealEditor-FMODStudioNiagara.dll" beforeDir="false" afterPath="$PROJECT_DIR$/Plugins/FMODStudioNiagara/Binaries/Win64/UnrealEditor-FMODStudioNiagara.dll" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/prompts.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/prompts.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/services/fallback_reply.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/services/fallback_reply.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_api.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_fallback_reply.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_fallback_reply.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_prompts.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_prompts.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Temple/TempleCommandQueue.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Temple/TempleCommandQueue.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Temple/TempleCommandQueue.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Temple/TempleCommandQueue.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -113,7 +113,9 @@
       <option name="presentableId" value="Default" />
       <updated>1789720800477</updated>
       <workItem from="1789720802905" duration="981000" />
-      <workItem from="1791604130609" duration="18880000" />
+      <workItem from="1791604130609" duration="18926000" />
+      <workItem from="1791723247105" duration="706000" />
+      <workItem from="1792764639519" duration="2961000" />
     </task>
     <servers />
   </component>

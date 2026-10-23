@@ -47,7 +47,6 @@ void UTempleCommandQueue::ResetWindow(const FDateTime& WindowStartedAt)
 	Current = FTempleCycleCommands();
 	Current.EnhanceTiers.SetNum(GTempleEnhanceTierCount);
 	Current.WindowStartedAt = WindowStartedAt;
-	CurrentTalkUserIds.Reset();
 	CurrentTalkCharacterCount = 0;
 	bWindowStarted = true;
 }
@@ -78,7 +77,7 @@ void UTempleCommandQueue::AddTalk(const FString& UserId, const FString& CommentI
 	{
 		return;
 	}
-	if (ProcessedTalkUids.Contains(CommentId) || CurrentTalkUserIds.Contains(UserId))
+	if (ProcessedTalkUids.Contains(CommentId))
 	{
 		return;
 	}
@@ -97,6 +96,5 @@ void UTempleCommandQueue::AddTalk(const FString& UserId, const FString& CommentI
 	Talk.Username = Username.IsEmpty() ? UserId : Username;
 	Talk.Message = CleanMessage;
 	Current.Talks.Add(MoveTemp(Talk));
-	CurrentTalkUserIds.Add(UserId);
 	CurrentTalkCharacterCount += CleanMessage.Len();
 }
