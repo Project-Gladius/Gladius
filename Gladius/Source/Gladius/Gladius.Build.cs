@@ -8,7 +8,7 @@ public class Gladius : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "UMG", "DeveloperSettings" });
 
 		// JsonUtilities: 플레이어 기록을 구조체 그대로 JSON으로 직렬화하는 데 필요
 		PrivateDependencyModuleNames.AddRange(new string[] { "LevelSequence", "MovieScene", "HTTP", "Json", "JsonUtilities", "TempleAIClient", "FMODStudio" });
@@ -18,7 +18,8 @@ public class Gladius : ModuleRules
 		
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor" });
+			// AssetRegistry: 전투 UI WBP 자동 생성 커맨드릿(GenerateGladiusUI)
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor", "AssetRegistry" });
 		}
 
 		// Uncomment if you are using online features

@@ -6,6 +6,7 @@
 #include "BattleUnit.generated.h"
 
 class USkeletalMeshComponent;
+class UAnimMontage;
 class UWidgetComponent;
 class UCurveFloat;
 class UBattlePlayerNameplate;
@@ -159,6 +160,15 @@ public:
 	//크면 구르면서 그만큼 더 이동한다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnEvadeRoll(float RemainingSeconds, float RemainingDistance);
+
+    // Used by the actual roll animation entry point, independently of movement gait.
+    UFUNCTION(BlueprintPure, Category = "Battle|Motion")
+    bool CanPlayEvadeRoll() const;
+
+    // Configured by the character Blueprint so selecting a skill can cancel only its roll.
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Battle|Motion")
+    TObjectPtr<UAnimMontage> EvadeRollMontage;
+
 
 	//공격. AttackIndex는 1 또는 2, bCrit이면 치명타 연출.
 	//bFeverHighlight면 이번 턴 자기 직업군에서 피버가 가장 높았던 한 명이다 —

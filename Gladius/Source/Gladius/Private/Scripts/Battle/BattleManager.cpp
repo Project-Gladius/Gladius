@@ -7,9 +7,14 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/UI/ChatLogWidget.h"
 #include "Scripts/UI/BattleDataResetWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
+#include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
+#include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
+#include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
+#include "Scripts/UI/UIWidgetBuild.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -33,6 +38,9 @@ ABattleManager::ABattleManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	ChatLogWidgetClass = UChatLogWidget::StaticClass();
+	LeaderboardWidgetClass = ULeaderboardRotatorWidget::StaticClass();
+	BossTelegraphWidgetClass = UBossTelegraphWidget::StaticClass();
+	TopHudWidgetClass = UBattleTopHudWidget::StaticClass();
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
@@ -77,6 +85,8 @@ void ABattleManager::BeginPlay()
 {
 	Super::BeginPlay();
 
+ //BATTLE ANALYSIS는 전투씬에 들어온 순간부터 산출
+ SessionStats.Reset();
  InitializePlayerRecords();
  if (!bAutoStartBattle)
  {
@@ -112,6 +122,33 @@ void ABattleManager::BeginPlay()
   {
    ChatLogWidget->SetExpansionAllowed(false);
    ChatLogWidget->AddToViewport(1);
+  }
+ }
+ if (LeaderboardWidgetClass)
+ {
+  LeaderboardWidget = CreateWidget<ULeaderboardRotatorWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<ULeaderboardRotatorWidget>(LeaderboardWidgetClass, GladiusUI::AssetPaths::LeaderboardRotator));
+  if (LeaderboardWidget)
+  {
+   LeaderboardWidget->AddToViewport(1);
+   LeaderboardWidget->BindToBattleManager(this);
+  }
+ }
+ if (BossTelegraphWidgetClass)
+ {
+  BossTelegraphWidget = CreateWidget<UBossTelegraphWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<UBossTelegraphWidget>(BossTelegraphWidgetClass, GladiusUI::AssetPaths::BossTelegraph));
+  if (BossTelegraphWidget)
+  {
+   BossTelegraphWidget->AddToViewport(1);
+   BossTelegraphWidget->BindToBattleManager(this);
+  }
+ }
+ if (TopHudWidgetClass)
+ {
+  TopHudWidget = CreateWidget<UBattleTopHudWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<UBattleTopHudWidget>(TopHudWidgetClass, GladiusUI::AssetPaths::TopHud));
+  if (TopHudWidget)
+  {
+   TopHudWidget->AddToViewport(1);
+   TopHudWidget->BindToBattleManager(this);
   }
  }
  if (bShowTemporaryDataResetButtons && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("MainBattle"))
@@ -160,11 +197,16 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
  if (DataResetWidget) DataResetWidget->RemoveFromParent();
  if (DataResetController.IsValid()) DataResetController->bShowMouseCursor = bMouseCursorBeforeDataReset;
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
+ if (LeaderboardWidget) LeaderboardWidget->RemoveFromParent();
+ if (BossTelegraphWidget) BossTelegraphWidget->RemoveFromParent();
+ if (TopHudWidget) TopHudWidget->RemoveFromParent();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->GetCommandDispatcher()->UnbindBattleManager(this);
  StopBattle();
  //방송이 정상 종료되는 경우의 마지막 저장
 	SaveRecords();
+	//전투씬에서 나가면 BATTLE ANALYSIS 초기화
+	SessionStats.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -200,8 +242,24 @@ void ABattleManager::StartBattle()
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, FMath::Max(0.001f, BattleStartSeconds), false);
 }
 
+void ABattleManager::FinishBattle()
+{
+ if (!bBattleRunning) return;
+ StopBattle();
+ const TSoftObjectPtr<UWorld>& TempleMap = GetDefault<URealTimeSettings>()->TempleMap;
+ if (TempleMap.IsNull())
+ {
+  UE_LOG(LogTemp, Error, TEXT("[Battle] Cannot return to temple: TempleMap is not configured."));
+  return;
+ }
+ if (AGameManager* Game = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(this, AGameManager::StaticClass())))
+  Game->SetGameState(EGameState::Temple);
+ UGameplayStatics::OpenLevelBySoftObjectPtr(this, TempleMap);
+}
+
 void ABattleManager::StopBattle()
 {
+ WalkRunOnlyCutSceneUnit.Reset();
  if (bBattleRunning) SaveRecords();
  bBattleRunning = false;
  Phase = EBattlePhase::BattleEnd;
@@ -233,6 +291,20 @@ bool ABattleManager::IsAcceptingInput() const
 		|| Phase == EBattlePhase::Collect);
 }
 
+float ABattleManager::GetInputPhaseRemainingSeconds() const
+{
+	if (!IsAcceptingInput() || !GetWorld())
+	{
+		return 0.f;
+	}
+	return FMath::Max(0.f, InputPhaseEndTime - GetWorld()->GetTimeSeconds());
+}
+
+bool ABattleManager::IsTurnCutScenePlaying() const
+{
+	return IsValid(CutSceneApplier) && CutSceneApplier->IsPlaying();
+}
+
 // ---------------- 좌표 ----------------
 
 EMoveGait ABattleManager::ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed)
@@ -247,6 +319,13 @@ EMoveGait ABattleManager::ChooseGait(float Distance, float Seconds, float RunSpe
 	if (Speed < RunSpeed)   { return EMoveGait::Walk; }
 	if (Speed < RollSpeed)  { return EMoveGait::Run; }
 	return EMoveGait::Roll;
+}
+
+EMoveGait ABattleManager::ChooseMovementGait(const ABattleUnit* Unit, float Distance, float Seconds) const
+{
+ const EMoveGait Gait = ChooseGait(Distance, Seconds, RunSpeed, RollSpeed);
+ return Unit && Unit == WalkRunOnlyCutSceneUnit.Get() && Gait == EMoveGait::Roll
+     ? EMoveGait::Run : Gait;
 }
 
 float ABattleManager::AttackMotionSeconds(float SkillSeconds, float FlurrySeconds)
@@ -875,6 +954,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 #endif
 
 		Player = &Players.Add(UserId, NewPlayer);
+  SessionStats.RegisterPlayer(UserId, DisplayName, Record.CharacterId);
   SaveRecords();
 
 		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분한다.
@@ -946,6 +1026,9 @@ void ABattleManager::StartTurn()
  StopTurnCutScenes();
  ++TurnIndex;
  Phase = EBattlePhase::Prepare;
+ //상단 UI: Prepare는 예고 + 선택 시간이 끝날 때(Collect 시작)까지
+ InputPhaseDuration = FMath::Max(0.f, TelegraphSeconds) + FMath::Max(0.f, PlayerSelectCountdown);
+ InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->SetCombatAutoPollingEnabled(true);
 
@@ -994,8 +1077,11 @@ void ABattleManager::StartTurn()
 	//예고 자세. 플레이어가 자세만 보고도 피격 범위를 짐작할 수 있어야 한다
 	if (BossUnit)
 	{
-		BossUnit->OnBossTelegraph(TelegraphedAction.Id, TelegraphedAction.TelegraphText);
+		BossUnit->OnBossTelegraph(TelegraphedAction.TelegraphMotion(), TelegraphedAction.TelegraphText);
 	}
+
+	//암시 문구는 보스 유닛(모션)과 별개로 UI 등 구독자에게 알린다
+	OnBossTelegraph.Broadcast(TelegraphedAction.TelegraphMotion(), TelegraphedAction.TelegraphText);
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / '%s' → %s"),
 		TurnIndex, Turns, TelegraphSeconds, Players.Num(),
@@ -1024,6 +1110,9 @@ void ABattleManager::BeginCollect()
 {
 	//시청자 화면에서는 아직 입력 시간이다. 늦게 도착하는 채팅을 계속 받는다
 	Phase = EBattlePhase::Collect;
+	//상단 UI: Collect는 수집 시간이 끝날 때(Move 시작)까지 다시 가득 찬 상태에서 시작
+	InputPhaseDuration = FMath::Max(0.f, CollectSeconds);
+	InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 수집 — %.1f초"), TurnIndex, CollectSeconds);
 
@@ -1110,6 +1199,8 @@ void ABattleManager::StartMoveCutScenes()
  PlayNextCutScene();
  if (ClassId == TEXT("gladius") && IsValid(Selected->Unit))
  {
+  if (IsValid(CutSceneApplier) && CutSceneApplier->IsPlaying() && CutSceneApplier->GetCurrentSubject() == Selected->Unit)
+   WalkRunOnlyCutSceneUnit = Selected->Unit;
   Selected->Unit->OnAttackStarted.RemoveAll(this);
   Selected->Unit->OnAttackStarted.AddUObject(this, &ABattleManager::HandleSelectedGladiusAttackStarted);
   Selected->Unit->OnMovementFinished.RemoveAll(this);
@@ -1291,7 +1382,9 @@ void ABattleManager::BeginMove()
 {
  if (!bBattleRunning) return;
  StopTurnCutScenes();
+ WalkRunOnlyCutSceneUnit.Reset();
 	Phase = EBattlePhase::Move;
+	ResolveBattleStartTarget();
 
 	//**회피자의 구역은 아직 바꾸지 않는다.** 실제로 넘어가는 것은 보스 공격 직전이고,
 	//여기서 미리 옮기면 아직 서 있는 자리를 같은 구역의 다른 사람이 배정받아 겹친다.
@@ -1348,7 +1441,7 @@ void ABattleManager::BeginMove()
 			? P.TargetLocation : ChargeLocation(P.TargetLocation);
 		const float Distance = FVector::Dist(P.Unit->GetActorLocation(), Target);
 
-		EMoveGait ApproachGait = ChooseGait(Distance, MoveSecondsForMe, RunSpeed, RollSpeed);
+		EMoveGait ApproachGait = ChooseMovementGait(P.Unit, Distance, MoveSecondsForMe);
 		// An attacking Gladius charges straight into the skill; rolls belong to evade actions.
 		if (Classes.IsValidIndex(P.ClassIndex) && Classes[P.ClassIndex].Id == TEXT("gladius")
 			&& ApproachGait == EMoveGait::Roll) ApproachGait = EMoveGait::Run;
@@ -1587,6 +1680,7 @@ void ABattleManager::ResolveTurn()
 
 			//Records는 방송 전체 누적이라 초기화되지 않는다. 판 단위 순위는 이쪽이다
 			P.DamageDealt += Dealt;
+			SessionStats.AddDamage(Pair.Key, Dealt);
 
 			if (Record)
 			{
@@ -1710,7 +1804,7 @@ void ABattleManager::ResolveTurn()
 	//BossDelay는 **휘두르기 시작**이다. 칼은 그보다 뒤에, 구역마다 다른 시각에 닿는다
 	//(LeftRight는 왼쪽을 먼저 친다). 피격과 구르기는 닿는 순간에 맞춘다 — 시작에 맞추면
 	//칼이 오기도 전에 맞는 모션이 나가고, 회피자는 다 구른 뒤 멈춰 서서 칼을 맞는다
-	const UAnimMontage* Strike = BossUnit ? BossUnit->GetStrikeMontage(TelegraphedAction.Id) : nullptr;
+	const UAnimMontage* Strike = BossUnit ? BossUnit->GetStrikeMontage(TelegraphedAction.AttackMotion()) : nullptr;
 	StrikeLandsWithin = 0.f;
 
 	for (int32 Index = 0; Index < 3; ++Index)
@@ -1943,7 +2037,7 @@ void ABattleManager::BeginEvadeApproach(EBattleLane Leaving)
 
 		const FVector Waypoint = From + Dir * Lead;
 		P.Unit->MoveTo(Waypoint, ApproachSeconds,
-			ChooseGait(Lead, ApproachSeconds, RunSpeed, RollSpeed));
+			ChooseMovementGait(P.Unit, Lead, ApproachSeconds));
 	}
 }
 
@@ -1984,14 +2078,14 @@ void ABattleManager::BossAttackBeat()
 	//예고한 것과 같은 행동이므로 MotionId도 그때 보여준 것과 짝이 맞는다
 	if (BossUnit)
 	{
-		BossUnit->OnBossAttack(TelegraphedAction.Id, TelegraphedAction.HitCount);
+		BossUnit->OnBossAttack(TelegraphedAction.AttackMotion(), TelegraphedAction.HitCount);
 	}
 
 	//맞는 쪽 반응은 여기가 아니라 칼이 닿는 LandBossStrike에서 나간다.
 	//공격 모션이 끝나야 다음 턴으로 간다. 상태마다 길이가 2.7초~8.4초로 갈린다.
 	//마지막 구역에 칼이 닿기 전에 끝나면 맞는 모션이 다음 턴으로 넘어가므로 그보다는 길게 잡는다
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn,
-		FMath::Max(BossStrikeSecondsFor(TelegraphedAction.Id), StrikeLandsWithin + KINDA_SMALL_NUMBER), false);
+		FMath::Max(BossStrikeSecondsFor(TelegraphedAction.AttackMotion()), StrikeLandsWithin + KINDA_SMALL_NUMBER), false);
 }
 
 float ABattleManager::StrikeImpactSeconds(const UAnimMontage* Montage, EBattleLane Lane)
@@ -2078,7 +2172,7 @@ void ABattleManager::EndTurn()
 		{
 			const float Distance = FVector::Dist(P.Unit->GetActorLocation(), P.TargetLocation);
 			P.Unit->MoveTo(P.TargetLocation, ReturnSeconds,
-				ChooseGait(Distance, ReturnSeconds, RunSpeed, RollSpeed));
+				ChooseMovementGait(P.Unit, Distance, ReturnSeconds));
 		}
 	}
 
@@ -2112,7 +2206,7 @@ void ABattleManager::EndTurn()
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — %d턴 완주 / 누적 피해 %d / 생존 %d/%d / 1위 %s (%d)"),
 			Turns, BossDamageTaken, Alive, Players.Num(), *TopName, TopDamage);
 
-		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StopBattle, FMath::Max(0.001f, FMath::Max(ReturnSeconds, ResolveSeconds)), false);
+		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::FinishBattle, FMath::Max(0.001f, FMath::Max(ReturnSeconds, ResolveSeconds)), false);
 		return;
 	}
 
@@ -2135,6 +2229,8 @@ void ABattleManager::RemovePlayer(const FString& UserId)
 	}
 
 	Players.Remove(UserId);
+	//전투 중 이탈하면 BATTLE ANALYSIS 목록과 이번 씬 기록에서도 제거
+	SessionStats.RemovePlayer(UserId);
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] 이탈: %s (무입력 %d턴) — 현재 %d/%d명"),
 		*UserId, IdleTurnsBeforeKick, Players.Num(), MaxPlayers);
@@ -2284,6 +2380,44 @@ namespace
 			}
 		}
 	}
+}
+
+void ABattleManager::ResolveBattleStartTarget()
+{
+	FBossAction& Action = TelegraphedAction;
+	if (!Action.NeedsBattleStartTarget()) return;
+
+	int64 Counts[3] = { 0, 0, 0 };
+	int64 FeverTotals[3] = { 0, 0, 0 };
+	for (const auto& Pair : Players)
+	{
+		const FBattlePlayer& Player = Pair.Value;
+		if (Player.HP <= 0 || Player.ReviveCountdown > 0) continue;
+		const int32 Lane = static_cast<int32>(Player.Lane);
+		if (Lane < 0 || Lane >= 3) continue;
+		++Counts[Lane];
+		FeverTotals[Lane] += FMath::Max(0, Player.Fever);
+	}
+
+	//빈 구역도 후보다. 동률이면 한 곳을 균등 추첨한다.
+	TArray<int32, TInlineAllocator<3>> Candidates;
+	int64 Best = 0;
+	for (int32 Lane = 0; Lane < 3; ++Lane)
+	{
+		if (Action.DamageByZone[Lane] <= 0) continue;
+		const int64 Score = Action.TargetMode == EBossTargetMode::MostDamage ? FeverTotals[Lane] : Counts[Lane];
+		const bool bBetter = Candidates.IsEmpty() || (Action.TargetMode == EBossTargetMode::LeastPlayer ? Score < Best : Score > Best);
+		if (bBetter) { Best = Score; Candidates.Reset(); }
+		if (Score == Best) Candidates.Add(Lane);
+	}
+	if (Candidates.IsEmpty()) return;
+	const int32 Picked = Candidates[FMath::RandRange(0, Candidates.Num() - 1)];
+	for (int32 Lane = 0; Lane < 3; ++Lane)
+		if (Lane != Picked) Action.DamageByZone[Lane] = 0;
+	//이후 이동·피버 증감으로 다시 고르지 않는다.
+	Action.TargetMode = EBossTargetMode::Fixed;
+	UE_LOG(LogTemp, Log, TEXT("[Battle] 입력 종료 대상 확정 '%s' -> %s (인원 %lld/%lld/%lld, 피버 %lld/%lld/%lld)"),
+		*Action.Id, *ZonesLabel(Action), Counts[0], Counts[1], Counts[2], FeverTotals[0], FeverTotals[1], FeverTotals[2]);
 }
 
 FBossAction ABattleManager::NextBossAction()
@@ -2633,6 +2767,7 @@ float ABattleManager::ZoneResistMultiplier(const FBossAction& Action, EBattleLan
 
 FString ABattleManager::ZonesLabel(const FBossAction& Action)
 {
+	if (Action.NeedsBattleStartTarget()) return TEXT("Pending (input closes)");
 	static const TCHAR* Names[] = { TEXT("Left"), TEXT("Mid"), TEXT("Right") };
 
 	FString Label;

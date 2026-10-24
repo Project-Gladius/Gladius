@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Scripts/Battle/BattleBalance.h"
+#include "Scripts/Battle/BattleSessionStats.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "BattleManager.generated.h"
 
@@ -10,7 +11,13 @@ class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
 class UChatLogWidget;
+class ULeaderboardRotatorWidget;
+class UBossTelegraphWidget;
 class UBattleDataResetWidget;
+class UBattleTopHudWidget;
+
+//보스가 다음 공격을 예고할 때. MotionId: 보스 행동 id(모션 키), TelegraphText: 암시 문구
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBossTelegraphSignature, const FString&, MotionId, const FString&, TelegraphText);
 
 //BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
@@ -464,6 +471,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle|State")
 	bool IsAcceptingInput() const;
 
+	//입력 단계(Prepare: 선택 마감까지, Collect: 수집 마감까지)의 남은 시간과 전체 길이(초). 상단 UI 게이지용
+	UFUNCTION(BlueprintPure, Category = "Battle|State")
+	float GetInputPhaseRemainingSeconds() const;
+
+	UFUNCTION(BlueprintPure, Category = "Battle|State")
+	float GetInputPhaseDuration() const { return InputPhaseDuration; }
+
+	//이번 턴 컷신이 재생 중인지
+	UFUNCTION(BlueprintPure, Category = "Battle|State")
+	bool IsTurnCutScenePlaying() const;
+
 	// 컷신 등 표시 계층은 전투 상태를 읽기만 한다.
 	const TMap<FString, FBattlePlayer>& GetBattlePlayers() const { return Players; }
 	ABattleUnit* GetBossUnit() const { return BossUnit.Get(); }
@@ -475,11 +493,34 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle|Motion")
 	static float StrikeImpactSeconds(const UAnimMontage* Montage, EBattleLane Lane);
 
+	// 리더보드 등 표시 계층이 읽는 데이터
+	//방송 전체 누적 기록 (Saved/PlayerData.json에 저장되는 내용)
+	const TMap<FString, FPlayerRecord>& GetPlayerRecords() const { return Records; }
+	//이번 전투씬 진입부터의 유저별 누적 기록
+	const FBattleSessionStats& GetSessionStats() const { return SessionStats; }
+	const TArray<FCharacterDef>& GetCharacterClasses() const { return Classes; }
+
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
  bool bAutoStartBattle = true;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
+
+ //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<ULeaderboardRotatorWidget> LeaderboardWidgetClass;
+
+ //보스 행동 암시 텍스트. 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<UBossTelegraphWidget> BossTelegraphWidgetClass;
+
+ //최상단 중앙 상단 UI (턴, 안내 문구, 게이지, 남은 시간). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<UBattleTopHudWidget> TopHudWidgetClass;
+
+ //매 턴 Prepare 시작 시 보스 행동이 정해지면 브로드캐스트. 암시 텍스트 UI 등이 구독
+ UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
+ FOnBossTelegraphSignature OnBossTelegraph;
 
  // HPGen for the temple recovery blessing; adjustable until design fixes the value.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Temple", meta = (ClampMin = "0"))
@@ -637,6 +678,17 @@ public:
 private:
  UPROPERTY(Transient)
  TObjectPtr<UChatLogWidget> ChatLogWidget;
+ UPROPERTY(Transient)
+ TObjectPtr<ULeaderboardRotatorWidget> LeaderboardWidget;
+ UPROPERTY(Transient)
+ TObjectPtr<UBossTelegraphWidget> BossTelegraphWidget;
+ UPROPERTY(Transient)
+ TObjectPtr<UBattleTopHudWidget> TopHudWidget;
+ //현재 입력 단계가 끝나는 월드 시각과 그 단계의 전체 길이
+ float InputPhaseEndTime = 0.f;
+ float InputPhaseDuration = 0.f;
+ //전투씬 진입(BeginPlay)부터 나갈 때(EndPlay)까지의 유저별 누적. 판이 새로 시작돼도 유지
+ FBattleSessionStats SessionStats;
  UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;
  TWeakObjectPtr<APlayerController> DataResetController;
  bool bMouseCursorBeforeDataReset = false;
@@ -664,6 +716,9 @@ private:
  FString CutSceneAttackUserId;
  float CutSceneAttackStartTime = 0.f;
  bool bCutSceneAttackCrit = false;
+ // Keep the selected Gladius on walk/run speed choices through this turn's return movement.
+ TWeakObjectPtr<ABattleUnit> WalkRunOnlyCutSceneUnit;
+ EMoveGait ChooseMovementGait(const ABattleUnit* Unit, float Distance, float Seconds) const;
  void HandleSelectedGladiusAttackStarted(int32 AttackIndex);
  void StartSelectedGladiusAttack();
  void StartMoveCutScenes();
@@ -732,6 +787,8 @@ private:
 	bool IsRangedClass(int32 ClassIndex) const;
 	//결과를 반영해 이름표를 갱신하고 종료 조건을 본다
 	void EndTurn();
+	// Complete the final results, save records, and return to the configured temple.
+	void FinishBattle();
 
 	//구역별 인원에 맞춰 설 자리를 다시 배분한다
 	void AssignSlots();
@@ -767,6 +824,9 @@ private:
 
 	//이번 턴 보스 행동. 패턴이 끝났으면 새 패턴을 먼저 뽑는다
 	FBossAction NextBossAction();
+
+	//입력 종료 후, 회피 이동과 피버 증감 전에 단 한 번 확정한다.
+	void ResolveBattleStartTarget();
 
 	//남은 턴에 들어가는 패턴 중 가중 랜덤으로 하나. 못 고르면 nullptr.
 	//PreviousId는 직전에 끝난 패턴 (연속 재선택 금지에 쓴다)

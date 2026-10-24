@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "gladius-boss-patterns",
-  "revision": 2,
+  "revision": 3,
   "name": "트루돈",
   "maxHp": 100,
   "encounter": {
@@ -14,7 +14,7 @@
       "name": "SingleStrikeLeft",
       "hitCount": 1,
       "damageByZone": {
-        "left": 1,
+        "left": 2,
         "center": 0,
         "right": 0
       },
@@ -49,7 +49,7 @@
       "hitCount": 1,
       "damageByZone": {
         "left": 0,
-        "center": 1,
+        "center": 2,
         "right": 0
       },
       "attributeByZone": {
@@ -84,7 +84,7 @@
       "damageByZone": {
         "left": 0,
         "center": 0,
-        "right": 1
+        "right": 2
       },
       "attributeByZone": {
         "left": "physical",
@@ -116,7 +116,7 @@
       "name": "StrongStrikeLeft",
       "hitCount": 1,
       "damageByZone": {
-        "left": 2,
+        "left": 4,
         "center": 0,
         "right": 0
       },
@@ -151,7 +151,7 @@
       "hitCount": 1,
       "damageByZone": {
         "left": 0,
-        "center": 2,
+        "center": 4,
         "right": 0
       },
       "attributeByZone": {
@@ -186,7 +186,7 @@
       "damageByZone": {
         "left": 0,
         "center": 0,
-        "right": 2
+        "right": 4
       },
       "attributeByZone": {
         "left": "physical",
@@ -218,8 +218,8 @@
       "name": "LeftMiddle",
       "hitCount": 1,
       "damageByZone": {
-        "left": 1,
-        "center": 1,
+        "left": 2,
+        "center": 2,
         "right": 0
       },
       "attributeByZone": {
@@ -253,8 +253,8 @@
       "hitCount": 1,
       "damageByZone": {
         "left": 0,
-        "center": 1,
-        "right": 1
+        "center": 2,
+        "right": 2
       },
       "attributeByZone": {
         "left": "physical",
@@ -286,9 +286,9 @@
       "name": "LeftRight",
       "hitCount": 1,
       "damageByZone": {
-        "left": 1,
+        "left": 2,
         "center": 0,
-        "right": 1
+        "right": 2
       },
       "attributeByZone": {
         "left": "physical",
@@ -354,9 +354,9 @@
       "name": "AllStrike",
       "hitCount": 1,
       "damageByZone": {
-        "left": 2,
-        "center": 2,
-        "right": 2
+        "left": 4,
+        "center": 4,
+        "right": 4
       },
       "attributeByZone": {
         "left": "physical",
@@ -422,9 +422,9 @@
       "name": "Fury",
       "hitCount": 1,
       "damageByZone": {
-        "left": 1,
-        "center": 1,
-        "right": 1
+        "left": 2,
+        "center": 2,
+        "right": 2
       },
       "attributeByZone": {
         "left": "physical",
@@ -452,6 +452,132 @@
       "attackMotionId": "",
       "target": {
         "mode": "randomOne",
+        "zones": [
+          "left",
+          "center",
+          "right"
+        ]
+      }
+    },
+    {
+      "id": "MostPlayer",
+      "name": "MostPlayer",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 2,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "트루돈이 사람이 가장 많은 곳을 찾고 있습니다",
+        "motionId": "Fury"
+      },
+      "attackMotionId": "Fury",
+      "target": {
+        "mode": "mostPlayer",
+        "zones": [
+          "left",
+          "center",
+          "right"
+        ]
+      }
+    },
+    {
+      "id": "LeastPlayer",
+      "name": "LeastPlayer",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 2,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "트루돈이 사람이 가장 적은 곳을 찾고 있습니다",
+        "motionId": "Fury"
+      },
+      "attackMotionId": "Fury",
+      "target": {
+        "mode": "leastPlayer",
+        "zones": [
+          "left",
+          "center",
+          "right"
+        ]
+      }
+    },
+    {
+      "id": "MostDamage",
+      "name": "MostDamage",
+      "hitCount": 1,
+      "damageByZone": {
+        "left": 2,
+        "center": 2,
+        "right": 2
+      },
+      "attributeByZone": {
+        "left": "physical",
+        "center": "physical",
+        "right": "physical"
+      },
+      "resistanceByZone": {
+        "left": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "center": {
+          "physical": "normal",
+          "magical": "normal"
+        },
+        "right": {
+          "physical": "normal",
+          "magical": "normal"
+        }
+      },
+      "telegraph": {
+        "text": "트루돈이 가장 강한 공격이 오는 곳을 찾고 있습니다",
+        "motionId": "Fury"
+      },
+      "attackMotionId": "Fury",
+      "target": {
+        "mode": "mostDamage",
         "zones": [
           "left",
           "center",
@@ -637,6 +763,27 @@
       "steps": [
         "LeftRight"
       ]
+    },
+    {
+      "id": "pattern_23",
+      "name": "MostPlayer",
+      "steps": [
+        "MostPlayer"
+      ]
+    },
+    {
+      "id": "pattern_24",
+      "name": "LeastPlayer",
+      "steps": [
+        "LeastPlayer"
+      ]
+    },
+    {
+      "id": "pattern_25",
+      "name": "MostDamage",
+      "steps": [
+        "MostDamage"
+      ]
     }
   ],
   "selection": {
@@ -729,6 +876,18 @@
       },
       {
         "patternId": "pattern_22",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_23",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_24",
+        "weight": 1
+      },
+      {
+        "patternId": "pattern_25",
         "weight": 1
       }
     ]

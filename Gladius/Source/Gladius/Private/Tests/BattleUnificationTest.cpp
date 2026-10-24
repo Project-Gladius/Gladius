@@ -9,6 +9,7 @@
 #include "JsonObjectConverter.h"
 #include "HAL/FileManager.h"
 #include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/Battle/CutSceneApplier.h"
 #include "LevelSequence.h"
 #include "MovieScene.h"
@@ -18,6 +19,7 @@
 #include "Scripts/UI/BattleDataResetWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Components/InputComponent.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "EngineUtils.h"
@@ -30,6 +32,26 @@
 
 struct FBattleUnificationTestAccess
 {
+ static bool LoadBossData(ABattleManager* B) { return B->Balance.LoadFromFolder(B->BalanceFolderPath()); }
+ static const FBattleBalance& BossData(ABattleManager* B) { return B->Balance; }
+ static void SetBossAction(ABattleManager* B, const FBossAction& Action) { B->TelegraphedAction = Action; }
+ static const FBossAction& BossAction(ABattleManager* B) { return B->TelegraphedAction; }
+ static void LockTarget(ABattleManager* B) { B->ResolveBattleStartTarget(); }
+ static void ClearPlayers(ABattleManager* B) { B->Players.Reset(); }
+ static void PutPlayer(ABattleManager* B, const TCHAR* Id, EBattleLane Lane, int32 Fever, int32 HP = 7, int32 Revive = 0)
+ {
+  FBattlePlayer P; P.Lane=Lane; P.Fever=Fever; P.HP=HP; P.MaxHP=7; P.ReviveCountdown=Revive;
+  P.PendingAction=EBattleAction::AvoidR;
+  B->Players.Add(Id,P);
+ }
+ static void BindKeys(ABattleManager* B) { B->BindActionKeys(); }
+ static bool PressKey(ABattleManager* B, FKey Key)
+ {
+  if (!B->InputComponent) return false;
+  for (const FInputKeyBinding& Binding : B->InputComponent->KeyBindings)
+   if (Binding.Chord.Key == Key && Binding.KeyEvent == IE_Pressed) { Binding.KeyDelegate.Execute(Key); return true; }
+  return false;
+ }
  static void SetPath(ABattleManager* B, const FString& Path) { B->TestRecordPath = Path; }
  static void Prepare(ABattleManager* B) { B->GetWorldTimerManager().ClearTimer(B->PhaseTimerHandle); B->StartTurn(); }
  static void Select(ABattleManager* B) { B->BeginInput(); }
@@ -37,6 +59,7 @@ struct FBattleUnificationTestAccess
  static void Move(ABattleManager* B) { B->GetWorldTimerManager().ClearTimer(B->PhaseTimerHandle); B->BeginMove(); }
  static float PhaseRemaining(ABattleManager* B) { return B->GetWorldTimerManager().GetTimerRemaining(B->PhaseTimerHandle); }
  static void Resolve(ABattleManager* B) { B->ResolveTurn(); }
+ static EMoveGait MovementGait(ABattleManager* B, const ABattleUnit* Unit, float Distance, float Seconds) { return B->ChooseMovementGait(Unit,Distance,Seconds); }
  static int32 ShotIndex(ABattleManager* B) { return B->CutSceneIndex; }
  static FString StartedCutSceneAttack(ABattleManager* B) { return B->CutSceneAttackUserId; }
  static void FlushOneAttack(ABattleManager* B) { B->AttackCount = 1; B->FlushAttackCues(); }
@@ -98,6 +121,50 @@ struct FUnifiedBattleWorld
   return true;
  }
 };
+}
+
+class FReturnToTempleAssertions : public IAutomationLatentCommand
+{
+ TSharedPtr<FUnifiedBattleWorld> State;
+ FAutomationTestBase* Test;
+ int32 Frames = 0;
+public:
+ FReturnToTempleAssertions(TSharedPtr<FUnifiedBattleWorld> InState, FAutomationTestBase* InTest)
+  : State(InState), Test(InTest) {}
+ bool Update() override
+ {
+  State->World->GetTimerManager().Tick(0.1f);
+  if (State->Battle->Phase == EBattlePhase::Resolve && ++Frames < 10) return false;
+  FWorldContext& Context = GEngine->GetWorldContextFromWorldChecked(State->World);
+  Test->TestTrue(TEXT("Completed battle enters BattleEnd"), State->Battle->Phase == EBattlePhase::BattleEnd);
+  Test->TestTrue(TEXT("Completion saves player records before travel"), IFileManager::Get().FileExists(*State->Path));
+  Test->TestTrue(TEXT("Final turn requests the configured temple"),
+   Context.TravelURL.Contains(GetDefault<URealTimeSettings>()->TempleMap.ToSoftObjectPath().GetLongPackageName()));
+  Context.TravelURL.Reset();
+  return true;
+ }
+};
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleReturnToTempleTest, "Gladius.BattleUnified.ReturnToTempleAfterFinalTurn",
+ EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBattleReturnToTempleTest::RunTest(const FString& Parameters)
+{
+ TSharedPtr<FUnifiedBattleWorld> T = MakeShared<FUnifiedBattleWorld>();
+ ABattleManager* B = T->Battle;
+ FWorldContext& Context = GEngine->GetWorldContextFromWorldChecked(T->World);
+ B->Turns = 1;
+ B->ReturnSeconds = 0.01f;
+ B->ResolveSeconds = 0.01f;
+ B->StartBattle();
+ TestTrue(TEXT("Starting a battle does not request travel"), Context.TravelURL.IsEmpty());
+ B->StopBattle();
+ TestTrue(TEXT("Stopping for cleanup does not request travel"), Context.TravelURL.IsEmpty());
+ B->StartBattle();
+ B->TurnIndex = B->Turns;
+ FBattleUnificationTestAccess::EndTurn(B);
+ TestTrue(TEXT("Final results finish before travel"), Context.TravelURL.IsEmpty());
+ ADD_LATENT_AUTOMATION_COMMAND(FReturnToTempleAssertions(T, this));
+ return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUnifiedBattleRoutingTest, "Gladius.BattleUnified.ChatRoutingAndParticipation",
@@ -656,6 +723,166 @@ bool FGladiusDirectAttackMontageTest::RunTest(const FString& Parameters)
   Subject->OnAttackStarted.Remove(StartedHandle);
   B->StopBattle();
  }
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCutSceneWalkRunOnlyTest,"Gladius.BattleUnified.CutSceneGladiusWalkRunOnly",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FCutSceneWalkRunOnlyTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ B->bEnableTurnCutScenes=true; B->RunSpeed=350.f; B->RollSpeed=700.f;
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ B->SubmitAction(TEXT("selected"),TEXT("Selected"),EBattleAction::Attack1,TEXT("gladius"));
+ B->SubmitAction(TEXT("other"),TEXT("Other"),EBattleAction::Attack2,TEXT("gladius"));
+ FBattleUnificationTestAccess::Fever(B,TEXT("selected"),100);
+ FBattleUnificationTestAccess::Move(B);
+ auto* Selected=B->GetBattlePlayers().FindChecked(TEXT("selected")).Unit.Get();
+ auto* Other=B->GetBattlePlayers().FindChecked(TEXT("other")).Unit.Get();
+ TestEqual(TEXT("Cutscene applies to selected Gladius"),B->CutSceneApplier->GetCurrentSubject(),Selected);
+ TestTrue(TEXT("Low speed remains walk"),FBattleUnificationTestAccess::MovementGait(B,Selected,100.f,1.f)==EMoveGait::Walk);
+ TestTrue(TEXT("Normal speed remains run"),FBattleUnificationTestAccess::MovementGait(B,Selected,500.f,1.f)==EMoveGait::Run);
+ TestTrue(TEXT("Roll threshold becomes run"),FBattleUnificationTestAccess::MovementGait(B,Selected,700.f,1.f)==EMoveGait::Run);
+ TestTrue(TEXT("Very high speed remains run"),FBattleUnificationTestAccess::MovementGait(B,Selected,10000.f,0.1f)==EMoveGait::Run);
+ TestTrue(TEXT("Zero duration cannot select roll"),FBattleUnificationTestAccess::MovementGait(B,Selected,100.f,0.f)==EMoveGait::Run);
+ TestTrue(TEXT("Non-selected unit keeps default speed choices"),FBattleUnificationTestAccess::MovementGait(B,Other,1000.f,1.f)==EMoveGait::Roll);
+ Selected->SetActorLocation(Selected->GetActorLocation()+FVector(10000,0,0));
+ Other->SetActorLocation(Other->GetActorLocation()+FVector(10000,0,0));
+ FBattleUnificationTestAccess::EndTurn(B);
+ TestTrue(TEXT("Actual high-speed return uses run after the cutscene ends"),Selected->GetMoveGait()==EMoveGait::Run);
+ TestTrue(TEXT("Other unit return keeps normal speed choice"),Other->GetMoveGait()==EMoveGait::Roll);
+ FBattleUnificationTestAccess::Prepare(B);
+ B->SubmitAction(TEXT("selected"),TEXT("Selected"),EBattleAction::Attack1,TEXT("gladius"));
+ B->SubmitAction(TEXT("other"),TEXT("Other"),EBattleAction::Attack2,TEXT("gladius"));
+ FBattleUnificationTestAccess::Fever(B,TEXT("selected"),1);
+ FBattleUnificationTestAccess::Fever(B,TEXT("other"),100);
+ FBattleUnificationTestAccess::Move(B);
+ TestEqual(TEXT("Next turn changes the selected participant"),B->CutSceneApplier->GetCurrentSubject(),Other);
+ TestTrue(TEXT("New selected Gladius cannot speed-roll"),FBattleUnificationTestAccess::MovementGait(B,Other,1000.f,1.f)==EMoveGait::Run);
+ TestTrue(TEXT("Previous selected participant is released"),FBattleUnificationTestAccess::MovementGait(B,Selected,1000.f,1.f)==EMoveGait::Roll);
+ B->StopBattle();
+ TestTrue(TEXT("Stopping battle clears the temporary movement policy"),FBattleUnificationTestAccess::MovementGait(B,Other,1000.f,1.f)==EMoveGait::Roll);
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FKeyboardSkillRejectsRollTest,"Gladius.BattleUnified.KeyboardSkillRejectsRoll",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FKeyboardSkillRejectsRollTest::RunTest(const FString& Parameters)
+{
+ UClass* UnitClass=LoadClass<ABattleUnit>(nullptr,TEXT("/Game/Blueprints/ScaledBattleUnits/BP_BattleUnitG_DevBattle.BP_BattleUnitG_DevBattle_C"));
+ if(!TestNotNull(TEXT("Actual Gladius class loads"),UnitClass)) return false;
+ for(int32 Skill : {1,2})
+ {
+  FUnifiedBattleWorld T; auto* B=T.Battle;
+  B->UnitClassByCharacter.Add(TEXT("gladius"),UnitClass);
+  B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+  B->SubmitAction(TEXT("@testuser00"),TEXT("Keyboard user"),EBattleAction::Idle,TEXT("gladius"));
+  auto* Subject=B->GetBattlePlayers().FindChecked(TEXT("@testuser00")).Unit.Get();
+  if(!Subject->HasActorBegunPlay()) Subject->DispatchBeginPlay();
+  auto* Mesh=Subject->FindComponentByClass<USkeletalMeshComponent>(); Mesh->InitAnim(true);
+  auto* Anim=Mesh->GetAnimInstance();
+  if(!TestNotNull(TEXT("Animation instance exists"),Anim)) return false;
+  auto* Roll=LoadObject<UAnimMontage>(nullptr,TEXT("/Game/Asset/Battle/gladius/AnimationMontage/AM_Gladius_Roll.AM_Gladius_Roll"));
+  T.World->SpawnActor<APlayerController>();
+  FBattleUnificationTestAccess::BindKeys(B);
+  Anim->Montage_Play(Roll);
+  TestTrue(TEXT("Reproduction begins with an active Roll montage"),Anim->Montage_IsPlaying(Roll));
+  TestTrue(TEXT("Actual numeric skill key is bound"),FBattleUnificationTestAccess::PressKey(B,Skill==1?EKeys::Two:EKeys::Three));
+  TestTrue(TEXT("Numeric key selects the requested skill"),Subject->GetSelectedAction()==(Skill==1?EBattleAction::Attack1:EBattleAction::Attack2));
+  TestFalse(TEXT("Selecting a skill immediately stops an existing Roll montage"),Anim->Montage_IsPlaying(Roll));
+  Subject->OnEvadeRoll(0.8f,200.f);
+  TestFalse(TEXT("Roll animation request cannot play during a selected skill"),Anim->Montage_IsPlaying(Roll));
+  Subject->NotifyAttack(Skill,false,true);
+  auto* Attack=Anim->GetCurrentActiveMontage();
+  TestTrue(TEXT("Selected skill montage plays"),Attack&&Attack->GetName()==FString::Printf(TEXT("AM_Gladius_Attack%d"),Skill));
+  Subject->OnEvadeRoll(0.8f,200.f);
+  TestTrue(TEXT("Roll request cannot interrupt the actual skill montage"),Anim->GetCurrentActiveMontage()==Attack);
+  Subject->NotifyActionSelected(EBattleAction::AvoidL);
+  Subject->OnEvadeRoll(0.8f,200.f);
+  TestTrue(TEXT("Explicit evade action still plays its Roll montage"),Anim->Montage_IsPlaying(Roll));
+  B->StopBattle();
+ }
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPopulationBossTargetTest,"Gladius.BattleUnified.PopulationBossTargets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPopulationBossTargetTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ if (!TestTrue(TEXT("Actual balance JSON loads"),FBattleUnificationTestAccess::LoadBossData(B))) return false;
+ const auto& Data=FBattleUnificationTestAccess::BossData(B);
+ TestEqual(TEXT("Three attacks added"),Data.Actions.Num(),16);
+ TestEqual(TEXT("Three single-turn patterns added"),Data.Patterns.Num(),25);
+ for (const auto& Action:Data.Actions)
+ {
+  const bool Strong=Action.Id.StartsWith(TEXT("StrongStrike"))||Action.Id==TEXT("AllStrike");
+  for (int32 Lane=0;Lane<3;++Lane)
+   if(Action.DamageByZone[Lane]>0) TestEqual(TEXT("All positive boss damage doubled"),Action.DamageByZone[Lane],Strong?4:2);
+ }
+ const TCHAR* Ids[]={TEXT("MostPlayer"),TEXT("LeastPlayer"),TEXT("MostDamage")};
+ const TCHAR* Texts[]={TEXT("트루돈이 사람이 가장 많은 곳을 찾고 있습니다"),TEXT("트루돈이 사람이 가장 적은 곳을 찾고 있습니다"),TEXT("트루돈이 가장 강한 공격이 오는 곳을 찾고 있습니다")};
+ const int32 Expected[]={0,2,1};
+ for(int32 Index=0;Index<3;++Index)
+ {
+  const auto* Definition=Data.FindAction(Ids[Index]);
+  if(!TestNotNull(TEXT("New attack exists"),Definition)) return false;
+  TestEqual(TEXT("Fury telegraph animation reused"),Definition->TelegraphMotion(),FString(TEXT("Fury")));
+  TestEqual(TEXT("Fury attack animation reused"),Definition->AttackMotion(),FString(TEXT("Fury")));
+  TestEqual(TEXT("Requested telegraph text"),Definition->TelegraphText,FString(Texts[Index]));
+  const FString PatternId=FString::Printf(TEXT("pattern_%02d"),23+Index);
+  const auto* Pattern=Data.FindPattern(PatternId);
+  if(!TestNotNull(TEXT("Single-turn pattern exists"),Pattern)) return false;
+  TestEqual(TEXT("One action per pattern"),Pattern->Steps.Num(),1);
+  TestEqual(TEXT("Pattern points to new action"),Pattern->Steps[0],FString(Ids[Index]));
+  TestTrue(TEXT("New pattern participates in weighted selection"),Data.Pool.ContainsByPredicate([&](const FPatternWeight& W){return W.PatternId==PatternId&&W.Weight>0.f;}));
+  FBattleUnificationTestAccess::ClearPlayers(B);
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("L1"),EBattleLane::Left,2);
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("L2"),EBattleLane::Left,3);
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("L3"),EBattleLane::Left,4);
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("M1"),EBattleLane::Mid,20);
+  FBattleUnificationTestAccess::SetBossAction(B,*Definition);
+  TestTrue(TEXT("Target still pending during input"),FBattleUnificationTestAccess::BossAction(B).NeedsBattleStartTarget());
+  //A late input/join must count; dead and reviving participants must not count.
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("Rdead"),EBattleLane::Right,100,0);
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("Rreviving"),EBattleLane::Right,100,7,1);
+  FBattleUnificationTestAccess::Move(B);
+  const auto& Locked=FBattleUnificationTestAccess::BossAction(B);
+  TestFalse(TEXT("Target resolved when collection ends"),Locked.NeedsBattleStartTarget());
+  for(int32 Lane=0;Lane<3;++Lane)
+   TestEqual(TEXT("Exactly the required snapshot lane takes damage"),Locked.DamageByZone[Lane],Lane==Expected[Index]?2:0);
+  TestTrue(TEXT("Snapshot precedes avoidance movement"),B->GetBattlePlayers().FindChecked(TEXT("L1")).Lane==EBattleLane::Left);
+  FBattleUnificationTestAccess::ClearPlayers(B);
+  FBattleUnificationTestAccess::PutPlayer(B,TEXT("new"),EBattleLane::Right,1000);
+  FBattleUnificationTestAccess::LockTarget(B);
+  for(int32 Lane=0;Lane<3;++Lane)
+   TestEqual(TEXT("Later movement/fever changes cannot retarget"),Locked.DamageByZone[Lane],Lane==Expected[Index]?2:0);
+ }
+ for(const TCHAR* Id:Ids)
+ {
+  const auto* Definition=Data.FindAction(Id);
+  //No participants: all three zero scores tie and exactly one lane is selected.
+  FBattleUnificationTestAccess::ClearPlayers(B);
+  for(int32 Trial=0;Trial<30;++Trial)
+  {
+   FBattleUnificationTestAccess::SetBossAction(B,*Definition);
+   FBattleUnificationTestAccess::LockTarget(B);
+   int32 Hits=0;
+   for(int32 Lane=0;Lane<3;++Lane) if(FBattleUnificationTestAccess::BossAction(B).DamageByZone[Lane]>0) ++Hits;
+   TestEqual(TEXT("Empty/tied lanes select exactly one"),Hits,1);
+  }
+ }
+ //A partial tie may never select the strictly worse lane.
+ FBattleUnificationTestAccess::PutPlayer(B,TEXT("left"),EBattleLane::Left,5);
+ FBattleUnificationTestAccess::PutPlayer(B,TEXT("mid"),EBattleLane::Mid,5);
+ for(const TCHAR* Id:{TEXT("MostPlayer"),TEXT("MostDamage")})
+  for(int32 Trial=0;Trial<30;++Trial)
+  {
+   FBattleUnificationTestAccess::SetBossAction(B,*Data.FindAction(Id));
+   FBattleUnificationTestAccess::LockTarget(B);
+   TestEqual(TEXT("Ties stay within the best lanes"),FBattleUnificationTestAccess::BossAction(B).DamageByZone[2],0);
+  }
+ B->RunSelfTest();
  return true;
 }
 
