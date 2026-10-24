@@ -6,6 +6,8 @@
 #include "Scripts/Time/RealTimeSunSubsystem.h"
 #include "Scripts/Time/BattleScheduleSubsystem.h"
 #include "Scripts/Time/RealTimeClockSubsystem.h"
+#include "Scripts/Time/TemporaryMoonLight.h"
+#include "Components/StaticMeshComponent.h"
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Scripts/Temple/Goddess.h"
 #include "Scripts/Backend/GameManager.h"
@@ -21,6 +23,9 @@
 
 struct FRealTimeTestAccess
 {
+    static ATemporaryMoonLight* Moon(URealTimeSunSubsystem* S) { return S->TemporaryMoon.Get(); }
+    static UStaticMeshComponent* MoonSphere(ATemporaryMoonLight* M) { return M->Sphere; }
+    static UDirectionalLightComponent* MoonLight(ATemporaryMoonLight* M) { return M->MoonLight; }
     static void Prepare(UWorld* W)
     {
         W->GetWorldSettings()->DefaultGameMode=AGameModeBase::StaticClass();
@@ -111,6 +116,7 @@ bool FRealTimeSunWorldTest::RunTest(const FString& Parameters)
     TGuardValue<TSoftObjectPtr<UWorld>> BattleGuard(Settings->BattleMap,TSoftObjectPtr<UWorld>(W));
     TGuardValue<TSoftObjectPtr<UWorld>> TempleGuard(Settings->TempleMap,Settings->TempleMap);
     TGuardValue<bool> EnabledGuard(Settings->bEnableSun,true);
+    TGuardValue<bool> MoonGuard(Settings->bEnableTemporaryMoon,true);
     TGuardValue<FRealTimeSunProfile> ProfileGuard(Settings->BattleSun,Settings->BattleSun);
     TGuardValue<FRealTimeSunProfile> TempleProfileGuard(Settings->TempleSun,Settings->TempleSun);
     Settings->BattleSun.NoonAltitude=60; Settings->BattleSun.NoonDirection=35; Settings->BattleSun.SunActorTag=NAME_None;
@@ -121,6 +127,29 @@ bool FRealTimeSunWorldTest::RunTest(const FString& Parameters)
     FRealTimeTestAccess::SunAt(S,Noon);
     TestTrue(TEXT("Battle sun rotates actual light"),Light->GetForwardVector().Equals(-URealTimeSunSubsystem::CalculateSunDirection(12,Settings->BattleSun),0.001));
     TestEqual(TEXT("Sun supports runtime rotation"),Light->Mobility,EComponentMobility::Movable);
+    ATemporaryMoonLight* Moon=FRealTimeTestAccess::Moon(S);
+    if (TestNotNull(TEXT("Temporary moon created automatically"),Moon))
+    {
+        auto* Globe=FRealTimeTestAccess::MoonSphere(Moon);
+        auto* MoonLight=FRealTimeTestAccess::MoonLight(Moon);
+        TestFalse(TEXT("Moon sphere hidden below daytime horizon"),Globe->IsVisible());
+        TestEqual(TEXT("No moon illumination at noon"),MoonLight->Intensity,0.f);
+        FRealTimeTestAccess::SunAt(S,FDateTime(2026,10,24,0,0,0));
+        TestTrue(TEXT("Night sphere is at zenith"),Globe->GetRelativeLocation().GetSafeNormal().Equals(FVector::UpVector,0.001));
+        TestTrue(TEXT("Night moon sphere is visible"),Globe->IsVisible());
+        TestTrue(TEXT("Night moon illuminates entire map"),MoonLight->Intensity > 0);
+        TestTrue(TEXT("Night light shines straight down"),MoonLight->GetForwardVector().Equals(-FVector::UpVector,0.001));
+        for (int32 Hour : {19, 23, 1, 5})
+        {
+            FRealTimeTestAccess::SunAt(S,FDateTime(2026,10,24,Hour,0,0));
+            TestTrue(TEXT("Sphere stays overhead throughout the night"),Globe->GetRelativeLocation().GetSafeNormal().Equals(FVector::UpVector,0.001));
+            TestTrue(TEXT("Night sphere remains visible"),Globe->IsVisible());
+        }
+        const FLinearColor Color=MoonLight->GetLightColor();
+        TestTrue(TEXT("Moon emits yellow light"),Color.R > Color.B && Color.G > Color.B);
+        TestTrue(TEXT("Sphere has emissive material"),Globe->GetMaterial(0) != nullptr);
+        TestFalse(TEXT("Sphere never blocks gameplay"),Globe->IsCollisionEnabled());
+    }
     Settings->BattleMap=Settings->TempleMap;
     Settings->TempleMap=TSoftObjectPtr<UWorld>(W);
     FRealTimeTestAccess::SunAt(S,Noon);
@@ -129,6 +158,7 @@ bool FRealTimeSunWorldTest::RunTest(const FString& Parameters)
     Settings->bEnableSun=false;
     FRealTimeTestAccess::SunAt(S,FDateTime(2026,10,24,18,0,0));
     TestTrue(TEXT("Disabled sun keeps rotation"),Light->GetComponentQuat().Equals(Before,0.001));
+    TestNull(TEXT("Disabling clock lighting removes temporary moon"),FRealTimeTestAccess::Moon(S));
     Actor->Destroy();
     W->EndPlay(EEndPlayReason::Quit);
     GI->Shutdown(); GEngine->DestroyWorldContext(W); W->DestroyWorld(false); GI->RemoveFromRoot();

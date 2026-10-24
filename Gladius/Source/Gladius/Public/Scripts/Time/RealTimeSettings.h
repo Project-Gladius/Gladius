@@ -39,6 +39,25 @@ public:
     UPROPERTY(Config, EditAnywhere, Category="Sun")
     FRealTimeSunProfile TempleSun;
 
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon")
+    bool bEnableTemporaryMoon = true;
+
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon")
+    FLinearColor TemporaryMoonColor = FLinearColor(1.f, 0.82f, 0.25f);
+
+    // Relative to the map's existing sun intensity, so existing exposure is respected.
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon", meta=(ClampMin="0", ClampMax="2"))
+    float TemporaryMoonLightScale = 0.35f;
+
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon", meta=(ClampMin="0"))
+    float TemporaryMoonGlow = 8.f;
+
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon", meta=(ClampMin="10000", Units="cm"))
+    float TemporaryMoonDistance = 200000.f;
+
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon", meta=(ClampMin="100", Units="cm"))
+    float TemporaryMoonRadius = 2000.f;
+
     UPROPERTY(Config, EditAnywhere, Category="Maps")
     TSoftObjectPtr<UWorld> BattleMap = TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Levels/Main/MainBattle.MainBattle")));
 
