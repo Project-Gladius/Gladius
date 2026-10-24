@@ -9,6 +9,7 @@ class USkeletalMeshComponent;
 class UWidgetComponent;
 class UCurveFloat;
 class UBattlePlayerNameplate;
+class UAnimMontage;
 struct FBattlePlayerUIData;
 
 DECLARE_MULTICAST_DELEGATE(FOnBattleUnitMovementFinished);
@@ -120,6 +121,20 @@ public:
 	//지정된 적이 없으면 자기 위치를 돌려주어, 쏘더라도 제자리에 떨어진다
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	FVector GetFacingTarget() const { return bHasFaceTarget ? FaceTarget : GetActorLocation(); }
+
+	//몬타주에 찍힌 노티파이의 시각을 읽는다. 타격·발사 시점을 손으로 적지 않고
+	//애셋에서 가져오기 위한 것이다 — 아트팀이 모션을 다시 뽑아도 따라온다.
+	//
+	//`Play Montage`의 `On Notify Begin`은 이 프로젝트에서 동작하지 않지만(CLAUDE.md
+	//"타격 시점은 Delay 오프셋으로 잡습니다") 노티파이 **데이터**는 멀쩡하다.
+	//델리게이트를 안 타고 배열만 읽으므로 그 고장과 겹치지 않는다.
+	//
+	//SectionName을 주면 그 구간의 노티파이만 보고, 시각도 **섹션 시작 기준**으로
+	//돌려준다. `Play Montage`에 StartingSection을 주면 시간이 거기서부터 흐르기 때문이다.
+	//같은 이름이 여러 개면 Occurrence로 고른다. 못 찾으면 0을 주고 경고를 남긴다
+	UFUNCTION(BlueprintPure, Category = "Battle|Motion")
+	static float NotifyTimeIn(const UAnimMontage* Montage, FName NotifyName,
+	                          FName SectionName, int32 Occurrence = 0);
 
 	// ---- 블루프린트 훅 ----
 	//

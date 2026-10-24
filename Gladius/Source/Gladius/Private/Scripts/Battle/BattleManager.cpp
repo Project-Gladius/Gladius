@@ -1,4 +1,4 @@
-#include "Scripts/Battle/BattleManager.h"
+﻿#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Scripts/Battle/BattleSpot.h"
@@ -22,6 +22,7 @@
 #include "JsonObjectConverter.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Animation/AnimMontage.h"
 
 //키보드로 조종하는 더미 유저. AddTestPlayer가 0번에 붙이는 이름과 같아야
 //Q로 만들든 키로 만들든 이름표가 흔들리지 않는다
@@ -2979,6 +2980,64 @@ void ABattleManager::RunSelfTest()
 
 		//피버가 높을수록 때릴 게 많아 이동에 쓸 시간이 줄어든다
 		check(FeverFlurrySeconds(Sections, 9) > FeverFlurrySeconds(Sections, 2));
+	}
+
+	// --- 노티파이 시각 읽기 ---
+	//
+	//타격·발사 시점을 손으로 적지 않고 애셋에서 가져온다. 기댓값은 전부
+	//**에디터에서 직접 읽은 절대 시각**이다 — 환산한 값을 넣으면 검사가
+	//자기 자신을 증명하는 꼴이 되므로 넣지 않는다
+	{
+		const auto Load = [](const TCHAR* Path) -> UAnimMontage*
+		{
+			return LoadObject<UAnimMontage>(nullptr, Path);
+		};
+
+		UAnimMontage* const Attack1 = Load(TEXT("/Game/Asset/Battle/Sera/Animation/AnimationMontage/AM_Sera_Attack1.AM_Sera_Attack1"));
+		UAnimMontage* const Attack2 = Load(TEXT("/Game/Asset/Battle/Sera/Animation/AnimationMontage/AM_Sera_Attack2.AM_Sera_Attack2"));
+		UAnimMontage* const Fever = Load(TEXT("/Game/Asset/Battle/Sera/Animation/AnimationMontage/AM_Sera_FeverHit.AM_Sera_FeverHit"));
+
+		//애셋이 옮겨가면 여기서 터진다. 조용히 넘어가는 것보다 낫다
+		check(Attack1 && Attack2 && Fever);
+
+		//섹션이 하나뿐인 몬타주는 절대 시각이 그대로 나온다
+		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Fire"), NAME_None), 2.33f, 0.01f));
+		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack2, TEXT("Fire"), NAME_None), 1.772f, 0.01f));
+
+		//같은 이름이 셋이면 Occurrence로 고른다
+		const float FeverAbs[3] = { 0.794f, 2.802f, 3.914f };
+		for (int32 Index = 0; Index < 3; ++Index)
+		{
+			check(FMath::IsNearlyEqual(
+				ABattleUnit::NotifyTimeIn(Fever, TEXT("Fire"), NAME_None, Index),
+				FeverAbs[Index], 0.01f));
+		}
+
+		//섹션을 주면 그 섹션 시작 기준으로 환산해 돌려준다.
+		//기댓값을 적는 대신 '환산값 + 섹션 시작 == 절대 시각'을 본다 —
+		//섹션 경계가 바뀌어도 검사가 따라온다
+		const FName FeverSections[3] = { TEXT("FeverAttack1"), TEXT("FeverAttack2"), TEXT("FeverAttack3") };
+		for (int32 Index = 0; Index < 3; ++Index)
+		{
+			const int32 SectionIndex = Fever->GetSectionIndex(FeverSections[Index]);
+			check(SectionIndex != INDEX_NONE);
+
+			float Start = 0.f;
+			float End = 0.f;
+			Fever->GetSectionStartAndEndTime(SectionIndex, Start, End);
+
+			const float Relative = ABattleUnit::NotifyTimeIn(Fever, TEXT("Fire"), FeverSections[Index]);
+
+			//구간 안에 있어야 한다. 0이면 못 찾은 것이다
+			check(Relative > 0.f && Relative <= End - Start);
+			check(FMath::IsNearlyEqual(Start + Relative, FeverAbs[Index], 0.01f));
+		}
+
+		//없는 것을 물으면 0을 준다 (경고는 남는다)
+		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(nullptr, TEXT("Fire"), NAME_None), 0.f));
+		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Nope"), NAME_None), 0.f));
+		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Fire"), TEXT("Nope")), 0.f));
+		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Fire"), NAME_None, 9), 0.f));
 	}
 
 	// --- 돌진 좌표 ---
