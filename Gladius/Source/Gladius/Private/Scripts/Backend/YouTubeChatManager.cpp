@@ -38,9 +38,10 @@ void AYouTubeChatManager::BeginPlay()
 	}
 
 	GetCommandDispatcher();
+	InitializeKeyPool();
 	if (UGameInstance* Instance = GetGameInstance())
 	{
-		Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(ApiKey, VideoId, AdminUserIds);
+		Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(ApiKey.IsEmpty() ? CurrentApiKey() : ApiKey, VideoId, AdminUserIds);
 	}
 
 	IgnoreMessagesBefore = FDateTime::UtcNow();
@@ -69,11 +70,66 @@ void AYouTubeChatManager::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 }
 
+void AYouTubeChatManager::InitializeKeyPool()
+{
+	UGameInstance* Instance = GetGameInstance();
+	UChatLogSubsystem* ChatLog = Instance ? Instance->GetSubsystem<UChatLogSubsystem>() : nullptr;
+	KeyPool = ChatLog ? &ChatLog->GetApiKeyPool() : &LocalKeyPool;
+
+	//게임 인스턴스당 한 번만 파일을 읽음 (레벨이 바뀌어도 바닥난 키 기록 유지)
+	if (KeyPool->Num() == 0)
+	{
+		const FString Path = FYouTubeApiKeyPool::GetDefaultKeyFilePath();
+		const int32 Loaded = KeyPool->LoadFromFile(Path);
+		UE_LOG(LogTemp, Log, TEXT("[YouTube] API 키 %d개를 읽었습니다 (%s)"), Loaded, *Path);
+	}
+	KeyPool->AddKey(ApiKey);
+}
+
+FString AYouTubeChatManager::CurrentApiKey()
+{
+	if (!KeyPool) InitializeKeyPool();
+	return KeyPool->GetCurrentKey(FDateTime::UtcNow());
+}
+
+bool AYouTubeChatManager::IsKeyUnusableResponse(int32 ResponseCode, const FString& Body)
+{
+	if (ResponseCode != 400 && ResponseCode != 403) return false;
+	//할당량 초과 / 잘못된·만료된 키 / 프로젝트에서 YouTube Data API를 켜지 않음
+	static const TCHAR* Reasons[] = {
+		TEXT("quotaExceeded"), TEXT("dailyLimitExceeded"), TEXT("keyInvalid"), TEXT("keyExpired"),
+		TEXT("API_KEY_INVALID"), TEXT("accessNotConfigured"), TEXT("SERVICE_DISABLED") };
+	for (const TCHAR* Reason : Reasons)
+	{
+		if (Body.Contains(Reason, ESearchCase::CaseSensitive)) return true;
+	}
+	return false;
+}
+
+bool AYouTubeChatManager::SwitchApiKey(const FString& UsedKey, const FString& Body)
+{
+	const FDateTime Now = FDateTime::UtcNow();
+	const bool bHasNext = KeyPool && KeyPool->MarkExhausted(UsedKey, Now);
+	const TCHAR* Why = Body.Contains(TEXT("quotaExceeded")) || Body.Contains(TEXT("dailyLimitExceeded")) ? TEXT("할당량 초과") : TEXT("사용할 수 없는 키");
+	if (bHasNext)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[YouTube] API 키 %s %s → %s로 교체 (남은 키 %d/%d)"),
+			*FYouTubeApiKeyPool::Mask(UsedKey), Why, *FYouTubeApiKeyPool::Mask(CurrentApiKey()),
+			KeyPool->NumAvailable(Now), KeyPool->Num());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[YouTube] API 키 %s %s. 쓸 수 있는 키가 없습니다 (총 %d개). 할당량은 한국 시간 오후 4~5시에 초기화됩니다."),
+			*FYouTubeApiKeyPool::Mask(UsedKey), Why, KeyPool ? KeyPool->Num() : 0);
+	}
+	return bHasNext;
+}
+
 void AYouTubeChatManager::StartFetchingChat()
 {
-	if (ApiKey.IsEmpty() || VideoId.IsEmpty()) 
+	if (CurrentApiKey().IsEmpty() || VideoId.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("ApiKey 또는 VideoId가 설정되지 않았습니다."));
+		UE_LOG(LogTemp, Error, TEXT("ApiKey 또는 VideoId가 설정되지 않았습니다. (키가 모두 할당량을 다 썼을 수도 있습니다)"));
 		return;
 	}
 
@@ -90,10 +146,17 @@ void AYouTubeChatManager::SetCombatAutoPollingEnabled(bool bEnabled)
 {
 	bCombatAutoPollingEnabled = bEnabled;
 	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
-	if (bEnabled && !bFetchInFlight && !LiveChatId.IsEmpty() && !ApiKey.IsEmpty()
-		&& GetCurrentGameState() == EGameState::Combat)
+	if (bEnabled && !bFetchInFlight && GetCurrentGameState() == EGameState::Combat)
 	{
-		RequestChatFetch();
+		//LiveChatId를 아직 못 받았으면(예: 키가 다 바닥났다가 초기화됨) 다시 조회. 성공하면 바로 주기 조회 시작
+		if (LiveChatId.IsEmpty())
+		{
+			if (!VideoId.IsEmpty() && !CurrentApiKey().IsEmpty()) RequestLiveChatId();
+		}
+		else if (!CurrentApiKey().IsEmpty())
+		{
+			RequestChatFetch();
+		}
 	}
 }
 
@@ -117,9 +180,11 @@ void AYouTubeChatManager::RequestChatFetch()
 		return;
 	}
 
-	if (LiveChatId.IsEmpty() || ApiKey.IsEmpty())
+	if (LiveChatId.IsEmpty() || CurrentApiKey().IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("LiveChatId가 없어 채팅을 조회하지 못했습니다."));
+		UE_LOG(LogTemp, Warning, TEXT("LiveChatId 또는 쓸 수 있는 API 키가 없어 채팅을 조회하지 못했습니다."));
+		//다음 조회 때는 쓸 수 있도록 LiveChatId를 다시 요청
+		if (LiveChatId.IsEmpty() && !VideoId.IsEmpty() && !CurrentApiKey().IsEmpty()) RequestLiveChatId();
 		OnChatFetchFinished.Broadcast(false);
 		return;
 	}
@@ -230,26 +295,48 @@ bool AYouTubeChatManager::IsSpamming(const FString& UserId, const FString& Conte
 
 void AYouTubeChatManager::RequestLiveChatId()
 {
+	const FString Key = CurrentApiKey();
+	if (bLiveChatIdInFlight || Key.IsEmpty()) return;
+	bLiveChatIdInFlight = true;
+
 	FString Url = FString::Printf(
 		TEXT("https://www.googleapis.com/youtube/v3/videos?id=%s&part=liveStreamingDetails&key=%s"),
 		*VideoId,
-		*ApiKey
+		*Key
 	);
 
 	FHttpModule* Http = &FHttpModule::Get(); //Http를 관장하는 singleton의 주소를 Http에 받아옴 (포인터 형식으로)
 
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest(); //IHttpRequest형식의 포인터 변수인데, 함수가 끝나도 참조가 남아있다면 메모리에서 사라지지 않음! 대신 FHttpRequestPtr로 쓸 수 있음
 
-	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnLiveChatIdResponse); //요청했던 자기 자신의 포인터, 구글이 보내준 JSON 응답 본문 및 HTTP 상태 코드(200 OK 등)가 담긴 객체, 연결 성공 여부를 매개변수로 넘김
+	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnLiveChatIdResponse, Key); //요청했던 자기 자신의 포인터, 구글이 보내준 JSON 응답 본문 및 HTTP 상태 코드(200 OK 등)가 담긴 객체, 연결 성공 여부를 매개변수로 넘김
 
 	Request->SetURL(Url);
 	Request->SetVerb("GET");
 	Request->ProcessRequest();
 }
 
-void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, FString UsedKey)
 {
-	if (!bWasSuccessful || !Response.IsValid()) return;
+	bLiveChatIdInFlight = false;
+	if (!bWasSuccessful || !Response.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("LiveChatID 요청 실패 (네트워크 연결을 확인하세요)"));
+		return;
+	}
+
+	const int32 ResponseCode = Response->GetResponseCode();
+	if (ResponseCode != 200)
+	{
+		const FString Body = Response->GetContentAsString();
+		if (IsKeyUnusableResponse(ResponseCode, Body))
+		{
+			if (SwitchApiKey(UsedKey, Body)) RequestLiveChatId();
+			return;
+		}
+		UE_LOG(LogTemp, Error, TEXT("LiveChatID 획득 실패 HTTP %d: %s"), ResponseCode, *Body.Left(300));
+		return;
+	}
 
 	TSharedPtr<FJsonObject> JsonObject;
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
@@ -280,11 +367,12 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 void AYouTubeChatManager::RequestMessages()
 {
-	if (bFetchInFlight || LiveChatId.IsEmpty() || ApiKey.IsEmpty()) return;
+	const FString Key = CurrentApiKey();
+	if (bFetchInFlight || LiveChatId.IsEmpty() || Key.IsEmpty()) return;
 	FString Url = FString::Printf(
 		TEXT("https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=%s&part=snippet,authorDetails&key=%s"),
 		*LiveChatId,
-		*ApiKey
+		*Key
 	);
 
 	if (!NextPageToken.IsEmpty()) {
@@ -294,7 +382,7 @@ void AYouTubeChatManager::RequestMessages()
 	FHttpModule* Http = &FHttpModule::Get();
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
 
-	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnChatMessagesResponse);
+	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnChatMessagesResponse, Key);
 
 	Request->SetURL(Url);
 	Request->SetVerb("GET");
@@ -304,19 +392,30 @@ void AYouTubeChatManager::RequestMessages()
 	if (!Request->ProcessRequest()) { FinishFetch(false, CombatPollIntervalSeconds); }
 }
 
-void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful)
+void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, FString UsedKey)
 {
 	if (Request != ActiveChatRequest) { return; }
-	if (!bWasSuccessful || !Response.IsValid()) 
+	if (!bWasSuccessful || !Response.IsValid())
 	{
-		int32 ResponseCode = Response.IsValid() ? Response->GetResponseCode() : 0;
-		UE_LOG(LogTemp, Error, TEXT("채팅 수신 실패! HTTP Response Code: %d"), ResponseCode);
+		UE_LOG(LogTemp, Error, TEXT("채팅 수신 실패! (네트워크 연결을 확인하세요)"));
+		FinishFetch(false, CombatPollIntervalSeconds);
+		return;
+	}
 
-		if (ResponseCode == 403)
+	//HTTP 오류(403 등)도 bWasSuccessful은 true로 오므로 응답 코드로 판단
+	const int32 ResponseCode = Response->GetResponseCode();
+	if (ResponseCode != 200)
+	{
+		const FString Body = Response->GetContentAsString();
+		if (IsKeyUnusableResponse(ResponseCode, Body) && SwitchApiKey(UsedKey, Body))
 		{
-			UE_LOG(LogTemp, Error, TEXT("API 일일 할당량을 모두 소모했거나 권한이 없습니다!"));
+			//같은 조회를 새 키로 바로 다시 보냄 (신전 사이클은 이 조회가 끝날 때까지 기다림)
+			ActiveChatRequest.Reset();
+			bFetchInFlight = false;
+			RequestMessages();
+			return;
 		}
-
+		UE_LOG(LogTemp, Error, TEXT("채팅 수신 실패! HTTP %d: %s"), ResponseCode, *Body.Left(300));
 		FinishFetch(false, CombatPollIntervalSeconds);
 		return;
 	}
