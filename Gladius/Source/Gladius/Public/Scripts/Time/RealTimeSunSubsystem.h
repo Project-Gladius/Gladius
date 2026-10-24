@@ -6,6 +6,7 @@
 
 class URealTimeClockSubsystem;
 class UDirectionalLightComponent;
+class ATemporaryMoonLight;
 struct FRealTimeSunProfile;
 
 UCLASS()
@@ -22,6 +23,7 @@ private:
     friend struct FRealTimeTestAccess;
     TWeakObjectPtr<URealTimeClockSubsystem> Clock;
     TWeakObjectPtr<UDirectionalLightComponent> Sun;
+    TWeakObjectPtr<ATemporaryMoonLight> TemporaryMoon;
     FName BoundTag;
     bool bWarnedMissingSun = false;
     void UpdateSun(const FDateTime& Now);

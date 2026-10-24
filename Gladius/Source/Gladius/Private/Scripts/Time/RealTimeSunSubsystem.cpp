@@ -1,6 +1,7 @@
 #include "Scripts/Time/RealTimeSunSubsystem.h"
 #include "Scripts/Time/RealTimeClockSubsystem.h"
 #include "Scripts/Time/RealTimeSettings.h"
+#include "Scripts/Time/TemporaryMoonLight.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -28,6 +29,8 @@ void URealTimeSunSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 void URealTimeSunSubsystem::Deinitialize()
 {
     if (Clock.IsValid()) Clock->OnTimeSample.RemoveAll(this);
+    if (TemporaryMoon.IsValid()) TemporaryMoon->Destroy();
+    TemporaryMoon.Reset();
     Sun.Reset();
     Super::Deinitialize();
 }
@@ -49,6 +52,7 @@ UDirectionalLightComponent* URealTimeSunSubsystem::FindSun(FName Tag) const
     TArray<UDirectionalLightComponent*> All, Atmosphere;
     for (TActorIterator<AActor> It(GetWorld()); It; ++It)
     {
+        if (It->IsA<ATemporaryMoonLight>()) continue;
         if (!Tag.IsNone() && !It->ActorHasTag(Tag)) continue;
         TInlineComponentArray<UDirectionalLightComponent*> Lights;
         It->GetComponents(Lights);
@@ -67,6 +71,11 @@ UDirectionalLightComponent* URealTimeSunSubsystem::FindSun(FName Tag) const
 void URealTimeSunSubsystem::UpdateSun(const FDateTime& Now)
 {
     const URealTimeSettings* Settings = GetDefault<URealTimeSettings>();
+    if (!Settings->bEnableSun || !Settings->bEnableTemporaryMoon)
+    {
+        if (TemporaryMoon.IsValid()) TemporaryMoon->Destroy();
+        TemporaryMoon.Reset();
+    }
     if (!Settings->bEnableSun) return;
     const FRealTimeSunProfile* Profile = nullptr;
     if (URealTimeSettings::MatchesMap(GetWorld(), Settings->BattleMap)) Profile = &Settings->BattleSun;
@@ -88,5 +97,16 @@ void URealTimeSunSubsystem::UpdateSun(const FDateTime& Now)
     }
     const double Hours = Now.GetTimeOfDay().GetTotalHours();
     // A directional light points along its rays, opposite the visible sun direction.
-    Sun->SetWorldRotation((-CalculateSunDirection(Hours, *Profile)).Rotation());
+    const FVector SunDirection = CalculateSunDirection(Hours, *Profile);
+    Sun->SetWorldRotation((-SunDirection).Rotation());
+    if (Settings->bEnableTemporaryMoon)
+    {
+        if (!TemporaryMoon.IsValid())
+        {
+            FActorSpawnParameters Params;
+            Params.ObjectFlags |= RF_Transient;
+            TemporaryMoon = GetWorld()->SpawnActor<ATemporaryMoonLight>(ATemporaryMoonLight::StaticClass(), FTransform::Identity, Params);
+        }
+        if (TemporaryMoon.IsValid()) TemporaryMoon->UpdateFromSun(SunDirection, Sun->Intensity, *Settings);
+    }
 }
