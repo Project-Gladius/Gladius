@@ -776,6 +776,8 @@ private:
 	bool IsRangedClass(int32 ClassIndex) const;
 	//결과를 반영해 이름표를 갱신하고 종료 조건을 본다
 	void EndTurn();
+	// Complete the final results, save records, and return to the configured temple.
+	void FinishBattle();
 
 	//구역별 인원에 맞춰 설 자리를 다시 배분한다
 	void AssignSlots();

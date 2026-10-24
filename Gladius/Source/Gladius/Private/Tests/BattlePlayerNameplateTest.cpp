@@ -94,6 +94,28 @@ struct FPlayerNameplateTestAccess
 	}
 };
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateBaseScaleTest, "Gladius.BattleUI.BaseDistanceScale", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPlayerNameplateBaseScaleTest::RunTest(const FString& Parameters)
+{
+    auto* UI=NewObject<UBattlePlayerNameplate>();
+    TestEqual(TEXT("Existing widgets retain original scale by default"),UI->BaseDistanceScale,1.f);
+    const float Near=UI->GetDistanceScale(100.f);
+    const float Reference=UI->GetDistanceScale(2400.f);
+    const float Far=UI->GetDistanceScale(10000.f);
+    for (float Base : {0.5f, 2.f})
+    {
+        UI->BaseDistanceScale=Base;
+        TestEqual(TEXT("Reference size follows base multiplier"),UI->GetDistanceScale(2400.f),Reference*Base);
+        TestEqual(TEXT("Effective maximum follows base multiplier"),UI->GetDistanceScale(100.f),Near*Base);
+        TestEqual(TEXT("Effective minimum follows base multiplier"),UI->GetDistanceScale(10000.f),Far*Base);
+    }
+    TestEqual(TEXT("Minimum ratio stays editable and unchanged"),UI->MinimumDistanceScale,0.7f);
+    TestEqual(TEXT("Maximum ratio stays editable and unchanged"),UI->MaximumDistanceScale,1.2f);
+    UI->BaseDistanceScale=0.f;
+    TestEqual(TEXT("Invalid zero base is clamped safely"),UI->GetDistanceScale(2400.f),0.01f);
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateLayoutTest, "Gladius.BattleUI.LayoutAndHealthIcons", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FPlayerNameplateLayoutTest::RunTest(const FString& Parameters)
 {

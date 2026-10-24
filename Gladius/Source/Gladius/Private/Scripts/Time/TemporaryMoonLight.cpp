@@ -24,14 +24,14 @@ ATemporaryMoonLight::ATemporaryMoonLight()
     Sphere->SetGenerateOverlapEvents(false);
     Sphere->SetCanEverAffectNavigation(false);
     Sphere->SetCastShadow(false);
-    static ConstructorHelpers::FObjectFinder<UStaticMesh> Mesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+    static ConstructorHelpers::FObjectFinder<UStaticMesh> Mesh(TEXT("/Game/Environment/Moon/SM_Moon.SM_Moon"));
     if (Mesh.Succeeded()) Sphere->SetStaticMesh(Mesh.Object);
-    static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/Materials/Time/M_TemporaryMoon.M_TemporaryMoon"));
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> Material(TEXT("/Game/Environment/Moon/M_Moon.M_Moon"));
     if (Material.Succeeded()) Sphere->SetMaterial(0, Material.Object);
     MoonLight = CreateDefaultSubobject<UDirectionalLightComponent>(TEXT("YellowMoonLight"));
     MoonLight->SetupAttachment(RootComponent);
     MoonLight->SetMobility(EComponentMobility::Movable);
-    // The sphere is the visible disc; avoid adding a second atmospheric sun disc.
+    // The moon mesh is the visible disc; avoid adding a second atmospheric sun disc.
     MoonLight->SetAtmosphereSunLight(false);
     MoonLight->SetIntensity(0.f);
     Tags.Add(TEXT("TemporaryMoon"));
@@ -44,9 +44,8 @@ void ATemporaryMoonLight::UpdateFromSun(const FVector& SunDirection, float SunIn
     // Hold the temporary night light at the viewer's zenith throughout the night.
     MoonDirection = bNight ? FVector::UpVector : -NormalizedSun;
     OrbitDistance = FMath::Max(Settings.TemporaryMoonDistance, 10000.f);
-    // Engine sphere radius is 50 cm. Cap apparent radius to keep it a sky object.
-    const float Radius = FMath::Clamp(Settings.TemporaryMoonRadius, 100.f, OrbitDistance * 0.1f);
-    Sphere->SetRelativeScale3D(FVector(Radius / 50.f));
+    // Keep the imported moon at its original model size.
+    Sphere->SetRelativeScale3D(FVector::OneVector);
     if (!GlowMaterial) GlowMaterial = Sphere->CreateAndSetMaterialInstanceDynamic(0);
     if (GlowMaterial)
     {

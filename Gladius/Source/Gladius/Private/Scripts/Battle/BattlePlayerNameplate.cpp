@@ -156,7 +156,7 @@ float UBattlePlayerNameplate::GetDistanceScale(float Distance) const
 {
 	const float Minimum = FMath::Max(0.01f, MinimumDistanceScale);
 	const float Maximum = FMath::Max(Minimum, MaximumDistanceScale);
-	return FMath::Clamp(2400.f / FMath::Max(Distance, 1.f), Minimum, Maximum);
+	return FMath::Max(0.01f, BaseDistanceScale) * FMath::Clamp(2400.f / FMath::Max(Distance, 1.f), Minimum, Maximum);
 }
 
 bool UBattlePlayerNameplate::ConvertToDesignerBlueprint(UObject* Asset)

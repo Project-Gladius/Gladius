@@ -7,6 +7,7 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/UI/ChatLogWidget.h"
 #include "Scripts/UI/BattleDataResetWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
@@ -238,6 +239,21 @@ void ABattleManager::StartBattle()
 	SpawnBoss();
 	UpdateVisuals();
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, FMath::Max(0.001f, BattleStartSeconds), false);
+}
+
+void ABattleManager::FinishBattle()
+{
+ if (!bBattleRunning) return;
+ StopBattle();
+ const TSoftObjectPtr<UWorld>& TempleMap = GetDefault<URealTimeSettings>()->TempleMap;
+ if (TempleMap.IsNull())
+ {
+  UE_LOG(LogTemp, Error, TEXT("[Battle] Cannot return to temple: TempleMap is not configured."));
+  return;
+ }
+ if (AGameManager* Game = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(this, AGameManager::StaticClass())))
+  Game->SetGameState(EGameState::Temple);
+ UGameplayStatics::OpenLevelBySoftObjectPtr(this, TempleMap);
 }
 
 void ABattleManager::StopBattle()
@@ -2120,7 +2136,7 @@ void ABattleManager::EndTurn()
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 종료 — %d턴 완주 / 누적 피해 %d / 생존 %d/%d / 1위 %s (%d)"),
 			Turns, BossDamageTaken, Alive, Players.Num(), *TopName, TopDamage);
 
-		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StopBattle, FMath::Max(0.001f, FMath::Max(ReturnSeconds, ResolveSeconds)), false);
+		GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::FinishBattle, FMath::Max(0.001f, FMath::Max(ReturnSeconds, ResolveSeconds)), false);
 		return;
 	}
 

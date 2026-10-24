@@ -71,6 +71,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Battle UI|Editor") static bool ConvertToDesignerBlueprint(UObject* Asset);
 	// Legacy settings retained for one-time migration. Geometry now belongs to the Designer.
 	UPROPERTY() FVector2D PanelSize = FVector2D(300, 200);
+	// Multiplies the reference size and both distance limits without changing their ratios.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle UI|Distance Scale", meta=(ClampMin="0.01", UIMin="0.01", ToolTip="Overall size multiplier. Scales the reference size and the effective minimum/maximum together.")) float BaseDistanceScale = 1.0f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle UI|Distance Scale", meta=(ClampMin="0.01")) float MinimumDistanceScale = 0.70f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle UI|Distance Scale", meta=(ClampMin="0.01")) float MaximumDistanceScale = 1.20f;
 	UPROPERTY() FLinearColor PanelColor = FLinearColor(0.025f, 0.035f, 0.065f, 0.9f);

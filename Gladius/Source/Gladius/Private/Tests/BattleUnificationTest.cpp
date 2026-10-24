@@ -9,6 +9,7 @@
 #include "JsonObjectConverter.h"
 #include "HAL/FileManager.h"
 #include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/Battle/CutSceneApplier.h"
 #include "LevelSequence.h"
 #include "MovieScene.h"
@@ -120,6 +121,50 @@ struct FUnifiedBattleWorld
   return true;
  }
 };
+}
+
+class FReturnToTempleAssertions : public IAutomationLatentCommand
+{
+ TSharedPtr<FUnifiedBattleWorld> State;
+ FAutomationTestBase* Test;
+ int32 Frames = 0;
+public:
+ FReturnToTempleAssertions(TSharedPtr<FUnifiedBattleWorld> InState, FAutomationTestBase* InTest)
+  : State(InState), Test(InTest) {}
+ bool Update() override
+ {
+  State->World->GetTimerManager().Tick(0.1f);
+  if (State->Battle->Phase == EBattlePhase::Resolve && ++Frames < 10) return false;
+  FWorldContext& Context = GEngine->GetWorldContextFromWorldChecked(State->World);
+  Test->TestTrue(TEXT("Completed battle enters BattleEnd"), State->Battle->Phase == EBattlePhase::BattleEnd);
+  Test->TestTrue(TEXT("Completion saves player records before travel"), IFileManager::Get().FileExists(*State->Path));
+  Test->TestTrue(TEXT("Final turn requests the configured temple"),
+   Context.TravelURL.Contains(GetDefault<URealTimeSettings>()->TempleMap.ToSoftObjectPath().GetLongPackageName()));
+  Context.TravelURL.Reset();
+  return true;
+ }
+};
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleReturnToTempleTest, "Gladius.BattleUnified.ReturnToTempleAfterFinalTurn",
+ EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBattleReturnToTempleTest::RunTest(const FString& Parameters)
+{
+ TSharedPtr<FUnifiedBattleWorld> T = MakeShared<FUnifiedBattleWorld>();
+ ABattleManager* B = T->Battle;
+ FWorldContext& Context = GEngine->GetWorldContextFromWorldChecked(T->World);
+ B->Turns = 1;
+ B->ReturnSeconds = 0.01f;
+ B->ResolveSeconds = 0.01f;
+ B->StartBattle();
+ TestTrue(TEXT("Starting a battle does not request travel"), Context.TravelURL.IsEmpty());
+ B->StopBattle();
+ TestTrue(TEXT("Stopping for cleanup does not request travel"), Context.TravelURL.IsEmpty());
+ B->StartBattle();
+ B->TurnIndex = B->Turns;
+ FBattleUnificationTestAccess::EndTurn(B);
+ TestTrue(TEXT("Final results finish before travel"), Context.TravelURL.IsEmpty());
+ ADD_LATENT_AUTOMATION_COMMAND(FReturnToTempleAssertions(T, this));
+ return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUnifiedBattleRoutingTest, "Gladius.BattleUnified.ChatRoutingAndParticipation",
