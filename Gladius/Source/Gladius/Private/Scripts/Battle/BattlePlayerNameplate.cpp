@@ -10,6 +10,7 @@
 #include "Components/WidgetSwitcher.h"
 #if WITH_EDITOR
 #include "WidgetBlueprint.h"
+#include "WidgetBlueprintOperationUtils.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #endif
@@ -47,6 +48,7 @@ void UBattlePlayerNameplate::NativeOnInitialized()
 void UBattlePlayerNameplate::NativePreConstruct()
 {
 	Super::NativePreConstruct();
+	SetRenderTransformPivot(FVector2D(0.5f, 1.f));
 	// Runtime uses a fixed base size; the Designer owns its preview dimensions.
 	if (!IsDesignTime()) SetPanelDimensions(FVector2D(300.f, 200.f));
 	if (IsDesignTime()) Data = PreviewData;
@@ -83,7 +85,11 @@ void UBattlePlayerNameplate::ResolveDesignerWidgets()
 	HealthText = Cast<UTextBlock>(Find(TEXT("HealthValue")));
 	FeverIcon = Cast<UImage>(Find(TEXT("FeverIcon")));
 	FeverText = Cast<UTextBlock>(Find(TEXT("FeverValue")));
-	ActionText = Cast<UTextBlock>(Find(TEXT("ActionValue")));
+	const bool bAttack = Data.Action == EBattleAction::Attack1 || Data.Action == EBattleAction::Attack2;
+	ActionText = Cast<UTextBlock>(Find(bAttack ? TEXT("AttackDamageValue")
+		: Data.Action == EBattleAction::Defense ? TEXT("DefenseReductionValue") : TEXT("ActionValue")));
+	// Old assets keep working until the editor migration is applied.
+	if (!ActionText) ActionText = Cast<UTextBlock>(Find(TEXT("ActionValue")));
 	CritChanceIcon = Cast<UImage>(Find(TEXT("CritChanceIcon")));
 	CritChanceText = Cast<UTextBlock>(Find(TEXT("CritChanceValue")));
 	CritDamageIcon = Cast<UImage>(Find(TEXT("CritDamageIcon")));
@@ -106,6 +112,7 @@ void UBattlePlayerNameplate::SetDisplayData(const FBattlePlayerUIData& InData)
 
 void UBattlePlayerNameplate::SetPanelDimensions(FVector2D InSize)
 {
+	SetRenderTransformPivot(FVector2D(0.5f, 1.f));
 	PanelSize = InSize;
 	ResolveDesignerWidgets();
 	if (PanelSizeBox)
@@ -160,9 +167,10 @@ void UBattlePlayerNameplate::RefreshAppearance()
 	{
 	case EBattleAction::Attack1:
 	case EBattleAction::Attack2:
-		Action = FString::Printf(TEXT("ATK %d   %d + %d"), Data.Action==EBattleAction::Attack1 ? 1 : 2, Data.BaseDamage, Data.BonusDamage); break;
+		Action = FString::Printf(TEXT("%d + %d"), Data.BaseDamage + Data.BonusDamage,
+			FMath::Max(0, Data.Fever) * FMath::Max(0, Data.FeverAttackDamage)); break;
 	case EBattleAction::Defense:
-		Action = FString::Printf(TEXT("DEFENSE   %.0f%%"), Data.DefenseReduction*100.f);
+		Action = FString::Printf(TEXT("%.0f%%"), FMath::Clamp(Data.DefenseReduction, 0.f, 1.f)*100.f);
 		break;
 	case EBattleAction::AvoidL: case EBattleAction::AvoidM: case EBattleAction::AvoidR:
 		Action = Data.Action==EBattleAction::AvoidL ? TEXT("EVADE LEFT") : Data.Action==EBattleAction::AvoidR ? TEXT("EVADE RIGHT") : TEXT("EVADE MID");
@@ -178,6 +186,60 @@ float UBattlePlayerNameplate::GetDistanceScale(float Distance) const
 	const float Minimum = FMath::Max(0.01f, MinimumDistanceScale);
 	const float Maximum = FMath::Max(Minimum, MaximumDistanceScale);
 	return FMath::Max(0.01f, BaseDistanceScale) * FMath::Clamp(2400.f / FMath::Max(Distance, 1.f), Minimum, Maximum);
+}
+
+bool UBattlePlayerNameplate::EnsureStatusValueWidgets(UObject* Asset)
+{
+#if WITH_EDITOR
+	UWidgetBlueprint* BP = Cast<UWidgetBlueprint>(Asset);
+	if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(StaticClass()) || !BP->WidgetTree) return false;
+	UWidgetTree* Tree = BP->WidgetTree;
+	for (const TCHAR* State : { TEXT("Attack1"), TEXT("Attack2"), TEXT("Defense") })
+		if (!Cast<UCanvasPanel>(Tree->FindWidget(FName(*(FString(TEXT("State_")) + State))))) return false;
+	BP->Modify();
+	Tree->Modify();
+	auto* Defaults = BP->GeneratedClass->GetDefaultObject<UBattlePlayerNameplate>();
+	Defaults->Modify();
+	Defaults->SetRenderTransformPivot(FVector2D(0.5f, 1.f));
+	for (const TCHAR* State : { TEXT("Attack1"), TEXT("Attack2"), TEXT("Defense") })
+	{
+		const FString Prefix(State);
+		const FString ValueName = Prefix + (Prefix == TEXT("Defense")
+			? TEXT("_DefenseReductionValue") : TEXT("_AttackDamageValue"));
+		UTextBlock* Value = Cast<UTextBlock>(Tree->FindWidget(FName(*ValueName)));
+		if (!Value)
+		{
+			Value = Cast<UTextBlock>(Tree->FindWidget(FName(*(Prefix + TEXT("_ActionValue")))));
+			if (Value)
+			{
+				// Use the editor rename path to keep Blueprint graph references intact.
+				if (!FWidgetBlueprintOperationUtils::RenameWidget(BP, Value, ValueName)) return false;
+			}
+			else
+			{
+				Value = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(*ValueName));
+				auto* Page = CastChecked<UCanvasPanel>(Tree->FindWidget(FName(*(TEXT("State_") + Prefix))));
+				auto* Slot = Page->AddChildToCanvas(Value);
+				Slot->SetPosition(Defaults->DefaultLayout.ActionText.Position);
+				Slot->SetSize(Defaults->DefaultLayout.ActionText.Size);
+				auto Font = Value->GetFont();
+				Font.Size = 18;
+				Value->SetFont(Font);
+				Value->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			}
+		}
+		Value->Modify();
+		Value->SetVisibility(ESlateVisibility::HitTestInvisible);
+		Value->SetText(FText::FromString(Prefix == TEXT("Defense") ? TEXT("50%") : TEXT("0 + 0")));
+		FWidgetBlueprintOperationUtils::ToggleWidgetAsVariable(BP, Value, true, false);
+	}
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	FKismetEditorUtilities::CompileBlueprint(BP);
+	BP->MarkPackageDirty();
+	return BP->Status != BS_Error;
+#else
+	return false;
+#endif
 }
 
 bool UBattlePlayerNameplate::ConvertToDesignerBlueprint(UObject* Asset)

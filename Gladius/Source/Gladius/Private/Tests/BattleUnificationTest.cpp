@@ -24,6 +24,8 @@
 #include "Scripts/Battle/BattleUnit.h"
 #include "EngineUtils.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Engine/LocalPlayer.h"
@@ -32,6 +34,8 @@
 
 struct FBattleUnificationTestAccess
 {
+ static FBattlePlayer& UIPlayer(ABattleManager* B) { return B->Players.FindOrAdd(TEXT("UIProbe")); }
+ static void RefreshUI(ABattleManager* B) { B->RefreshPlayerUI(); }
  static bool LoadBossData(ABattleManager* B) { return B->Balance.LoadFromFolder(B->BalanceFolderPath()); }
  static const FBattleBalance& BossData(ABattleManager* B) { return B->Balance; }
  static void SetBossAction(ABattleManager* B, const FBossAction& Action) { B->TelegraphedAction = Action; }
@@ -133,6 +137,44 @@ struct FUnifiedBattleWorld
   return DispatchRaw(User, Text);
  }
 };
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleNameplateDamageDataTest, "Gladius.BattleUnified.NameplateDamageData", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBattleNameplateDamageDataTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* B=T.Battle;
+ auto* Unit=T.World->SpawnActor<ABattleUnit>();
+ B->Phase=EBattlePhase::Prepare;
+ B->FeverAttackDamage=5; B->FeverDamageCoefficient=999.f; B->FeverCap=9;
+ B->Classes[0].Attacks[0].BaseDamage=10; B->Classes[0].Attacks[1].BaseDamage=7;
+ B->Classes[0].DefenseDamageRatio=0.5f;
+ auto& P=FBattleUnificationTestAccess::UIPlayer(B);
+ P.Unit=Unit; P.ClassIndex=0; P.Fever=3; P.DamageBonus=6;
+ for (EBattleAction Action : {EBattleAction::Attack1, EBattleAction::Attack2})
+ {
+  P.PendingAction=Action;
+  FBattleUnificationTestAccess::RefreshUI(B);
+  auto* UI=Cast<UBattlePlayerNameplate>(Unit->Nameplate->GetUserWidgetObject());
+  if (!TestNotNull(TEXT("Player gets the actual nameplate widget"),UI)) return false;
+  TestEqual(TEXT("Temple enhancement is included once"),UI->Data.BonusDamage,6);
+  TestEqual(TEXT("Fever hit damage is the gameplay value"),UI->Data.FeverAttackDamage,5);
+  TestEqual(TEXT("UI uses the actual fever hit count"),UI->Data.Fever,3);
+  TestEqual(TEXT("Total follows skill + enhancement + fever hits"),UI->Data.BaseDamage+UI->Data.BonusDamage+UI->Data.Fever*UI->Data.FeverAttackDamage,
+   Action==EBattleAction::Attack1 ? 31 : 28);
+  Unit->Nameplate->SetPivot(FVector2D(0.5f,0.5f));
+  Unit->SetPlayerUI(UI->Data);
+  TestEqual(TEXT("Same widget class still restores bottom-center pivot"),Unit->Nameplate->GetPivot(),FVector2D(0.5f,1.f));
+ }
+ P.Fever=30;
+ FBattleUnificationTestAccess::RefreshUI(B);
+ auto* UI=CastChecked<UBattlePlayerNameplate>(Unit->Nameplate->GetUserWidgetObject());
+ TestEqual(TEXT("Display count respects the same cap as gameplay"),UI->Data.Fever,9);
+ P.PendingAction=EBattleAction::Defense;
+ FBattleUnificationTestAccess::RefreshUI(B);
+ TestEqual(TEXT("Defense displays the gameplay reduction"),UI->Data.DefenseReduction,0.5f);
+ Unit->Destroy();
+ return true;
 }
 
 class FReturnToTempleAssertions : public IAutomationLatentCommand

@@ -26,6 +26,7 @@ class GLADIUS_API ABattleUnit : public AActor
 
 public:
 	ABattleUnit();
+	virtual void OnConstruction(const FTransform& Transform) override;
 
 	//머리 위 이름과 체력 갱신. UMG라 한글·이모지 핸들도 그대로 나온다
 	UFUNCTION(BlueprintCallable, Category = "Battle")

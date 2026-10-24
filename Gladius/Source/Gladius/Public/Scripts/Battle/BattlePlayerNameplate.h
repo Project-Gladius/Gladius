@@ -23,9 +23,11 @@ struct FBattlePlayerUIData
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") EBattleAction Action = EBattleAction::Idle;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") int32 BaseDamage = 0;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") int32 BonusDamage = 0;
+	// Fixed damage per fever hit; enhancement applies only to BonusDamage once.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data", meta=(ClampMin="0")) int32 FeverAttackDamage = 5;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") float CritChance = 0.f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") float CritDamage = 0.f;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") float DefenseReduction = 0.f;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data", meta=(ClampMin="0", ClampMax="1")) float DefenseReduction = 0.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Data") bool bFeverWillDrop = false;
 };
 
@@ -69,6 +71,8 @@ class GLADIUS_API UBattlePlayerNameplate : public UUserWidget
 public:
 	// One-time editor migration; never called by runtime widget initialization.
 	UFUNCTION(BlueprintCallable, Category="Battle UI|Editor") static bool ConvertToDesignerBlueprint(UObject* Asset);
+	// Add or rename only the numeric status fields, preserving authored slots and styles.
+	UFUNCTION(BlueprintCallable, Category="Battle UI|Editor") static bool EnsureStatusValueWidgets(UObject* Asset);
 	// Legacy settings retained for one-time migration. Geometry now belongs to the Designer.
 	UPROPERTY() FVector2D PanelSize = FVector2D(300, 200);
 	// Multiplies the reference size and both distance limits without changing their ratios.

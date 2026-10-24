@@ -2672,7 +2672,8 @@ void ABattleManager::RefreshPlayerUI()
 		//칼이 닿기 전에는 깎이기 전 체력을 그린다
 		Data.HP = Player.HP + Player.HPLossToShow;
 		Data.MaxHP = Player.MaxHP;
-		Data.Fever = Player.Fever;
+		Data.Fever = FeverStacksFor(Player.Fever);
+		Data.FeverAttackDamage = FeverAttackDamage;
 		Data.Action = (Phase == EBattlePhase::Prepare || Phase == EBattlePhase::Collect)
 			? Player.PendingAction : EBattleAction::Idle;
 
@@ -2685,7 +2686,7 @@ void ABattleManager::RefreshPlayerUI()
 			{
 				const FAttackDef& Attack = Character.Attacks[Data.Action == EBattleAction::Attack1 ? 0 : 1];
 				Data.BaseDamage = Attack.BaseDamage;
-				Data.BonusDamage = FMath::RoundToInt(Player.DamageBonus + Player.Fever * FeverDamageCoefficient);
+				Data.BonusDamage = Player.DamageBonus;
 				Data.CritChance = FMath::Min(Attack.CritChance + Player.CritChanceBonus, CritChanceCap);
 				Data.CritDamage = Attack.CritDamage + Player.CritDamageBonus;
 			}

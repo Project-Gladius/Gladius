@@ -8,6 +8,7 @@
 #include "Components/TextBlock.h"
 #include "Components/SizeBox.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/WidgetComponent.h"
 #include "Engine/Texture2D.h"
 
 struct FPlayerNameplateTestAccess
@@ -19,6 +20,7 @@ struct FPlayerNameplateTestAccess
   {
    UI->SetPanelDimensions(FVector2D(600.f+Rebuild*100.f,400.f+Rebuild*100.f));
    UI->NativePreConstruct();
+   Test.TestEqual(TEXT("Rebuild keeps the bottom-center scale pivot"), UI->GetRenderTransformPivot(), FVector2D(0.5f,1.f));
    Test.TestEqual(TEXT("Rebuild restores width"),UI->PanelSizeBox->GetWidthOverride(),300.f);
    Test.TestEqual(TEXT("Rebuild restores height"),UI->PanelSizeBox->GetHeightOverride(),200.f);
   }
@@ -26,6 +28,9 @@ struct FPlayerNameplateTestAccess
 
 	static void Check(FAutomationTestBase& Test, UBattlePlayerNameplate* UI)
 	{
+		auto* DefenseHealthText=Cast<UTextBlock>(UI->WidgetTree->FindWidget(TEXT("Defense_HealthValue")));
+		if (!Test.TestNotNull(TEXT("Designer Defense HP text exists"),DefenseHealthText)) return;
+		const FVector2D DesignerDefenseHealthPosition=CastChecked<UCanvasPanelSlot>(DefenseHealthText->Slot)->GetPosition();
 		UI->GladiusActionIconTextures.Reset();
 		UI->SeraActionIconTextures.Reset();
 		UI->ActionIconTextures.Reset();
@@ -74,7 +79,7 @@ struct FPlayerNameplateTestAccess
 		Test.TestTrue(TEXT("Sixth HP full at six"), UI->HealthSegments[5]->GetBrush().GetResourceObject()==UI->HealthFilledTexture);
 		Test.TestEqual(TEXT("Other actions hide details"), UI->CritChanceText->GetVisibility(), ESlateVisibility::Collapsed);
 		Test.TestEqual(TEXT("Other actions hide critical icons"), UI->CritDamageIcon->GetVisibility(), ESlateVisibility::Collapsed);
-		Test.TestEqual(TEXT("Migrated default layout retained"), Cast<UCanvasPanelSlot>(UI->HealthText->Slot)->GetPosition(), UI->DefaultLayout.HealthText.Position);
+		Test.TestEqual(TEXT("Saved Designer layout retained"), Cast<UCanvasPanelSlot>(UI->HealthText->Slot)->GetPosition(), DesignerDefenseHealthPosition);
 		//행동 페이지마다 아이콘 위치는 디자이너가 따로 정함. 데이터 갱신으로 그 위치가 움직이지 않아야 함
 		const FVector2D DefenseIconPosition=Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition();
 		UI->SetDisplayData(Data);
@@ -97,6 +102,58 @@ struct FPlayerNameplateTestAccess
 		Test.TestEqual(TEXT("Inverted bounds are safe"), UI->GetDistanceScale(100.f), 0.5f);
 	}
 };
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateStatusValuesTest, "Gladius.BattleUI.NumericAttackAndDefenseValues", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPlayerNameplateStatusValuesTest::RunTest(const FString& Parameters)
+{
+ TestEqual(TEXT("Nameplate component defaults to bottom center"), GetDefault<ABattleUnit>()->Nameplate->GetPivot(), FVector2D(0.5f,1.f));
+ UClass* Class=LoadClass<UBattlePlayerNameplate>(nullptr,TEXT("/Game/Blueprints/UI/MyBattlePlayerNameplate.MyBattlePlayerNameplate_C"));
+ if (!TestNotNull(TEXT("Nameplate Blueprint loads"),Class)) return false;
+ auto* UI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class);
+ UI->Initialize(); UI->TakeWidget();
+ FBattlePlayerUIData Data;
+ Data.BaseDamage=10; Data.BonusDamage=6; Data.Fever=3; Data.FeverAttackDamage=5;
+ Data.CritChance=1.f; Data.CritDamage=9.f; Data.DefenseReduction=0.5f;
+ for (EBattleAction Action : {EBattleAction::Attack1, EBattleAction::Attack2, EBattleAction::Defense})
+ {
+  Data.Action=Action;
+  Data.BaseDamage=Action==EBattleAction::Attack2 ? 7 : 10;
+  UI->SetDisplayData(Data);
+  const TCHAR* Name=Action==EBattleAction::Attack1 ? TEXT("Attack1_AttackDamageValue")
+   : Action==EBattleAction::Attack2 ? TEXT("Attack2_AttackDamageValue") : TEXT("Defense_DefenseReductionValue");
+  auto* Value=Cast<UTextBlock>(UI->WidgetTree->FindWidget(Name));
+  if (!TestNotNull(Name,Value)) return false;
+  TestEqual(TEXT("Enhanced skill and fever damage are separate numbers, or defense percentage"),Value->GetText().ToString(),
+   FString(Action==EBattleAction::Attack1 ? TEXT("16 + 15") : Action==EBattleAction::Attack2 ? TEXT("13 + 15") : TEXT("50%")));
+  TestTrue(TEXT("Status number is visible"),Value->GetVisibility()!=ESlateVisibility::Collapsed);
+  auto* Slot=Cast<UCanvasPanelSlot>(Value->Slot);
+  if (!TestNotNull(TEXT("Value has an editable canvas slot"),Slot)) return false;
+  Slot->SetPosition(FVector2D(91,117)); Slot->SetSize(FVector2D(123,39));
+  auto Font=Value->GetFont(); Font.Size=23; Value->SetFont(Font);
+  UI->SetDisplayData(Data);
+  TestEqual(TEXT("Refresh keeps Designer placement"),Slot->GetPosition(),FVector2D(91,117));
+  TestEqual(TEXT("Refresh keeps Designer size"),Slot->GetSize(),FVector2D(123,39));
+  TestEqual(TEXT("Refresh keeps Designer font"),Value->GetFont().Size,23.f);
+ }
+ Data.Action=EBattleAction::Attack1; Data.Fever=0; Data.BaseDamage=10;
+ UI->SetDisplayData(Data);
+ auto* AttackValue=CastChecked<UTextBlock>(UI->WidgetTree->FindWidget(TEXT("Attack1_AttackDamageValue")));
+ TestEqual(TEXT("No fever keeps a separate zero fever damage value"),AttackValue->GetText().ToString(),FString(TEXT("16 + 0")));
+ auto* DesignerUI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class);
+ DesignerUI->SetDesignerFlags(EWidgetDesignFlags::Designing);
+ DesignerUI->Initialize(); DesignerUI->TakeWidget();
+ auto* Pages=CastChecked<UWidgetSwitcher>(DesignerUI->WidgetTree->FindWidget(TEXT("ActionPages")));
+ Pages->SetActiveWidget(DesignerUI->WidgetTree->FindWidget(TEXT("State_Defense")));
+ auto* DefenseValue=CastChecked<UTextBlock>(DesignerUI->WidgetTree->FindWidget(TEXT("Defense_DefenseReductionValue")));
+ for (float Reduction : {0.5f,0.25f})
+ {
+  DesignerUI->PreviewData.DefenseReduction=Reduction;
+  FPlayerNameplateTestAccess::RebuildPreview(DesignerUI);
+  TestEqual(TEXT("Defense reduction is editable in the Designer preview"),DefenseValue->GetText().ToString(),
+   FString(Reduction==0.5f ? TEXT("50%") : TEXT("25%")));
+ }
+ return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateBaseScaleTest, "Gladius.BattleUI.BaseDistanceScale", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FPlayerNameplateBaseScaleTest::RunTest(const FString& Parameters)
