@@ -118,20 +118,25 @@ void UBattlePlayerNameplate::SetPanelDimensions(FVector2D InSize)
 void UBattlePlayerNameplate::RefreshAppearance()
 {
 	ResolveDesignerWidgets();
+	// Designer brushes belong to the authored layout; runtime uses the data-driven icons.
+	auto UpdateImage = [this](UImage* Image, UTexture2D* Texture, FLinearColor Fallback = FLinearColor::Transparent)
+	{
+		if (!IsDesignTime()) SetImage(Image, Texture, Fallback);
+	};
 
 	const int32 MaxHP = FMath::Clamp(Data.MaxHP, 5, 6);
 	const int32 HP = FMath::Clamp(Data.HP, 0, MaxHP);
 	if (NameText) NameText->SetText(FText::FromString(Data.DisplayName.Len()>12 ? Data.DisplayName.Left(11)+TEXT("…") : Data.DisplayName));
 	if (HealthText) HealthText->SetText(FText::FromString(FString::Printf(TEXT("HP %d/%d"), HP, MaxHP)));
 	if (FeverText) FeverText->SetText(FText::AsNumber(Data.Fever));
-	SetImage(HealthIcon, HealthIconTexture);
-	SetImage(FeverIcon, FeverIconTexture);
+	UpdateImage(HealthIcon, HealthIconTexture);
+	UpdateImage(FeverIcon, FeverIconTexture);
 	for (int32 Index=0; Index<HealthSegments.Num(); ++Index)
 	{
 		if (!HealthSegments[Index]) continue;
 		HealthSegments[Index]->SetVisibility(Index<MaxHP ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		const bool Filled = Index<HP;
-		SetImage(HealthSegments[Index], Filled ? HealthFilledTexture.Get() : HealthEmptyTexture.Get(),
+		UpdateImage(HealthSegments[Index], Filled ? HealthFilledTexture.Get() : HealthEmptyTexture.Get(),
 			Filled ? FLinearColor(0.95f, 0.14f, 0.17f) : FLinearColor(0.3f, 0.34f, 0.4f));
 	}
 	const TMap<EBattleAction, TObjectPtr<UTexture2D>>* ClassIcons = nullptr;
@@ -140,9 +145,9 @@ void UBattlePlayerNameplate::RefreshAppearance()
 	const TObjectPtr<UTexture2D>* ResultIcon = ClassIcons ? ClassIcons->Find(Data.Action) : nullptr;
 	// An explicit empty entry hides the icon; a missing entry uses the old common assignment.
 	if (!ResultIcon) ResultIcon = ActionIconTextures.Find(Data.Action);
-	SetImage(ActionIcon, ResultIcon ? ResultIcon->Get() : nullptr);
-	SetImage(CritChanceIcon, CritChanceIconTexture);
-	SetImage(CritDamageIcon, CritDamageIconTexture);
+	UpdateImage(ActionIcon, ResultIcon ? ResultIcon->Get() : nullptr);
+	UpdateImage(CritChanceIcon, CritChanceIconTexture);
+	UpdateImage(CritDamageIcon, CritDamageIconTexture);
 	const ESlateVisibility DetailVisibility = Data.Action==EBattleAction::Attack2 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed;
 	if (CritChanceIcon) CritChanceIcon->SetVisibility(DetailVisibility);
 	if (CritChanceText) CritChanceText->SetVisibility(DetailVisibility);

@@ -190,12 +190,36 @@ bool FPlayerNameplateDesignerStateTest::RunTest(const FString& Parameters)
  if (!TestNotNull(TEXT("Attack1 icon has a Designer slot"),Slot)) return false;
  UI->PreviewData.Action=EBattleAction::Idle;
  Pages->SetActiveWidget(Page);
+ auto* OriginalTexture=UTexture2D::CreateTransient(1,1);
+ auto* DesignerTexture=UTexture2D::CreateTransient(1,1);
+ UI->PreviewData.CharacterId=TEXT("gladius");
+ UI->HealthIconTexture=OriginalTexture; UI->FeverIconTexture=OriginalTexture;
+ UI->HealthFilledTexture=OriginalTexture; UI->HealthEmptyTexture=OriginalTexture;
+ UI->CritChanceIconTexture=OriginalTexture; UI->CritDamageIconTexture=OriginalTexture;
+ UI->GladiusActionIconTextures.Add(EBattleAction::Attack1,OriginalTexture);
+ TArray<UWidget*> Widgets; UI->WidgetTree->GetAllWidgets(Widgets);
+ TArray<UImage*> DesignerIcons;
+ const FLinearColor DesignerTint(0.3f,0.6f,0.9f,0.8f);
+ for (UWidget* Widget : Widgets)
+  if (Widget->GetName().StartsWith(TEXT("Attack1_")))
+   if (UImage* Image=Cast<UImage>(Widget))
+   {
+    Image->SetBrushFromTexture(DesignerTexture,false);
+    Image->SetColorAndOpacity(DesignerTint);
+    DesignerIcons.Add(Image);
+   }
+ TestTrue(TEXT("Attack1 has editable icon images"),DesignerIcons.Num()>0);
  Slot->SetPosition(FVector2D(73,91)); Slot->SetSize(FVector2D(47,53));
  Size->SetWidthOverride(410); Size->SetHeightOverride(260);
  for (int32 Rebuild=0; Rebuild<3; ++Rebuild)
  {
   FPlayerNameplateTestAccess::RebuildPreview(UI);
   UI->RefreshAppearance();
+  for (UImage* Image : DesignerIcons)
+  {
+   TestTrue(*FString::Printf(TEXT("Designer keeps edited asset: %s"),*Image->GetName()),Image->GetBrush().GetResourceObject()==DesignerTexture);
+   TestEqual(TEXT("Designer keeps edited image tint"),Image->GetColorAndOpacity(),DesignerTint);
+  }
   TestEqual(TEXT("Designer keeps Attack1 selected"),Pages->GetActiveWidget(),Page);
   TestTrue(TEXT("Preview data matches the edited state"),UI->Data.Action==EBattleAction::Attack1);
   TestEqual(TEXT("Designer preserves the moved Attack1 icon"),Slot->GetPosition(),FVector2D(73,91));
