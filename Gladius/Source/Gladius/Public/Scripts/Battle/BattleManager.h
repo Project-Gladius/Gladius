@@ -13,6 +13,7 @@ class ACutSceneApplier;
 class UChatLogWidget;
 class ULeaderboardRotatorWidget;
 class UBossTelegraphWidget;
+class UBattleDataResetWidget;
 
 //보스가 다음 공격을 예고할 때. MotionId: 보스 행동 id(모션 키), TelegraphText: 암시 문구
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBossTelegraphSignature, const FString&, MotionId, const FString&, TelegraphText);
@@ -505,6 +506,14 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
  int32 HPPerBonus = 1;
 
+ // Temporary buttons are only displayed in MainBattle.
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
+ bool bShowTemporaryDataResetButtons = true;
+
+ // Clears JSON records and removes matching participants. Test accounts use @testuser + digits.
+ UFUNCTION(BlueprintCallable, Category = "Battle|Debug")
+ bool ResetSavedUserData(bool bTestUsersOnly);
+
  void InitializePlayerRecords();
 
  UFUNCTION(BlueprintCallable, Category = "Battle|Temple")
@@ -652,6 +661,9 @@ private:
  TObjectPtr<UBossTelegraphWidget> BossTelegraphWidget;
  //전투씬 진입(BeginPlay)부터 나갈 때(EndPlay)까지의 유저별 누적. 판이 새로 시작돼도 유지
  FBattleSessionStats SessionStats;
+ UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;
+ TWeakObjectPtr<APlayerController> DataResetController;
+ bool bMouseCursorBeforeDataReset = false;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
  bool bRecordLoadFailed = false;
@@ -676,6 +688,8 @@ private:
  FString CutSceneAttackUserId;
  float CutSceneAttackStartTime = 0.f;
  bool bCutSceneAttackCrit = false;
+ void HandleSelectedGladiusAttackStarted(int32 AttackIndex);
+ void StartSelectedGladiusAttack();
  void StartMoveCutScenes();
  void StopTurnCutScenes();
  void PlayNextCutScene();

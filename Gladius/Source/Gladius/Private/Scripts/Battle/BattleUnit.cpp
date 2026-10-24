@@ -52,6 +52,12 @@ void ABattleUnit::NotifyActionSelected(EBattleAction Action)
 	OnActionSelected(Action);
 }
 
+void ABattleUnit::NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight)
+{
+    OnAttack(AttackIndex, bCrit, bFeverHighlight);
+    OnAttackStarted.Broadcast(AttackIndex);
+}
+
 void ABattleUnit::NotifyDied()
 {
 	bDead = true;
@@ -287,6 +293,7 @@ void ABattleUnit::Tick(float DeltaSeconds)
 		}
 
 		OnArrived();
+		OnMovementFinished.Broadcast();
 	}
 }
 

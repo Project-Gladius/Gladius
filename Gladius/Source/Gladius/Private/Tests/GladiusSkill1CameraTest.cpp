@@ -99,6 +99,8 @@ bool FSkillCameraMeshFallbackTest::RunTest(const FString& Parameters)
     Hidden->SetHiddenInGame(true);
     ACutSceneApplier* Applier = Context.World->SpawnActor<ACutSceneApplier>();
     Applier->BattleManager = Context.Manager;
+    // Exercise the retained optional procedural camera explicitly. Authored sequence is now the default.
+    Applier->CutScenes.FindOrAdd(TEXT("GladiusSkill1")).CameraClass = AGladiusSkill1Camera::StaticClass();
     TestTrue(TEXT("Built-in skill starts using visible static mesh"), Applier->ApplyCutScene(ECutSceneCharacterStrategy::DefaultGladius, TEXT("GladiusSkill1")));
     AGladiusSkill1Camera* Camera = nullptr;
     for (TActorIterator<AGladiusSkill1Camera> It(Context.World); It; ++It) { if (IsValid(*It)) { Camera = *It; break; } }
@@ -157,7 +159,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSkillCameraActualGladiusTest, "Gladius.CutScen
 bool FSkillCameraActualGladiusTest::RunTest(const FString& Parameters)
 {
     FSkillCameraWorld Context;
-    UClass* Class = LoadClass<ABattleUnit>(nullptr, TEXT("/Game/Dev/BP_BattleUnitG.BP_BattleUnitG_C"));
+    UClass* Class = LoadClass<ABattleUnit>(nullptr, TEXT("/Game/Blueprints/BP_BattleUnitG.BP_BattleUnitG_C"));
     if (!TestNotNull(TEXT("Actual Gladius blueprint exists"), Class)) { return false; }
     ABattleUnit* Unit = Context.World->SpawnActor<ABattleUnit>(Class);
     if (!TestNotNull(TEXT("Actual Gladius spawns"), Unit)) { return false; }

@@ -15,6 +15,17 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
+#include "Scripts/UI/BattleDataResetWidget.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Button.h"
+#include "Scripts/Battle/GladiusRunCamera.h"
+#include "Scripts/Battle/BattleUnit.h"
+#include "EngineUtils.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
 #include <type_traits>
 
 struct FBattleUnificationTestAccess
@@ -26,6 +37,7 @@ struct FBattleUnificationTestAccess
  static void Move(ABattleManager* B) { B->GetWorldTimerManager().ClearTimer(B->PhaseTimerHandle); B->BeginMove(); }
  static float PhaseRemaining(ABattleManager* B) { return B->GetWorldTimerManager().GetTimerRemaining(B->PhaseTimerHandle); }
  static void Resolve(ABattleManager* B) { B->ResolveTurn(); }
+ static int32 ShotIndex(ABattleManager* B) { return B->CutSceneIndex; }
  static FString StartedCutSceneAttack(ABattleManager* B) { return B->CutSceneAttackUserId; }
  static void FlushOneAttack(ABattleManager* B) { B->AttackCount = 1; B->FlushAttackCues(); }
  static void SelectedAttackLast(ABattleManager* B)
@@ -460,11 +472,20 @@ bool FTurnCutSceneSubjectChainTest::RunTest(const FString& Parameters)
  FBattleUnificationTestAccess::Move(B);
  TestEqual(TEXT("Class returns to Gladius and unseen user wins"),B->CutSceneUserId,FString(TEXT("G2")));
  TestTrue(TEXT("Gladius skill-two list"),B->CutSceneIds==TArray<FName>({TEXT("GladiusRun"),TEXT("GladiusSkill2")}));
- Applier->CancelCutScene();Applier->CancelCutScene();
+ FBattleUnificationTestAccess::Resolve(B);
+ FBattleUnificationTestAccess::SelectedAttackLast(B);
+ FBattleUnificationTestAccess::FlushOneAttack(B);
+ TestEqual(TEXT("Unrelated attack keeps Gladius run shot"),FBattleUnificationTestAccess::ShotIndex(B),1);
+ FBattleUnificationTestAccess::FlushOneAttack(B);
+ FBattleUnificationTestAccess::FlushOneAttack(B);
+ TestEqual(TEXT("Selected Gladius attack advances run to authored skill"),FBattleUnificationTestAccess::ShotIndex(B),2);
+ TestTrue(TEXT("Authored Gladius camera plays at attack dispatch"),Applier->IsPlaying());
+ Applier->CancelCutScene();
  FBattleUnificationTestAccess::Prepare(B);
  Submit(TEXT("S"),TEXT("sera"),EBattleAction::Attack1,50);
  FBattleUnificationTestAccess::Move(B);
  TestTrue(TEXT("Sera skill-one list"),B->CutSceneIds==TArray<FName>({TEXT("SeraSkill1")}));
+ TestEqual(TEXT("Sera skill one starts with its camera"),FBattleUnificationTestAccess::StartedCutSceneAttack(B),FString(TEXT("S")));
  Applier->CancelCutScene();
  FBattleUnificationTestAccess::Prepare(B);
  FBattleUnificationTestAccess::Move(B);
@@ -498,4 +519,144 @@ bool FCollectStartsMoveCutSceneTest::RunTest(const FString& Parameters)
  ADD_LATENT_AUTOMATION_COMMAND(FCollectMoveTimerAssertions(Context,Applier,this));
  return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTemporaryDataResetTest,"Gladius.BattleUnified.TemporaryDataResetButtons",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTemporaryDataResetTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ auto Join=[&](const TCHAR* Id) { return B->SubmitAction(Id,Id,EBattleAction::Attack1,TEXT("gladius")); };
+ TestTrue(TEXT("Real user joins"),Join(TEXT("real-user")));
+ TestTrue(TEXT("Similar real handle joins"),Join(TEXT("@testuserFan")));
+ TestTrue(TEXT("Decimal-looking real handle joins"),Join(TEXT("@testuser1.2")));
+ TestTrue(TEXT("Active test user joins"),Join(TEXT("@testuser00")));
+ TestTrue(TEXT("Offline test user joins"),Join(TEXT("@testuser42")));
+ B->LogoutPlayer(TEXT("@testuser42"));
+ const int32 RealHP=B->GetBattlePlayers().FindChecked(TEXT("real-user")).HP;
+ auto* Controller=T.World->SpawnActor<APlayerController>();
+ auto* LocalPlayer=NewObject<ULocalPlayer>(GEngine);
+ T.Instance->AddLocalPlayer(LocalPlayer,FPlatformUserId::CreateFromInternalId(0));
+ Controller->SetPlayer(LocalPlayer);
+ auto* Widget=CreateWidget<UBattleDataResetWidget>(Controller,UBattleDataResetWidget::StaticClass());
+ if(!TestNotNull(TEXT("Temporary controls can be created"),Widget)) return false;
+ Widget->SetBattleManager(B);
+ auto* TestButton=Cast<UButton>(Widget->WidgetTree->FindWidget(TEXT("ResetTestUsersButton")));
+ auto* AllButton=Cast<UButton>(Widget->WidgetTree->FindWidget(TEXT("ResetAllUsersButton")));
+ if(!TestNotNull(TEXT("Test-only button exists"),TestButton)||!TestNotNull(TEXT("All-user button exists"),AllButton)) return false;
+ TestButton->OnClicked.Broadcast();
+ TestTrue(TEXT("Real users remain in battle"),B->GetBattlePlayers().Contains(TEXT("real-user"))&&B->GetBattlePlayers().Contains(TEXT("@testuserFan")));
+ TestFalse(TEXT("Active test user leaves"),B->GetBattlePlayers().Contains(TEXT("@testuser00")));
+ TestTrue(TEXT("Both active and offline test records are removed"),!FBattleUnificationTestAccess::Record(B,TEXT("@testuser00"))&&!FBattleUnificationTestAccess::Record(B,TEXT("@testuser42")));
+ TestEqual(TEXT("Real health is preserved"),B->GetBattlePlayers().FindChecked(TEXT("real-user")).HP,RealHP);
+ auto ReadDisk=[&]() { FString Json; FPlayerRecordFile File; FFileHelper::LoadFileToString(Json,*T.Path); FJsonObjectConverter::JsonObjectStringToUStruct(Json,&File); return File; };
+ TestEqual(TEXT("JSON keeps only real users"),ReadDisk().Records.Num(),3);
+ B->SaveRecords(); B->LoadRecords();
+ TestFalse(TEXT("Removed test users stay removed after save/reload"),FBattleUnificationTestAccess::Record(B,TEXT("@testuser42"))!=nullptr);
+ TestTrue(TEXT("Reset test user can join afresh"),Join(TEXT("@testuser00")));
+ B->bEnableTurnCutScenes=true;
+ FBattleUnificationTestAccess::Fever(B,TEXT("@testuser00"),100);
+ FBattleUnificationTestAccess::Move(B);
+ TestTrue(TEXT("Reset is exercised with a running cutscene"),B->CutSceneApplier&&B->CutSceneApplier->IsPlaying());
+ AllButton->OnClicked.Broadcast();
+ TestEqual(TEXT("All participants removed"),B->GetBattlePlayers().Num(),0);
+ TestEqual(TEXT("JSON is cleared"),ReadDisk().Records.Num(),0);
+ TestTrue(TEXT("Battle restarts in an empty state"),B->IsBattleRunning()&&B->Phase==EBattlePhase::BattleStart);
+ B->SaveRecords(); B->LoadRecords();
+ TestEqual(TEXT("Later saves cannot restore removed users"),ReadDisk().Records.Num(),0);
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGladiusRunArrivalTest,"Gladius.BattleUnified.GladiusRunEndsOnArrival",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FGladiusRunArrivalTest::RunTest(const FString& Parameters)
+{
+ for(EBattleAction Action : {EBattleAction::Attack1,EBattleAction::Attack2})
+ {
+  FUnifiedBattleWorld T; auto* B=T.Battle;
+  B->bEnableTurnCutScenes=true;
+  B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+  B->SubmitAction(TEXT("runner"),TEXT("Runner"),Action,TEXT("gladius"));
+  B->SubmitAction(TEXT("other"),TEXT("Other"),Action,TEXT("gladius"));
+  FBattleUnificationTestAccess::Fever(B,TEXT("runner"),100);
+  auto* Applier=T.World->SpawnActor<ACutSceneApplier>(); B->CutSceneApplier=Applier;
+  FBattleUnificationTestAccess::Move(B);
+  auto* Subject=B->GetBattlePlayers().FindChecked(TEXT("runner")).Unit.Get();
+  auto* Other=B->GetBattlePlayers().FindChecked(TEXT("other")).Unit.Get();
+  AGladiusRunCamera* RunCamera=nullptr;
+  for(TActorIterator<AGladiusRunCamera> It(T.World);It;++It) if(IsValid(*It)) RunCamera=*It;
+  if(!TestNotNull(TEXT("Run shot is active"),RunCamera)) return false;
+  TestTrue(TEXT("Run camera listens to actual attack start"),Subject->OnAttackStarted.IsBoundToObject(RunCamera));
+  TestEqual(TEXT("Skill has not started while running"),FBattleUnificationTestAccess::ShotIndex(B),1);
+  Other->MoveTo(Other->GetActorLocation()+FVector(10,0,0),0.1f);
+  static_cast<AActor*>(Other)->Tick(0.2f);
+  TestTrue(TEXT("Another participant arrival does not end this shot"),IsValid(RunCamera));
+  Subject->MoveTo(Subject->GetActorLocation()+FVector(100,0,0),1.f);
+  static_cast<AActor*>(Subject)->Tick(0.5f);
+  TestTrue(TEXT("Run shot remains during movement"),IsValid(RunCamera)&&Subject->IsMoving());
+  static_cast<AActor*>(Subject)->Tick(0.5f);
+  TestFalse(TEXT("Movement ends"),Subject->IsMoving());
+  TestFalse(TEXT("Run camera is removed in the arrival frame without camera tick or attack dispatch"),IsValid(RunCamera));
+  TestEqual(TEXT("Arrival immediately advances to the skill shot"),FBattleUnificationTestAccess::ShotIndex(B),2);
+  TestTrue(TEXT("Authored skill camera is already playing"),Applier->IsPlaying());
+  TestEqual(TEXT("Skill shot keeps selected participant"),Applier->GetCurrentSubject(),Subject);
+  static_cast<AActor*>(Subject)->Tick(0.1f);
+  TestEqual(TEXT("Arrival is only delivered once"),FBattleUnificationTestAccess::ShotIndex(B),2);
+  B->StopBattle();
+  TestFalse(TEXT("Stopped run camera leaves no arrival listener"),Subject->OnMovementFinished.IsBound());
+ }
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGladiusDirectAttackMontageTest,"Gladius.BattleUnified.GladiusDirectAttackAndCamera",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FGladiusDirectAttackMontageTest::RunTest(const FString& Parameters)
+{
+ UClass* UnitClass=LoadClass<ABattleUnit>(nullptr,TEXT("/Game/Blueprints/ScaledBattleUnits/BP_BattleUnitG_DevBattle.BP_BattleUnitG_DevBattle_C"));
+ if(!TestNotNull(TEXT("Actual Gladius blueprint loads"),UnitClass)) return false;
+ for(int32 Skill : {1,2})
+ {
+  FUnifiedBattleWorld T; auto* B=T.Battle;
+  B->UnitClassByCharacter.Add(TEXT("gladius"),UnitClass);
+  B->bEnableTurnCutScenes=true; B->RunSpeed=1.f; B->RollSpeed=2.f;
+  B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+  B->SubmitAction(TEXT("runner"),TEXT("Runner"),Skill==1?EBattleAction::Attack1:EBattleAction::Attack2,TEXT("gladius"));
+  auto* Subject=B->GetBattlePlayers().FindChecked(TEXT("runner")).Unit.Get();
+  if(!Subject->HasActorBegunPlay()) Subject->DispatchBeginPlay();
+  auto* Mesh=Subject->FindComponentByClass<USkeletalMeshComponent>();
+  Mesh->InitAnim(true);
+  auto* Anim=Mesh->GetAnimInstance();
+  if(!TestNotNull(TEXT("Actual animation instance exists"),Anim)) return false;
+  const FString Asset=FString::Printf(TEXT("/Game/Asset/Battle/gladius/AnimationMontage/AM_Gladius_Attack%d.AM_Gladius_Attack%d"),Skill,Skill);
+  auto* Attack=LoadObject<UAnimMontage>(nullptr,*Asset);
+  auto* Roll=LoadObject<UAnimMontage>(nullptr,TEXT("/Game/Asset/Battle/gladius/AnimationMontage/AM_Gladius_Roll.AM_Gladius_Roll"));
+  FBattleUnificationTestAccess::Move(B);
+  TestTrue(TEXT("Attack approach uses run even at roll speed"),Subject->GetMoveGait()!=EMoveGait::Roll);
+  auto* Applier=B->CutSceneApplier.Get();
+  int32 StartCount=0;
+  bool bMontagePlayingAtSignal=false;
+  const FDelegateHandle StartedHandle=Subject->OnAttackStarted.AddLambda([&](int32 Index)
+  {
+   ++StartCount;
+   bMontagePlayingAtSignal=Index==Skill&&Anim->Montage_IsPlaying(Attack)&&Anim->GetCurrentActiveMontage()==Attack;
+  });
+  Anim->Montage_Play(Roll);
+  Subject->MoveTo(Subject->GetActorLocation()+FVector(100,0,0),1.f,EMoveGait::Run);
+  const double ArrivalTime=T.World->GetTimeSeconds();
+  static_cast<AActor*>(Subject)->Tick(1.f);
+  TestEqual(TEXT("One skill starts immediately on arrival"),StartCount,1);
+  TestTrue(TEXT("Attack montage is already playing when start signal is emitted"),bMontagePlayingAtSignal);
+  TestEqual(TEXT("No timer or frame wait between attack and camera"),T.World->GetTimeSeconds(),ArrivalTime);
+  TestEqual(TEXT("Skill camera starts in the attack call"),FBattleUnificationTestAccess::ShotIndex(B),2);
+  TestTrue(TEXT("Skill camera is playing"),Applier->IsPlaying());
+  TestTrue(TEXT("Attack replaces any roll montage"),Anim->GetCurrentActiveMontage()==Attack);
+  FBattleUnificationTestAccess::Resolve(B);
+  FBattleUnificationTestAccess::FlushOneAttack(B);
+  TestEqual(TEXT("Attack queue does not replay the skill"),StartCount,1);
+  TestEqual(TEXT("Attack queue does not restart the camera"),FBattleUnificationTestAccess::ShotIndex(B),2);
+  Subject->OnAttackStarted.Remove(StartedHandle);
+  B->StopBattle();
+ }
+ return true;
+}
+
 #endif

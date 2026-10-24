@@ -25,6 +25,7 @@ class GLADIUS_API AGladiusRunCamera : public ACutSceneCamera
 {
     GENERATED_BODY()
 public:
+    virtual void StopCutScene() override;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GladiusRun", meta = (ClampMin = "1.0", Units = "cm"))
     float CameraDistance = 500.f;
 
@@ -65,6 +66,7 @@ protected:
     virtual void UpdateCamera_Implementation(float RealDeltaSeconds) override;
 
 private:
+    void HandleSubjectAttackStarted(int32 AttackIndex);
     bool UpdatePose();
     bool GetDesiredYaw(float& OutYaw) const;
     float CurrentYaw = 0.f;
