@@ -15,22 +15,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="d9d411c6-142d-4de4-9930-1b2560173707" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/claudeCodeEditorTabs.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/claudeCodeEditorTabs.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/EdSplash.uasset" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/EdSplash.uasset" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/Splash.uasset" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Asset/Battle/Sera/Effect/ProjectileFX_Pack/Demo/Splash/Splash.uasset" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Content/Levels/Main/MainTemple.umap" beforeDir="false" afterPath="$PROJECT_DIR$/Content/Levels/Main/MainTemple.umap" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudio.dll" beforeDir="false" afterPath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudio.dll" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudioEditor.dll" beforeDir="false" afterPath="$PROJECT_DIR$/Plugins/FMODStudio/Binaries/Win64/UnrealEditor-FMODStudioEditor.dll" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Plugins/FMODStudioNiagara/Binaries/Win64/UnrealEditor-FMODStudioNiagara.dll" beforeDir="false" afterPath="$PROJECT_DIR$/Plugins/FMODStudioNiagara/Binaries/Win64/UnrealEditor-FMODStudioNiagara.dll" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/prompts.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/prompts.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/services/fallback_reply.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/app/services/fallback_reply.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_api.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_api.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_fallback_reply.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_fallback_reply.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_prompts.py" beforeDir="false" afterPath="$PROJECT_DIR$/Server/TempleAI_Phase1/tests/test_prompts.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Temple/TempleCommandQueue.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Temple/TempleCommandQueue.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Temple/TempleCommandQueue.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Temple/TempleCommandQueue.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleManager.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleManager.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleManager.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleManager.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -54,27 +41,27 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.cidr.known.project.marker&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.readMode.enableVisualFormatting&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
-    &quot;cidr.known.project.marker&quot;: &quot;true&quot;,
-    &quot;codeWithMe.voiceChat.enabledByDefault&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.cidr.known.project.marker": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.readMode.enableVisualFormatting": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "cidr.known.project.marker": "true",
+    "codeWithMe.voiceChat.enabledByDefault": "false",
+    "git-widget-placeholder": "LJK__UI",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "preferences.pluginManager",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RunManager" selected="C/C++ Project.Gladius">
     <configuration name="Gladius" type="CppProject" factoryName="C++ Project">
       <configuration_1 setup="1">

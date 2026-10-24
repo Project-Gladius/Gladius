@@ -9,6 +9,8 @@
 #include "Scripts/Backend/GameManager.h"
 #include "Scripts/UI/ChatLogWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
+#include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
+#include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -31,6 +33,8 @@ ABattleManager::ABattleManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	ChatLogWidgetClass = UChatLogWidget::StaticClass();
+	LeaderboardWidgetClass = ULeaderboardRotatorWidget::StaticClass();
+	BossTelegraphWidgetClass = UBossTelegraphWidget::StaticClass();
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
@@ -75,6 +79,8 @@ void ABattleManager::BeginPlay()
 {
 	Super::BeginPlay();
 
+ //BATTLE ANALYSIS는 전투씬에 들어온 순간부터 산출
+ SessionStats.Reset();
  InitializePlayerRecords();
  if (!bAutoStartBattle)
  {
@@ -112,6 +118,24 @@ void ABattleManager::BeginPlay()
    ChatLogWidget->AddToViewport(1);
   }
  }
+ if (LeaderboardWidgetClass)
+ {
+  LeaderboardWidget = CreateWidget<ULeaderboardRotatorWidget>(GetWorld(), LeaderboardWidgetClass);
+  if (LeaderboardWidget)
+  {
+   LeaderboardWidget->AddToViewport(1);
+   LeaderboardWidget->BindToBattleManager(this);
+  }
+ }
+ if (BossTelegraphWidgetClass)
+ {
+  BossTelegraphWidget = CreateWidget<UBossTelegraphWidget>(GetWorld(), BossTelegraphWidgetClass);
+  if (BossTelegraphWidget)
+  {
+   BossTelegraphWidget->AddToViewport(1);
+   BossTelegraphWidget->BindToBattleManager(this);
+  }
+ }
  GatherSpots();
 
 	for (const FCharacterDef& Class : Classes)
@@ -138,11 +162,15 @@ void ABattleManager::BeginPlay()
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
+ if (LeaderboardWidget) LeaderboardWidget->RemoveFromParent();
+ if (BossTelegraphWidget) BossTelegraphWidget->RemoveFromParent();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->GetCommandDispatcher()->UnbindBattleManager(this);
  StopBattle();
  //방송이 정상 종료되는 경우의 마지막 저장
 	SaveRecords();
+	//전투씬에서 나가면 BATTLE ANALYSIS 초기화
+	SessionStats.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -799,6 +827,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 #endif
 
 		Player = &Players.Add(UserId, NewPlayer);
+  SessionStats.RegisterPlayer(UserId, DisplayName, Record.CharacterId);
   SaveRecords();
 
 		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분한다.
@@ -920,6 +949,9 @@ void ABattleManager::StartTurn()
 	{
 		BossUnit->OnBossTelegraph(TelegraphedAction.Id, TelegraphedAction.TelegraphText);
 	}
+
+	//암시 문구는 보스 유닛(모션)과 별개로 UI 등 구독자에게 알린다
+	OnBossTelegraph.Broadcast(TelegraphedAction.Id, TelegraphedAction.TelegraphText);
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d/%d 예고 — %.1f초 / %d명 / '%s' → %s"),
 		TurnIndex, Turns, TelegraphSeconds, Players.Num(),
@@ -1468,6 +1500,7 @@ void ABattleManager::ResolveTurn()
 
 			//Records는 방송 전체 누적이라 초기화되지 않는다. 판 단위 순위는 이쪽이다
 			P.DamageDealt += Dealt;
+			SessionStats.AddDamage(Pair.Key, Dealt);
 
 			if (Record)
 			{
@@ -1941,6 +1974,8 @@ void ABattleManager::RemovePlayer(const FString& UserId)
 	}
 
 	Players.Remove(UserId);
+	//전투 중 이탈하면 BATTLE ANALYSIS 목록과 이번 씬 기록에서도 제거
+	SessionStats.RemovePlayer(UserId);
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] 이탈: %s (무입력 %d턴) — 현재 %d/%d명"),
 		*UserId, IdleTurnsBeforeKick, Players.Num(), MaxPlayers);
