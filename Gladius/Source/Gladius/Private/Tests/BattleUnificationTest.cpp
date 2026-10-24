@@ -18,6 +18,7 @@
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Scripts/UI/BattleDataResetWidget.h"
 #include "Components/InputComponent.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
 #include "Scripts/Battle/BattleUnit.h"
@@ -641,6 +642,53 @@ bool FCollectStartsMoveCutSceneTest::RunTest(const FString& Parameters)
  ADD_LATENT_AUTOMATION_COMMAND(FCollectMoveTimerAssertions(Context,Applier,this));
  return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTemporaryDataResetTest,"Gladius.BattleUnified.TemporaryDataResetButtons",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTemporaryDataResetTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ auto Join=[&](const TCHAR* Id) { return B->SubmitAction(Id,Id,EBattleAction::Attack1,TEXT("gladius")); };
+ TestTrue(TEXT("Real user joins"),Join(TEXT("real-user")));
+ TestTrue(TEXT("Similar real handle joins"),Join(TEXT("@testuserFan")));
+ TestTrue(TEXT("Decimal-looking real handle joins"),Join(TEXT("@testuser1.2")));
+ TestTrue(TEXT("Active test user joins"),Join(TEXT("@testuser00")));
+ TestTrue(TEXT("Offline test user joins"),Join(TEXT("@testuser42")));
+ B->LogoutPlayer(TEXT("@testuser42"));
+ const int32 RealHP=B->GetBattlePlayers().FindChecked(TEXT("real-user")).HP;
+ auto* Controller=T.World->SpawnActor<APlayerController>();
+ auto* LocalPlayer=NewObject<ULocalPlayer>(GEngine);
+ T.Instance->AddLocalPlayer(LocalPlayer,FPlatformUserId::CreateFromInternalId(0));
+ Controller->SetPlayer(LocalPlayer);
+ auto* Widget=CreateWidget<UBattleDataResetWidget>(Controller,UBattleDataResetWidget::StaticClass());
+ if(!TestNotNull(TEXT("Temporary controls can be created"),Widget)) return false;
+ Widget->SetBattleManager(B);
+ auto* TestButton=Cast<UButton>(Widget->WidgetTree->FindWidget(TEXT("ResetTestUsersButton")));
+ auto* AllButton=Cast<UButton>(Widget->WidgetTree->FindWidget(TEXT("ResetAllUsersButton")));
+ if(!TestNotNull(TEXT("Test-only button exists"),TestButton)||!TestNotNull(TEXT("All-user button exists"),AllButton)) return false;
+ TestButton->OnClicked.Broadcast();
+ TestTrue(TEXT("Real users remain in battle"),B->GetBattlePlayers().Contains(TEXT("real-user"))&&B->GetBattlePlayers().Contains(TEXT("@testuserFan")));
+ TestFalse(TEXT("Active test user leaves"),B->GetBattlePlayers().Contains(TEXT("@testuser00")));
+ TestTrue(TEXT("Both active and offline test records are removed"),!FBattleUnificationTestAccess::Record(B,TEXT("@testuser00"))&&!FBattleUnificationTestAccess::Record(B,TEXT("@testuser42")));
+ TestEqual(TEXT("Real health is preserved"),B->GetBattlePlayers().FindChecked(TEXT("real-user")).HP,RealHP);
+ auto ReadDisk=[&]() { FString Json; FPlayerRecordFile File; FFileHelper::LoadFileToString(Json,*T.Path); FJsonObjectConverter::JsonObjectStringToUStruct(Json,&File); return File; };
+ TestEqual(TEXT("JSON keeps only real users"),ReadDisk().Records.Num(),3);
+ B->SaveRecords(); B->LoadRecords();
+ TestFalse(TEXT("Removed test users stay removed after save/reload"),FBattleUnificationTestAccess::Record(B,TEXT("@testuser42"))!=nullptr);
+ TestTrue(TEXT("Reset test user can join afresh"),Join(TEXT("@testuser00")));
+ B->bEnableTurnCutScenes=true;
+ FBattleUnificationTestAccess::Fever(B,TEXT("@testuser00"),100);
+ FBattleUnificationTestAccess::Move(B);
+ TestTrue(TEXT("Reset is exercised with a running cutscene"),B->CutSceneApplier&&B->CutSceneApplier->IsPlaying());
+ AllButton->OnClicked.Broadcast();
+ TestEqual(TEXT("All participants removed"),B->GetBattlePlayers().Num(),0);
+ TestEqual(TEXT("JSON is cleared"),ReadDisk().Records.Num(),0);
+ TestTrue(TEXT("Battle restarts in an empty state"),B->IsBattleRunning()&&B->Phase==EBattlePhase::BattleStart);
+ B->SaveRecords(); B->LoadRecords();
+ TestEqual(TEXT("Later saves cannot restore removed users"),ReadDisk().Records.Num(),0);
+ return true;
+}
+
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGladiusRunArrivalTest,"Gladius.BattleUnified.GladiusRunEndsOnArrival",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FGladiusRunArrivalTest::RunTest(const FString& Parameters)

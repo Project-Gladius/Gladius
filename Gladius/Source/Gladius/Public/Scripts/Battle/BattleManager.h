@@ -13,6 +13,7 @@ class ACutSceneApplier;
 class UChatLogWidget;
 class ULeaderboardRotatorWidget;
 class UBossTelegraphWidget;
+class UBattleDataResetWidget;
 class UBattleTopHudWidget;
 
 //보스가 다음 공격을 예고할 때. MotionId: 보스 행동 id(모션 키), TelegraphText: 암시 문구
@@ -523,6 +524,10 @@ public:
  UFUNCTION(BlueprintCallable, Category = "Battle|Debug")
  bool ResetSavedUserData(bool bTestUsersOnly);
 
+ // Temporary buttons are only displayed in MainBattle.
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
+ bool bShowTemporaryDataResetButtons = true;
+
  void InitializePlayerRecords();
 
  UFUNCTION(BlueprintCallable, Category = "Battle|Temple")
@@ -696,6 +701,9 @@ private:
  float InputPhaseDuration = 0.f;
  //전투씬 진입(BeginPlay)부터 나갈 때(EndPlay)까지의 유저별 누적. 판이 새로 시작돼도 유지
  FBattleSessionStats SessionStats;
+ UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;
+ TWeakObjectPtr<APlayerController> DataResetController;
+ bool bMouseCursorBeforeDataReset = false;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
  bool bRecordLoadFailed = false;

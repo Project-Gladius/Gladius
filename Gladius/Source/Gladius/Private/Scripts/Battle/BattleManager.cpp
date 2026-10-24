@@ -12,6 +12,7 @@
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
+#include "Scripts/UI/BattleDataResetWidget.h"
 #include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
 #include "Scripts/UI/UIWidgetBuild.h"
 #include "Kismet/GameplayStatics.h"
@@ -134,6 +135,24 @@ void ABattleManager::BeginPlay()
    TopHudWidget->BindToBattleManager(this);
   }
  }
+ if (bShowTemporaryDataResetButtons && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("MainBattle"))
+ {
+  if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+  {
+   DataResetWidget = CreateWidget<UBattleDataResetWidget>(PC, UBattleDataResetWidget::StaticClass());
+   if (DataResetWidget)
+   {
+    DataResetWidget->SetBattleManager(this);
+    DataResetWidget->AddToViewport(100);
+    DataResetController = PC;
+    bMouseCursorBeforeDataReset = PC->bShowMouseCursor;
+    PC->bShowMouseCursor = true;
+    FInputModeGameAndUI InputMode;
+    InputMode.SetHideCursorDuringCapture(false);
+    PC->SetInputMode(InputMode);
+   }
+  }
+ }
  GatherSpots();
 
 	for (const FCharacterDef& Class : Classes)
@@ -157,6 +176,8 @@ void ABattleManager::BeginPlay()
 
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+ if (DataResetWidget) DataResetWidget->RemoveFromParent();
+ if (DataResetController.IsValid()) DataResetController->bShowMouseCursor = bMouseCursorBeforeDataReset;
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
  if (LeaderboardWidget) LeaderboardWidget->RemoveFromParent();
  if (BossTelegraphWidget) BossTelegraphWidget->RemoveFromParent();
