@@ -16,8 +16,8 @@
   <component name="ChangeListManager">
     <list default="true" id="d9d411c6-142d-4de4-9930-1b2560173707" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleManager.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleManager.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleManager.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleManager.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BossTelegraph/BossTelegraphTypes.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BossTelegraph/BossTelegraphTypes.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/Leaderboard/LeaderboardTypes.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/Leaderboard/LeaderboardTypes.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

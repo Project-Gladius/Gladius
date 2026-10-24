@@ -1,30 +1,11 @@
 #include "Scripts/UI/Leaderboard/LeaderboardTypes.h"
-
-namespace
-{
-	//텍스처 없이 색과 테두리만 있는 둥근 사각형
-	FSlateBrush MakeRoundedBrush(const FLinearColor& Fill, const FLinearColor& Outline, float OutlineWidth, float Radius)
-	{
-		FSlateBrush Brush;
-		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Brush.TintColor = FSlateColor(Fill);
-		Brush.OutlineSettings = FSlateBrushOutlineSettings(FVector4(Radius, Radius, Radius, Radius), FSlateColor(Outline), OutlineWidth);
-		return Brush;
-	}
-
-	//텍스처 없이 색만 있는 원
-	FSlateBrush MakeCircleBrush(const FLinearColor& Fill, const FLinearColor& Outline)
-	{
-		FSlateBrush Brush;
-		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Brush.TintColor = FSlateColor(Fill);
-		Brush.OutlineSettings = FSlateBrushOutlineSettings(FSlateColor(Outline), 2.0f);
-		return Brush;
-	}
-}
+#include "Scripts/UI/UIBrushFactory.h"
 
 FLeaderboardStyle::FLeaderboardStyle()
 {
+	using GladiusUI::MakeRoundedBrush;
+	using GladiusUI::MakeCircleBrush;
+
 	const FLinearColor Gold(0.83f, 0.66f, 0.32f);
 
 	PanelBrush = MakeRoundedBrush(FLinearColor(0.012f, 0.025f, 0.05f, 0.92f), Gold, 2.0f, 14.0f);

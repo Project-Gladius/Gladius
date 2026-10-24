@@ -1,20 +1,10 @@
 #include "Scripts/UI/BossTelegraph/BossTelegraphTypes.h"
-
-namespace
-{
-	//텍스처 없이 색과 테두리만 있는 둥근 사각형
-	FSlateBrush MakeRoundedBrush(const FLinearColor& Fill, const FLinearColor& Outline, float OutlineWidth, float Radius)
-	{
-		FSlateBrush Brush;
-		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Brush.TintColor = FSlateColor(Fill);
-		Brush.OutlineSettings = FSlateBrushOutlineSettings(FVector4(Radius, Radius, Radius, Radius), FSlateColor(Outline), OutlineWidth);
-		return Brush;
-	}
-}
+#include "Scripts/UI/UIBrushFactory.h"
 
 FBossTelegraphStyle::FBossTelegraphStyle()
 {
+	using GladiusUI::MakeRoundedBrush;
+
 	const FLinearColor Gold(0.83f, 0.66f, 0.32f);
 
 	OuterFrameBrush = MakeRoundedBrush(FLinearColor(0.01f, 0.02f, 0.045f, 0.92f), Gold, 2.0f, 12.0f);
