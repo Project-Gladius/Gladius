@@ -1,10 +1,11 @@
-#include "Scripts/Battle/BattleUnit.h"
+﻿#include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/UnitNameplate.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Components/WidgetComponent.h"
+#include "Animation/AnimMontage.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -67,6 +68,45 @@ void ABattleUnit::NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlig
 {
     OnAttack(AttackIndex, bCrit, bFeverHighlight);
     OnAttackStarted.Broadcast(AttackIndex);
+}
+
+void ABattleUnit::ReportHit(float Delay)
+{
+	if (Delay <= 0.f)
+	{
+		OnHitLanded.Broadcast();
+		return;
+	}
+
+	//투사체마다 따로 날아가므로 타이머를 하나로 돌려쓰지 않는다 — 연타 중 앞 발이 덮인다
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle,
+		FTimerDelegate::CreateWeakLambda(this, [this]() { OnHitLanded.Broadcast(); }), Delay, false);
+}
+
+void ABattleUnit::OnDamageShown_Implementation(int32 Damage, bool bCrit)
+{
+	// ponytail: 임시 팝업 — 제자리에 잠깐 떴다 사라진다. 떠오르기·색 구분은 WBP로 바꿀 때 넣는다
+	UWidgetComponent* Popup = NewObject<UWidgetComponent>(this);
+	Popup->SetupAttachment(Root);
+	Popup->SetWidgetSpace(EWidgetSpace::Screen);
+	Popup->SetDrawAtDesiredSize(true);
+	Popup->SetWidgetClass(UUnitNameplate::StaticClass());
+
+	//이름표 조금 위. 피버 연타가 한 점에 겹치지 않게 조금씩 흩는다
+	Popup->SetRelativeLocation(Nameplate->GetRelativeLocation() + FVector(
+		FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(40.f, 100.f)));
+	Popup->RegisterComponent();
+	Popup->InitWidget();
+
+	if (UUnitNameplate* Text = Cast<UUnitNameplate>(Popup->GetUserWidgetObject()))
+	{
+		Text->SetText(bCrit ? FString::Printf(TEXT("%d!"), Damage) : FString::FromInt(Damage));
+	}
+
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle,
+		FTimerDelegate::CreateWeakLambda(Popup, [Popup]() { Popup->DestroyComponent(); }), 1.f, false);
 }
 
 void ABattleUnit::NotifyDied()
@@ -215,6 +255,61 @@ void ABattleUnit::MoveTo(const FVector& Target, float Duration, EMoveGait Gait)
 	}
 
 	OnMoveStarted(Duration, Distance, Gait);
+}
+
+float ABattleUnit::NotifyTimeIn(const UAnimMontage* Montage, FName NotifyName,
+                                FName SectionName, int32 Occurrence)
+{
+	if (!Montage)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("NotifyTimeIn: 몬타주가 비어 있다 (노티파이 '%s')"),
+			*NotifyName.ToString());
+		return 0.f;
+	}
+
+	//섹션을 주면 그 구간만 본다. 시각도 섹션 시작 기준으로 돌려줘야
+	//StartingSection을 준 Play Montage의 Delay에 그대로 꽂을 수 있다
+	float Start = 0.f;
+	float End = Montage->GetPlayLength();
+	if (!SectionName.IsNone())
+	{
+		const int32 SectionIndex = Montage->GetSectionIndex(SectionName);
+		if (SectionIndex == INDEX_NONE)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("NotifyTimeIn: %s 에 '%s' 섹션이 없다"),
+				*Montage->GetName(), *SectionName.ToString());
+			return 0.f;
+		}
+		Montage->GetSectionStartAndEndTime(SectionIndex, Start, End);
+	}
+
+	int32 Seen = 0;
+	for (const FAnimNotifyEvent& Event : Montage->Notifies)
+	{
+		if (Event.NotifyName != NotifyName)
+		{
+			continue;
+		}
+
+		const float Time = Event.GetTriggerTime();
+		if (Time < Start || Time > End)
+		{
+			continue;
+		}
+
+		if (Seen++ < Occurrence)
+		{
+			continue;
+		}
+
+		return Time - Start;
+	}
+
+	//모르는 값을 조용히 0으로 때우면 발사가 모션 시작과 동시에 나가 원인을 짚기 어렵다
+	UE_LOG(LogTemp, Warning,
+		TEXT("NotifyTimeIn: %s 의 '%s' 섹션에서 노티파이 '%s' %d번째를 못 찾았다"),
+		*Montage->GetName(), *SectionName.ToString(), *NotifyName.ToString(), Occurrence);
+	return 0.f;
 }
 
 void ABattleUnit::SetFacingTarget(const FVector& WorldLocation)
