@@ -13,6 +13,7 @@
 #include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
 #include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
+#include "Scripts/UI/UIWidgetBuild.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -123,7 +124,7 @@ void ABattleManager::BeginPlay()
  }
  if (LeaderboardWidgetClass)
  {
-  LeaderboardWidget = CreateWidget<ULeaderboardRotatorWidget>(GetWorld(), LeaderboardWidgetClass);
+  LeaderboardWidget = CreateWidget<ULeaderboardRotatorWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<ULeaderboardRotatorWidget>(LeaderboardWidgetClass, GladiusUI::AssetPaths::LeaderboardRotator));
   if (LeaderboardWidget)
   {
    LeaderboardWidget->AddToViewport(1);
@@ -132,7 +133,7 @@ void ABattleManager::BeginPlay()
  }
  if (BossTelegraphWidgetClass)
  {
-  BossTelegraphWidget = CreateWidget<UBossTelegraphWidget>(GetWorld(), BossTelegraphWidgetClass);
+  BossTelegraphWidget = CreateWidget<UBossTelegraphWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<UBossTelegraphWidget>(BossTelegraphWidgetClass, GladiusUI::AssetPaths::BossTelegraph));
   if (BossTelegraphWidget)
   {
    BossTelegraphWidget->AddToViewport(1);
@@ -141,7 +142,7 @@ void ABattleManager::BeginPlay()
  }
  if (TopHudWidgetClass)
  {
-  TopHudWidget = CreateWidget<UBattleTopHudWidget>(GetWorld(), TopHudWidgetClass);
+  TopHudWidget = CreateWidget<UBattleTopHudWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<UBattleTopHudWidget>(TopHudWidgetClass, GladiusUI::AssetPaths::TopHud));
   if (TopHudWidget)
   {
    TopHudWidget->AddToViewport(1);

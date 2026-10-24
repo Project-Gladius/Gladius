@@ -18,7 +18,8 @@ public class Gladius : ModuleRules
 		
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor" });
+			// AssetRegistry: 전투 UI WBP 자동 생성 커맨드릿(GenerateGladiusUI)
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor", "AssetRegistry" });
 		}
 
 		// Uncomment if you are using online features

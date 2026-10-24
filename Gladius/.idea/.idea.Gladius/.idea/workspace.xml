@@ -15,13 +15,27 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="d9d411c6-142d-4de4-9930-1b2560173707" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../Balancing/Data/bosses.json" beforeDir="false" afterPath="$PROJECT_DIR$/../Balancing/Data/bosses.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.Gladius/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Config/DefaultGame.ini" beforeDir="false" afterPath="$PROJECT_DIR$/Config/DefaultGame.ini" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Gladius.Build.cs" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Gladius.Build.cs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleBalance.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleBalance.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleManager.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleManager.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BossTelegraph/BossTelegraphTypes.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BossTelegraph/BossTelegraphTypes.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleUnit.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/Battle/BattleUnit.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BattleHud/BattleTopHudWidget.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BattleHud/BattleTopHudWidget.cpp" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BossTelegraph/BossTelegraphWidget.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/BossTelegraph/BossTelegraphWidget.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/Leaderboard/LeaderboardBoardWidget.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/Leaderboard/LeaderboardBoardWidget.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/Leaderboard/LeaderboardRotatorWidget.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/Leaderboard/LeaderboardRotatorWidget.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/UIBrushFactory.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Scripts/UI/UIBrushFactory.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Tests/BattleUnificationTest.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Tests/BattleUnificationTest.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Private/Tests/CutSceneApplierTest.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Private/Tests/CutSceneApplierTest.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleBalance.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleBalance.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleManager.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleManager.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/BossTelegraph/BossTelegraphTypes.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/BossTelegraph/BossTelegraphTypes.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleUnit.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/Battle/BattleUnit.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/BattleHud/BattleTopHudWidget.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/BattleHud/BattleTopHudWidget.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/BossTelegraph/BossTelegraphWidget.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/BossTelegraph/BossTelegraphWidget.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/Leaderboard/LeaderboardBoardWidget.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/Leaderboard/LeaderboardBoardWidget.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h" beforeDir="false" afterPath="$PROJECT_DIR$/Source/Gladius/Public/Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

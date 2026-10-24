@@ -499,15 +499,15 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
 
- //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대)
+ //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<ULeaderboardRotatorWidget> LeaderboardWidgetClass;
 
- //상단 중앙 보스 행동 암시 텍스트
+ //보스 행동 암시 텍스트. 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UBossTelegraphWidget> BossTelegraphWidgetClass;
 
- //최상단 중앙 상단 UI (턴, 안내 문구, 게이지, 남은 시간)
+ //최상단 중앙 상단 UI (턴, 안내 문구, 게이지, 남은 시간). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UBattleTopHudWidget> TopHudWidgetClass;
 
