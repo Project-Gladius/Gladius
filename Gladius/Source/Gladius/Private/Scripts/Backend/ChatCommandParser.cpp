@@ -2,11 +2,11 @@
 
 namespace
 {
-	// 각 키워드는 서로 다른 문자로 시작하므로 검사 순서는 결과에 영향을 주지 않음
+	// "로그인"과 "로그아웃"은 앞 두 글자가 같지만, 셋째 글자부터 달라 서로의 접두어가 아니므로 검사 순서는 결과에 영향을 주지 않음
 	const TArray<FString>& GetKnownKeywords()
 	{
 		static const TArray<FString> Keywords = {
-			TEXT("공격"), TEXT("방어"), TEXT("회피"), TEXT("로그아웃"), TEXT("강화"), TEXT("대화"), TEXT("전투")
+			TEXT("공격"), TEXT("방어"), TEXT("회피"), TEXT("로그아웃"), TEXT("로그인"), TEXT("강화"), TEXT("대화"), TEXT("전투")
 		};
 		return Keywords;
 	}
@@ -77,6 +77,14 @@ bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& R
 	{
 		if (!Remainder.IsEmpty()) return false; //인자를 받지 않는 명령어라 뒤에 뭔가 더 붙으면 실패
 		OutCommand.CommandType = ECommandType::Logout;
+		return true;
+	}
+
+	if (Keyword == TEXT("로그인"))
+	{
+		//캐릭터 이름(글라디우스/세라)이 있어야 함. 이름이 맞는지는 BattleManager가 밸런스 데이터로 확인
+		if (Remainder.IsEmpty()) return false;
+		OutCommand.CommandType = ECommandType::Login;
 		return true;
 	}
 

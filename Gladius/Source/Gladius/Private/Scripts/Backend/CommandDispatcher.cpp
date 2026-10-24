@@ -7,15 +7,24 @@ void UCommandDispatcher::Execute(const FParsedCommand& Command)
 {
  ABattleManager* Battle = ResolveBattleManager();
  EBattleAction Action;
+ const FString DisplayName = Command.Username.IsEmpty() ? Command.UserId : Command.Username;
  if (FChatCommandParser::TryGetBattleAction(Command.CommandType, Action))
  {
-  if (IsValid(Battle) && Battle->IsBattleRunning() && SubmitBattleAction.IsBound())
-   SubmitBattleAction.Execute(Command.UserId, Command.Username.IsEmpty() ? Command.UserId : Command.Username, Action, TEXT(""));
+  //로그인(!로그인 <캐릭터>)한 유저의 전투 명령만 받는다. 명령만으로 자동 참가하지 않음
+  if (IsValid(Battle) && Battle->IsBattleRunning() && Battle->IsPlayerLoggedIn(Command.UserId) && SubmitBattleAction.IsBound())
+   SubmitBattleAction.Execute(Command.UserId, DisplayName, Action, TEXT(""));
+  else if (IsValid(Battle) && Battle->IsBattleRunning())
+   UE_LOG(LogTemp, Log, TEXT("[Battle] 로그인하지 않은 유저의 명령 무시: %s"), *Command.UserId);
+  return;
+ }
+ if (Command.CommandType == ECommandType::Login)
+ {
+  OnLoginCommand.Broadcast(Command.UserId, DisplayName, Command.Argument);
   return;
  }
  if (Command.CommandType == ECommandType::Logout)
  {
-  if (IsValid(Battle) && Battle->IsBattleRunning()) Battle->LogoutPlayer(Command.UserId);
+  OnLogoutCommand.Broadcast(Command.UserId);
   return;
  }
  const EGameState State = IsValid(Battle)
@@ -38,14 +47,27 @@ void UCommandDispatcher::BindBattleManager(ABattleManager* Manager)
 {
  if (BoundBattleManager.Get() == Manager && SubmitBattleAction.IsBound()) return;
  SubmitBattleAction.Unbind();
+ OnLoginCommand.Remove(LoginHandle);
+ OnLogoutCommand.Remove(LogoutHandle);
+ LoginHandle.Reset();
+ LogoutHandle.Reset();
  BoundBattleManager = Manager;
- if (IsValid(Manager)) SubmitBattleAction.BindUObject(Manager, &ABattleManager::SubmitAction);
+ if (IsValid(Manager))
+ {
+  SubmitBattleAction.BindUObject(Manager, &ABattleManager::SubmitAction);
+  LoginHandle = OnLoginCommand.AddUObject(Manager, &ABattleManager::HandleLoginCommand);
+  LogoutHandle = OnLogoutCommand.AddUObject(Manager, &ABattleManager::HandleLogoutCommand);
+ }
 }
 
 void UCommandDispatcher::UnbindBattleManager(ABattleManager* Manager)
 {
  if (BoundBattleManager.Get() != Manager) return;
  SubmitBattleAction.Unbind();
+ OnLoginCommand.Remove(LoginHandle);
+ OnLogoutCommand.Remove(LogoutHandle);
+ LoginHandle.Reset();
+ LogoutHandle.Reset();
  BoundBattleManager.Reset();
 }
 

@@ -10,6 +10,9 @@
 #include "FileHelpers.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionEditorLoaderAdapter.h"
+#include "WorldPartition/LoaderAdapter/LoaderAdapterShape.h"
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogGladiusLevelTool, Log, All);
@@ -122,6 +125,14 @@ int32 UGladiusLevelToolCommandlet::Main(const FString& Params)
 		return 1;
 	}
 
+	//World Partition 레벨은 항상 로드되는 액터만 열리므로, 전체 영역을 로드해 모든 액터를 다룰 수 있게 함
+	if (UWorldPartition* WorldPartition = World->GetWorldPartition())
+	{
+		const FBox Everything(FVector(-HALF_WORLD_MAX), FVector(HALF_WORLD_MAX));
+		UWorldPartitionEditorLoaderAdapter* Loader = WorldPartition->CreateEditorLoaderAdapter<FLoaderAdapterShape>(World, Everything, TEXT("GladiusLevelTool"));
+		Loader->GetLoaderAdapter()->Load();
+	}
+
 	bool bModified = false;
 	int32 Errors = 0;
 
@@ -169,7 +180,7 @@ int32 UGladiusLevelToolCommandlet::Main(const FString& Params)
 		{
 			TArray<FString> Parts;
 			Entry.ParseIntoArray(Parts, TEXT("|"));
-			FVector Loc; FRotator Rot; FVector Scale;
+			FVector Loc; FRotator Rot; FVector Scale = FVector::OneVector;
 			AActor* Actor = (Parts.Num() == 3 || Parts.Num() == 4) ? FindActorByLabel(World, Parts[0]) : nullptr;
 			if (!Actor || !ParseVector(Parts[1], Loc) || !ParseRotator(Parts[2], Rot)
 				|| (Parts.Num() == 4 && !ParseVector(Parts[3], Scale)))
@@ -217,6 +228,72 @@ int32 UGladiusLevelToolCommandlet::Main(const FString& Params)
 		}
 	}
 
+	//속성 설정
+	FString SetPropList;
+	if (FParse::Value(*Params, TEXT("setprop="), SetPropList, false))
+	{
+		TArray<FString> Entries;
+		SetPropList.ParseIntoArray(Entries, TEXT(";"));
+		for (const FString& Entry : Entries)
+		{
+			FString Label, Rest, PropName, Value;
+			AActor* Actor = nullptr;
+			FProperty* Property = nullptr;
+			if (Entry.Split(TEXT("|"), &Label, &Rest) && Rest.Split(TEXT("|"), &PropName, &Value))
+			{
+				Actor = FindActorByLabel(World, Label);
+				Property = Actor ? Actor->GetClass()->FindPropertyByName(FName(*PropName)) : nullptr;
+			}
+			if (!Property)
+			{
+				UE_LOG(LogGladiusLevelTool, Error, TEXT("setprop 대상/속성 오류: %s"), *Entry);
+				++Errors;
+				continue;
+			}
+			Actor->Modify();
+			if (!Property->ImportText_InContainer(*Value, Actor, Actor, PPF_None))
+			{
+				UE_LOG(LogGladiusLevelTool, Error, TEXT("setprop 값 오류: %s"), *Entry);
+				++Errors;
+				continue;
+			}
+			bModified = true;
+			UE_LOG(LogGladiusLevelTool, Display, TEXT("속성 설정: %s.%s"), *Label, *PropName);
+		}
+	}
+
+	//속성 출력
+	FString GetPropList;
+	if (FParse::Value(*Params, TEXT("getprop="), GetPropList, false))
+	{
+		FString Label, Names;
+		AActor* Actor = GetPropList.Split(TEXT("|"), &Label, &Names) ? FindActorByLabel(World, Label) : nullptr;
+		if (!Actor)
+		{
+			UE_LOG(LogGladiusLevelTool, Error, TEXT("getprop 대상 오류: %s"), *GetPropList);
+			++Errors;
+		}
+		else
+		{
+			TArray<FString> PropNames;
+			Names.ParseIntoArray(PropNames, TEXT(","));
+			for (const FString& PropName : PropNames)
+			{
+				if (FProperty* Property = Actor->GetClass()->FindPropertyByName(FName(*PropName)))
+				{
+					FString Text;
+					Property->ExportTextItem_InContainer(Text, Actor, nullptr, Actor, PPF_None);
+					UE_LOG(LogGladiusLevelTool, Display, TEXT("PROP|%s|%s|%s"), *Label, *PropName, *Text);
+				}
+				else
+				{
+					UE_LOG(LogGladiusLevelTool, Error, TEXT("속성 없음: %s.%s"), *Label, *PropName);
+					++Errors;
+				}
+			}
+		}
+	}
+
 	if (FParse::Param(*Params, TEXT("dump")))
 	{
 		DumpActors(World);
@@ -224,7 +301,8 @@ int32 UGladiusLevelToolCommandlet::Main(const FString& Params)
 
 	if (bModified && Errors == 0)
 	{
-		if (!UEditorLoadingAndSavingUtils::SaveMap(World, MapPath))
+		//World Partition 레벨은 액터가 별도 파일(__ExternalActors__)이라 바뀐 패키지를 모두 저장
+		if (!UEditorLoadingAndSavingUtils::SaveMap(World, MapPath) || !UEditorLoadingAndSavingUtils::SaveDirtyPackages(true, true))
 		{
 			UE_LOG(LogGladiusLevelTool, Error, TEXT("레벨 저장 실패: %s"), *MapPath);
 			return 1;

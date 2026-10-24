@@ -88,12 +88,26 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleManualFlowTest,"Gladius.Temple.Flow.Unli
 bool FTempleManualFlowTest::RunTest(const FString& Parameters)
 {
  FTempleTestWorld T;
+ T.Controller->CyclesBeforeCombat=0; //0 = 자동 이동 없음 (!전투·시간표로만 이동)
  for(int32 I=0;I<8;++I)FTempleFlowTestAccess::Cycle(T.Controller);
  TestEqual(TEXT("More than five cycles can run"),T.Controller->GetCompletedCycles(),8);
  TestFalse(TEXT("Cycles never request combat automatically"),FTempleFlowTestAccess::Leaving(T.Controller));
  T.Controller->RequestCombatTravel();
  TestTrue(TEXT("Manager takeover request pauses temple"),FTempleFlowTestAccess::Leaving(T.Controller));
  TestEqual(TEXT("Cycles stop after manual request"),T.Controller->GetCompletedCycles(),8);
+ return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleCycleLimitTest,"Gladius.Temple.Flow.CombatAfterCycles",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTempleCycleLimitTest::RunTest(const FString& Parameters)
+{
+ FTempleTestWorld T;
+ T.Controller->CyclesBeforeCombat=5;
+ for(int32 I=0;I<5;++I)FTempleFlowTestAccess::Cycle(T.Controller);
+ TestEqual(TEXT("Five cycles run"),T.Controller->GetCompletedCycles(),5);
+ TestFalse(TEXT("Fifth cycle plays out before leaving"),FTempleFlowTestAccess::Leaving(T.Controller));
+ FTempleFlowTestAccess::Cycle(T.Controller); //5번째 사이클이 끝나는 다음 타이머
+ TestTrue(TEXT("Combat is requested after five cycles"),FTempleFlowTestAccess::Leaving(T.Controller));
+ TestEqual(TEXT("No sixth cycle starts"),T.Controller->GetCompletedCycles(),5);
  return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleCommandTest,"Gladius.Temple.Flow.CombatCommand",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)

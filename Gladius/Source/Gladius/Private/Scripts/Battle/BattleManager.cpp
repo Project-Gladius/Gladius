@@ -9,7 +9,6 @@
 #include "Scripts/Backend/GameManager.h"
 #include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/UI/ChatLogWidget.h"
-#include "Scripts/UI/BattleDataResetWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
@@ -28,11 +27,6 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
-//키보드로 조종하는 더미 유저. AddTestPlayer가 0번에 붙이는 이름과 같아야
-//Q로 만들든 키로 만들든 이름표가 흔들리지 않는다
-static const FString DebugUserId = TEXT("@testuser00");
-static const FString DebugDisplayName = TEXT("테스터00");
-
 ABattleManager::ABattleManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -42,15 +36,6 @@ ABattleManager::ABattleManager()
 	TopHudWidgetClass = UBattleTopHudWidget::StaticClass();
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
-
-	StatusText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("StatusText"));
-	StatusText->SetupAttachment(RootComponent);
-	StatusText->SetUsingAbsoluteRotation(true);
-	//TextRender는 yaw 0이면 좌우가 뒤집혀 보인다
-	StatusText->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
-	StatusText->SetHorizontalAlignment(EHTA_Center);
-	StatusText->SetWorldSize(70.f);
-	StatusText->SetTextRenderColor(FColor::Yellow);
 
 	//밸런스 파일을 읽지 못했을 때만 쓰이는 기본값. 수치는 abilities.json 이 기준이다.
 	//배열 순서가 자리 배치의 앞뒤를 뜻한다 — 0번이 보스 쪽
@@ -89,7 +74,6 @@ void ABattleManager::BeginPlay()
  InitializePlayerRecords();
  if (!bAutoStartBattle)
  {
-  StatusText->SetVisibility(false);
   SetActorTickEnabled(false);
   return;
  }
@@ -150,24 +134,6 @@ void ABattleManager::BeginPlay()
    TopHudWidget->BindToBattleManager(this);
   }
  }
- if (bShowTemporaryDataResetButtons && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("MainBattle"))
- {
-  if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
-  {
-   DataResetWidget = CreateWidget<UBattleDataResetWidget>(PC, UBattleDataResetWidget::StaticClass());
-   if (DataResetWidget)
-   {
-    DataResetWidget->SetBattleManager(this);
-    DataResetWidget->AddToViewport(100);
-    DataResetController = PC;
-    bMouseCursorBeforeDataReset = PC->bShowMouseCursor;
-    PC->bShowMouseCursor = true;
-    FInputModeGameAndUI InputMode;
-    InputMode.SetHideCursorDuringCapture(false);
-    PC->SetInputMode(InputMode);
-   }
-  }
- }
  GatherSpots();
 
 	for (const FCharacterDef& Class : Classes)
@@ -186,15 +152,11 @@ void ABattleManager::BeginPlay()
 		UE_LOG(LogTemp, Warning, TEXT("[Battle] BossUnitClass가 비어 있습니다"));
 	}
 
-	BindActionKeys();
-	DrawArenaGuides();
 	StartBattle();
 }
 
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
- if (DataResetWidget) DataResetWidget->RemoveFromParent();
- if (DataResetController.IsValid()) DataResetController->bShowMouseCursor = bMouseCursorBeforeDataReset;
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
  if (LeaderboardWidget) LeaderboardWidget->RemoveFromParent();
  if (BossTelegraphWidget) BossTelegraphWidget->RemoveFromParent();
@@ -1049,26 +1011,6 @@ void ABattleManager::StartTurn()
 		Pair.Value.bActedThisTurn = false;
 	}
 
-	//채팅이 붙기 전까지, 키보드로 조종하는 한 명 말고는 무작위로 움직이게 둔다
-	if (bRandomizeTestPlayers)
-	{
-		for (TPair<FString, FBattlePlayer>& Pair : Players)
-		{
-			if (Pair.Key != DebugUserId && Pair.Value.ReviveCountdown == 0)
-			{
-				Pair.Value.PendingAction = (EBattleAction)FMath::RandRange(1, 6);
-				Pair.Value.bActedThisTurn = true;
-
-				//위 루프가 Idle을 쏴 둔 뒤라, 여기서 다시 알리지 않으면
-				//유닛은 끝까지 '무입력'으로 알고 준비 자세를 잡지 않는다
-				if (Pair.Value.Unit)
-				{
-					Pair.Value.Unit->NotifyActionSelected(Pair.Value.PendingAction);
-				}
-			}
-		}
-	}
-
 	//예고 자세. 플레이어가 자세만 보고도 피격 범위를 짐작할 수 있어야 한다
 	if (BossUnit)
 	{
@@ -1226,7 +1168,7 @@ void ABattleManager::StartSelectedGladiusAttack()
  CutSceneAttackUserId = CutSceneUserId;
  CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
  bCutSceneAttackCrit = FMath::FRand() < FMath::Min(Attack.CritChance + P->CritChanceBonus, CritChanceCap);
- P->Unit->NotifyAttack(AttackIndex, bCutSceneAttackCrit, true);
+ P->Unit->PerformSkill(AttackIndex, bCutSceneAttackCrit, true);
 }
 
 void ABattleManager::PlayNextCutScene()
@@ -1247,7 +1189,7 @@ void ABattleManager::PlayNextCutScene()
      const int32 AttackIndex = P->PendingAction == EBattleAction::Attack1 ? 1 : 2;
      const FAttackDef& Attack = Classes[P->ClassIndex].Attacks[AttackIndex - 1];
      bCutSceneAttackCrit = FMath::FRand() < FMath::Min(Attack.CritChance + P->CritChanceBonus, CritChanceCap);
-     P->Unit->NotifyAttack(AttackIndex, bCutSceneAttackCrit, true);
+     P->Unit->PerformSkill(AttackIndex, bCutSceneAttackCrit, true);
     }
    }
    RefreshPlayerUI();
@@ -1355,8 +1297,71 @@ bool ABattleManager::SetPlayerHealth(const FString& UserId, int32 CurrentHealth)
 
 void ABattleManager::LogoutPlayer(const FString& UserId)
 {
+ const FBattlePlayer* Player = Players.Find(UserId);
+ if (!Player)
+ {
+  return;
+ }
+ const FString DisplayName = Player->DisplayName;
+ //유닛이 사라지기 전에 퇴장 연출 기회를 줌
+ if (IsValid(Player->Unit)) Player->Unit->OnLoggedOut();
  RemovePlayer(UserId);
  SaveRecords();
+ UE_LOG(LogTemp, Log, TEXT("[Battle] 로그아웃: %s"), *UserId);
+ OnPlayerLoggedOut.Broadcast(UserId, DisplayName);
+}
+
+FString ABattleManager::ResolveCharacterId(const FString& NameOrId) const
+{
+ const FString Key = NameOrId.TrimStartAndEnd();
+ for (const FCharacterDef& Class : Classes)
+ {
+  if (Class.Id.Equals(Key, ESearchCase::IgnoreCase) || Class.Name.Equals(Key, ESearchCase::IgnoreCase)) return Class.Id;
+ }
+ //밸런스 파일 이름이 바뀌어도 채팅의 기본 이름은 받는다
+ if (Key == TEXT("글라디우스")) return TEXT("gladius");
+ if (Key == TEXT("세라")) return TEXT("sera");
+ return FString();
+}
+
+bool ABattleManager::LoginPlayer(const FString& UserId, const FString& DisplayName, const FString& CharacterName)
+{
+ if (UserId.TrimStartAndEnd().IsEmpty() || !bBattleRunning)
+ {
+  return false;
+ }
+ if (!IsAcceptingInput())
+ {
+  UE_LOG(LogTemp, Log, TEXT("[Battle] 입력 시간이 아니라 로그인 무시: %s"), *UserId);
+  return false;
+ }
+ if (Players.Contains(UserId))
+ {
+  UE_LOG(LogTemp, Log, TEXT("[Battle] 이미 로그인됨: %s (캐릭터 변경은 로그아웃 후 다시 로그인)"), *UserId);
+  return false;
+ }
+ const FString CharacterId = ResolveCharacterId(CharacterName);
+ if (CharacterId.IsEmpty())
+ {
+  UE_LOG(LogTemp, Log, TEXT("[Battle] 알 수 없는 캐릭터라 로그인 무시: %s '%s'"), *UserId, *CharacterName);
+  return false;
+ }
+
+ //기록이 있는 유저도 이번에 고른 캐릭터로 바꾼다 (강화 능력치는 유지)
+ InitializePlayerRecords();
+ FPlayerRecord& Record = GetOrCreateRecord(UserId, DisplayName, CharacterId);
+ Record.CharacterId = CharacterId;
+
+ //참가 처리(기록 반영·스폰·자리 배치)는 기존 SubmitAction이 담당. 로그인 자체는 '대기' 행동으로 들어간다
+ if (!SubmitAction(UserId, DisplayName, EBattleAction::Idle, CharacterId) || !Players.Contains(UserId))
+ {
+  UE_LOG(LogTemp, Log, TEXT("[Battle] 로그인 실패(정원 초과 등): %s"), *UserId);
+  return false;
+ }
+
+ UE_LOG(LogTemp, Log, TEXT("[Battle] 로그인: %s [%s]"), *UserId, *CharacterId);
+ OnPlayerLoggedIn.Broadcast(UserId, DisplayName, CharacterId);
+ return true;
 }
 
 const FCharacterMotionTimes& ABattleManager::MotionTimesFor(int32 ClassIndex) const
@@ -1559,11 +1564,8 @@ void ABattleManager::ResolveTurn()
 		FBattlePlayer& P = Pair.Value;
 		if (P.Unit && P.ReviveCountdown == 0 && P.PendingAction == EBattleAction::Defense)
 		{
-			P.Unit->OnDefend();
-
-			//펼치는 모션이 끝나면 밑에 깔린 '버티는 자세'가 드러나도록 한다.
-			//보스가 언제 칠지 모르니 길이를 정해 둘 수 없고, 상태라야 앞뒤로 블렌드된다
-			P.Unit->SetDefending(true);
+			//!방어 -> 캐릭터의 Defend (막는 모션 + 버티는 자세 상태)
+			P.Unit->Defend();
 		}
 	}
 
@@ -1897,7 +1899,7 @@ void ABattleManager::FlushAttackCues()
 						CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
 						bCutSceneAttackCrit = Cue.bCrit;
 					}
-					P->Unit->NotifyAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
+					P->Unit->PerformSkill(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
 				}
 
 				//평타는 스킬 모션이 끝난 뒤부터 이어진다. 그 길이를 AttackMotionSeconds가
@@ -2040,8 +2042,8 @@ void ABattleManager::BeginEvadeRolls()
 			? FMath::Lerp(From, P.TargetLocation, Covered / Remaining)
 			: From;
 
-		P.Unit->OnEvadeRoll(RollSeconds, Covered);
-		P.Unit->MoveTo(RollTo, RollSeconds, EMoveGait::Roll);
+		//!회피 좌/중/우 -> 캐릭터의 DodgeLeft/DodgeMid/DodgeRight
+		P.Unit->PerformDodge(P.PendingAction, RollTo, RollSeconds, Covered);
 	}
 }
 
@@ -2519,54 +2521,6 @@ void ABattleManager::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	//기본 폰트에 한글 글리프가 없어 이 표시판은 영문만 쓴다
-	const FString Header = FString::Printf(TEXT("Turn %d/%d   Players %d/%d   Damage %d"),
-		TurnIndex, Turns, Players.Num(), MaxPlayers, BossDamageTaken);
-
-	const float Remaining = GetWorldTimerManager().GetTimerRemaining(PhaseTimerHandle);
-
-	//구역마다 피해와 내성이 다르므로 좌·중·우를 나란히 보여준다
-	static const TCHAR* DisplayZoneNames[] = { TEXT("L"), TEXT("M"), TEXT("R") };
-	FString Zones;
-	for (int32 i = 0; i < 3; ++i)
-	{
-		Zones += FString::Printf(TEXT("  %s dmg %d P%.1f M%.1f"),
-			DisplayZoneNames[i], TelegraphedAction.DamageByZone[i],
-			ResistanceMultiplier(TelegraphedAction.ResistanceByZone[i].Physical),
-			ResistanceMultiplier(TelegraphedAction.ResistanceByZone[i].Magical));
-	}
-
-	const FString Telegraph = FString::Printf(TEXT("%s   hits %s (x%d)\n%s"),
-		*TelegraphedAction.TelegraphText, *ZonesLabel(TelegraphedAction),
-		TelegraphedAction.HitCount, *Zones);
-
-	FString Body;
-	switch (Phase)
-	{
-	case EBattlePhase::Prepare:
-	{
-		const FBattlePlayer* Me = Players.Find(DebugUserId);
-		const FString MyLine = Me
-			? FString::Printf(TEXT("%s: %s   HP %d/%d   Fever %d"), *DebugUserId,
-				*StaticEnum<EBattleAction>()->GetNameStringByValue((int64)Me->PendingAction),
-				Me->HP, Me->MaxHP, Me->Fever)
-			: FString::Printf(TEXT("%s: not joined"), *DebugUserId);
-
-		Body = FString::Printf(
-			TEXT("%s\nCHOOSE YOUR ACTION   %.1fs\n%s\n1=Idle 2=Attack1 3=Attack2  4=AvoidL 5=AvoidM 6=AvoidR 7=Defense\nQ=add front class  W=add back class  E=grant bonus"),
-			*Telegraph, Remaining, *MyLine);
-		break;
-	}
-	case EBattlePhase::Collect:
-		Body = FString::Printf(TEXT("%s\nCOLLECTING...   %.1fs"), *Telegraph, Remaining);
-		break;
-
-	default:
-		Body = LastTurnSummary.IsEmpty() ? TEXT("READY") : LastTurnSummary;
-		break;
-	}
-
-	StatusText->SetText(FText::FromString(Header + TEXT("\n") + Body));
 
 	// Screen-space widgets keep a constant pixel size unless we scale them explicitly.
 	PlayerUIScaleElapsed += DeltaTime;
@@ -2584,83 +2538,6 @@ void ABattleManager::Tick(float DeltaTime)
 			}
 		}
 	}
-}
-
-// ---------------- 입력 ----------------
-
-void ABattleManager::AddTestPlayer(const FString& CharacterId)
-{
-	const FString Id = FString::Printf(TEXT("@testuser%02d"), Players.Num());
-	//표시 이름을 한글로 둬서 UMG 이름표가 UTF-8을 제대로 그리는지 눈으로 확인한다.
-	//실제 핸들이 붙으면 이 줄은 사라진다
-	const FString Name = FString::Printf(TEXT("테스터%02d"), Players.Num());
-	SubmitAction(Id, Name, (EBattleAction)FMath::RandRange(1, 6), CharacterId);
-}
-
-void ABattleManager::GrantBonusToAll()
-{
-	for (TPair<FString, FBattlePlayer>& Pair : Players)
-	{
-		FPlayerRecord& Record = Records.FindOrAdd(Pair.Key);
-		Record.UserId = Pair.Key;
-		++Record.MaxHPBonus;
-		++Record.DamageBonus;
-		++Record.CritChanceBonus;
-		++Record.CritDamageBonus;
-
-		const int32 OldMax = Pair.Value.MaxHP;
-		ApplyRecordToPlayer(Record, Pair.Value);
-		SetPlayerHealth(Pair.Key, Pair.Value.HP + Pair.Value.MaxHP - OldMax);
-	}
-
-	SaveRecords();
-	UpdateVisuals();
-	UE_LOG(LogTemp, Log, TEXT("[Battle] 참여자 %d명 능력치 +1"), Players.Num());
-}
-
-void ABattleManager::BindActionKeys()
-{
-	APlayerController* PC = GetWorld()->GetFirstPlayerController();
-	if (!PC)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[Battle] PlayerController 없음 — 키 입력 비활성. Simulate 말고 Play로 실행하세요"));
-		return;
-	}
-
-	EnableInput(PC);
-	if (!InputComponent)
-	{
-		return;
-	}
-
-	//숫자 1~7 = EBattleAction 순서 그대로, DebugUserId 한 명을 조종한다
-	static const FKey ActionKeys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven };
-	for (int32 i = 0; i < UE_ARRAY_COUNT(ActionKeys); ++i)
-	{
-		FInputKeyBinding Binding(FInputChord(ActionKeys[i]), IE_Pressed);
-		Binding.bConsumeInput = false;
-		Binding.KeyDelegate.GetDelegateForManualSet().BindLambda(
-			[this, i]() { SubmitAction(DebugUserId, DebugDisplayName, (EBattleAction)i); });
-		InputComponent->KeyBindings.Emplace(MoveTemp(Binding));
-	}
-
-	//Q는 첫 번째 직업군, W는 마지막 직업군으로 더미를 넣는다. 앞뒤 배치를 눈으로 보려는 용도
-	FInputKeyBinding AddBinding(FInputChord(EKeys::Q), IE_Pressed);
-	AddBinding.bConsumeInput = false;
-	AddBinding.KeyDelegate.GetDelegateForManualSet().BindLambda(
-		[this]() { AddTestPlayer(Classes.Num() > 0 ? Classes[0].Id : FString()); });
-	InputComponent->KeyBindings.Emplace(MoveTemp(AddBinding));
-
-	FInputKeyBinding AddBackBinding(FInputChord(EKeys::W), IE_Pressed);
-	AddBackBinding.bConsumeInput = false;
-	AddBackBinding.KeyDelegate.GetDelegateForManualSet().BindLambda(
-		[this]() { AddTestPlayer(Classes.Num() > 0 ? Classes.Last().Id : FString()); });
-	InputComponent->KeyBindings.Emplace(MoveTemp(AddBackBinding));
-
-	FInputKeyBinding BonusBinding(FInputChord(EKeys::E), IE_Pressed);
-	BonusBinding.bConsumeInput = false;
-	BonusBinding.KeyDelegate.GetDelegateForManualSet().BindLambda([this]() { GrantBonusToAll(); });
-	InputComponent->KeyBindings.Emplace(MoveTemp(BonusBinding));
 }
 
 // ---------------- 순수 함수 ----------------

@@ -13,11 +13,15 @@ class ACutSceneApplier;
 class UChatLogWidget;
 class ULeaderboardRotatorWidget;
 class UBossTelegraphWidget;
-class UBattleDataResetWidget;
 class UBattleTopHudWidget;
 
 //보스가 다음 공격을 예고할 때. MotionId: 보스 행동 id(모션 키), TelegraphText: 암시 문구
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBossTelegraphSignature, const FString&, MotionId, const FString&, TelegraphText);
+
+//!로그인으로 전투에 참가했을 때. CharacterId: abilities.json의 직업 id (gladius / sera)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBattlePlayerLoggedIn, const FString&, UserId, const FString&, DisplayName, const FString&, CharacterId);
+//!로그아웃으로 전투에서 나갔을 때
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBattlePlayerLoggedOut, const FString&, UserId, const FString&, DisplayName);
 
 //BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
@@ -192,9 +196,6 @@ protected:
 public:
 	virtual void Tick(float DeltaTime) override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
-	TObjectPtr<UTextRenderComponent> StatusText;
-
 	// ---- 투기장 배치 ----
 
 	//이 액터의 위치가 투기장 중심. 보스는 항상 +X 끝에 선다
@@ -265,16 +266,16 @@ public:
 
 	//보스 행동 예고 시간. 보스 모션 길이에 맞춰야 하므로 임시값이다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float TelegraphSeconds = 5.f;
+	float TelegraphSeconds = 8.f;
 
 	//플레이어 행동 선택 카운트다운. 방송 지연이 있으므로 짧으면 반응이 안 온다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float PlayerSelectCountdown = 90.f;
+	float PlayerSelectCountdown = 32.f;
 
 	//카운트다운이 끝난 뒤 늦게 도착하는 채팅을 더 받는 시간.
 	//방송 지연 + API 폴링 간격보다 길어야 한다. 로그의 실측 지연을 보고 맞출 것
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float CollectSeconds = 6.f;
+	float CollectSeconds = 10.f;
 
 	//자리 이동과 돌진에 쓰는 시간. 이 시간이 지나면 판정 단계로 넘어간다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
@@ -441,10 +442,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Balance")
 	FString BalanceDataDir = TEXT("../Balancing/Data");
 
-	//채팅이 붙기 전까지 더미 유저들이 매 턴 무작위 행동을 고르게 한다
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
-	bool bRandomizeTestPlayers = false;
-
 	//에디터에서 자리 배치를 점으로 미리 보여준다. Play 없이 격자를 맞출 때 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
 	bool bPreviewSlots = true;
@@ -522,10 +519,6 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
  int32 HPPerBonus = 1;
 
- // Temporary buttons are only displayed in MainBattle.
- UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
- bool bShowTemporaryDataResetButtons = true;
-
  // Clears JSON records and removes matching participants. Test accounts use @testuser + digits.
  UFUNCTION(BlueprintCallable, Category = "Battle|Debug")
  bool ResetSavedUserData(bool bTestUsersOnly);
@@ -544,6 +537,27 @@ public:
 
  UFUNCTION(BlueprintCallable, Category = "Battle")
  void LogoutPlayer(const FString& UserId);
+
+ //!로그인 <캐릭터>: 고른 캐릭터로 전투에 참가. CharacterName은 "글라디우스"/"세라" 또는 직업 id
+ //입력 단계(Prepare/Collect)에만 받으며, 이미 참가 중이거나 정원이 차면 false
+ UFUNCTION(BlueprintCallable, Category = "Battle")
+ bool LoginPlayer(const FString& UserId, const FString& DisplayName, const FString& CharacterName);
+
+ UFUNCTION(BlueprintPure, Category = "Battle")
+ bool IsPlayerLoggedIn(const FString& UserId) const { return Players.Contains(UserId); }
+
+ //캐릭터 이름(한글 이름 또는 id)을 직업 id로. 모르는 이름이면 빈 문자열
+ FString ResolveCharacterId(const FString& NameOrId) const;
+
+ //채팅 디스패처의 OnLoginCommand / OnLogoutCommand 구독용
+ void HandleLoginCommand(const FString& UserId, const FString& DisplayName, const FString& CharacterName) { LoginPlayer(UserId, DisplayName, CharacterName); }
+ void HandleLogoutCommand(const FString& UserId) { LogoutPlayer(UserId); }
+
+ UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
+ FOnBattlePlayerLoggedIn OnPlayerLoggedIn;
+
+ UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
+ FOnBattlePlayerLoggedOut OnPlayerLoggedOut;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
  float BattleStartSeconds = 0.1f;
@@ -682,9 +696,6 @@ private:
  float InputPhaseDuration = 0.f;
  //전투씬 진입(BeginPlay)부터 나갈 때(EndPlay)까지의 유저별 누적. 판이 새로 시작돼도 유지
  FBattleSessionStats SessionStats;
- UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;
- TWeakObjectPtr<APlayerController> DataResetController;
- bool bMouseCursorBeforeDataReset = false;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
  bool bRecordLoadFailed = false;
@@ -789,18 +800,9 @@ private:
 	void UpdateVisuals();
 	void RefreshPlayerUI();
 	float PlayerUIScaleElapsed = 0.f;
-	void BindActionKeys();
 
 	//투기장 테두리와 레인 경계선. 표시만 하고 통행은 막지 않는다
 	void DrawArenaGuides() const;
-
-	//더미 유저 한 명을 무작위 행동으로 참가시킨다
-	//CharacterId를 비워두면 DefaultCharacterId로 들어간다
-	void AddTestPlayer(const FString& CharacterId = TEXT(""));
-
-	// ponytail: 성장 규칙이 미정이라 디버그 키로만 올린다.
-	// 실제 규칙이 정해지면 이 함수를 지우고 그 자리에 넣으면 된다
-	void GrantBonusToAll();
 
 	//기록의 강화 수치를 전투용 스냅샷에 반영한다
 	void ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const;
