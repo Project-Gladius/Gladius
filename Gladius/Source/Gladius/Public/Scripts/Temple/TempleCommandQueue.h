@@ -22,7 +22,11 @@ public:
 	//지금까지 쌓인 명령을 넘기고 큐를 비움 (다음 사이클 큐잉 시작)
 	FTempleCycleCommands TakeSnapshot();
 
-	// 유저당 신전에서 선택 가능한 축복 횟수
+	//유저의 남은 축복 횟수 조회 (TempleCycleController가 저장된 기록으로 연결)
+	//연결되면 '이번 사이클에 큐잉한 수 < 남은 횟수'일 때만 !강화를 받음
+	TFunction<int32(const FString& /*UserId*/)> GetRemainingBlessings;
+
+	//GetRemainingBlessings가 연결되지 않았을 때만 쓰는 신전 1회 방문당 축복 횟수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|Blessing", meta = (ClampMin = "0"))
 	int32 AvailableBless = 3;
 
@@ -42,6 +46,9 @@ private:
 
 	FTempleCycleCommands Current;
 	TMap<FString, int32> BlessSelectionsByUser;
+
+	//이번 사이클(스냅샷 전까지)에 유저별로 큐잉한 !강화 수
+	TMap<FString, int32> PendingBlessingsByUser;
 
 	//이미 처리한 채팅 Id (같은 채팅 중복 처리 방지)
 	TSet<FString> ProcessedTalkUids;

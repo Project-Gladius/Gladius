@@ -20,7 +20,8 @@
       "id": 1,
       "title": "회복",
       "relatedStat": "currentHp",
-      "displayText": "체력을 {HPGen}만큼 회복함"
+      "displayText": "체력을 {HPGen}만큼 회복함",
+      "amount": 1
     },
     {
       "id": 2,

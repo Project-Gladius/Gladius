@@ -489,6 +489,26 @@ bool FBattleBalance::LoadEnhancements(const FString& EnhancementsPath)
 		return false;
 	}
 
+	//축복 정의(선택). 회복 축복(id 1)의 amount만 수치로 쓴다. 나머지 축복은 perLevel 1단계씩
+	BlessingHealAmount = -1;
+	const TArray<TSharedPtr<FJsonValue>>* Blessings = nullptr;
+	if (Enhancements->TryGetArrayField(TEXT("blessings"), Blessings))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *Blessings)
+		{
+			const TSharedPtr<FJsonObject>* Blessing = nullptr;
+			int32 Id = 0;
+			if (Value->TryGetObject(Blessing) && (*Blessing)->TryGetNumberField(TEXT("id"), Id) && Id == 1
+				&& (*Blessing)->HasField(TEXT("amount")))
+			{
+				if (!GetInt(*Blessing, TEXT("amount"), EnhancementsPath, BlessingHealAmount, 0, 1000))
+				{
+					return false;
+				}
+			}
+		}
+	}
+
 	return true;
 }
 

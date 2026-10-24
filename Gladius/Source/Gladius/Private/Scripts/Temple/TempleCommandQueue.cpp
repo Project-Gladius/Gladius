@@ -48,6 +48,7 @@ void UTempleCommandQueue::ResetWindow(const FDateTime& WindowStartedAt)
 	Current.EnhanceTiers.SetNum(GTempleEnhanceTierCount);
 	Current.WindowStartedAt = WindowStartedAt;
 	CurrentTalkCharacterCount = 0;
+	PendingBlessingsByUser.Reset();
 	bWindowStarted = true;
 }
 
@@ -59,9 +60,17 @@ void UTempleCommandQueue::AddEnhance(const FString& UserId, const FString& Usern
 		return;
 	}
 
-	int32& Selections = BlessSelectionsByUser.FindOrAdd(UserId);
-	if (Selections >= AvailableBless) return;
-	++Selections;
+	//저장된 남은 축복 횟수 기준. 여신이 적용할 때 차감되므로 이번 사이클에 큐잉한 수만 빼고 비교
+	//연결이 없으면 신전 방문당 AvailableBless회
+	const bool bUseRecords = static_cast<bool>(GetRemainingBlessings);
+	const int32 Limit = bUseRecords ? GetRemainingBlessings(UserId) : AvailableBless;
+	int32& Used = bUseRecords ? PendingBlessingsByUser.FindOrAdd(UserId) : BlessSelectionsByUser.FindOrAdd(UserId);
+	if (Used >= Limit)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Temple] 남은 축복이 없어 !강화 무시: %s"), *UserId);
+		return;
+	}
+	++Used;
 	FParsedCommand Command;
 	Command.CommandType = static_cast<ECommandType>(static_cast<uint8>(ECommandType::Enhance1) + Tier - 1);
 	Command.UserId = UserId;

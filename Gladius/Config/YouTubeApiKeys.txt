@@ -1,0 +1,16 @@
+# YouTube Data API 키 목록 - 한 줄에 키 하나, 위에서부터 차례로 사용
+# 지금 키의 하루 할당량이 바닥나면 다음 키로 자동 교체 (할당량은 한국 시간 오후 4~5시 초기화)
+# 키마다 서로 다른 Google Cloud 프로젝트에서 만들어야 함
+# 팀 공용 파일 (GitHub에 함께 올라감). 키를 추가하면 커밋해서 공유
+AIzaSyAN188Sao-Q1jUAY91rmOKqUmhy-UsUhZA
+AIzaSyCUFsS_du2YVk7XY7HuRdnK1cjlCHtCVng
+AIzaSyACQYQsdETX5jKS5Oa68uZlH-VxM-P4wJY
+AIzaSyDf6F6NgLrYXPju9MC0WRUO682BUGOqCTc
+AIzaSyCuFmVv1KXh30KpmUiS1UdpcMvj70l9u_k
+AIzaSyB_MwvOIFijqC6W43o7HrQTxWqjr7hTpu0
+AIzaSyCfvt2lYBurXZ4Mu85CJhr0ciq8r5IUUIM
+AIzaSyAOKAbE4f-iq8qcFJbTOudBhot_mMlKkp8
+AIzaSyAT_rxiZfOlb62EKrU0t7NKDtoS9bFzKaE
+AIzaSyBIt4aJob6kodXCjQlzM2MQ1eoR1PBV4hQ
+AIzaSyB4euOlzRxjfmBqrIaL-gclioTh9YxaEhA
+AIzaSyBh33-PHrfSuZxYc0-mO7juBiE2KIz-lsw

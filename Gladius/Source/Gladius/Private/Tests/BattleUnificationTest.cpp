@@ -16,9 +16,9 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
-#include "Scripts/UI/BattleDataResetWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
+#include "Scripts/UI/BattleDataResetWidget.h"
 #include "Components/InputComponent.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
 #include "Scripts/Battle/BattleUnit.h"
@@ -44,7 +44,6 @@ struct FBattleUnificationTestAccess
   P.PendingAction=EBattleAction::AvoidR;
   B->Players.Add(Id,P);
  }
- static void BindKeys(ABattleManager* B) { B->BindActionKeys(); }
  static bool PressKey(ABattleManager* B, FKey Key)
  {
   if (!B->InputComponent) return false;
@@ -95,7 +94,6 @@ struct FUnifiedBattleWorld
   World->InitializeActorsForPlay(FURL());
   Battle = World->SpawnActor<ABattleManager>();
   Battle->bUseBalanceFiles = false;
-  Battle->bRandomizeTestPlayers = false;
   Battle->bEnableTurnCutScenes = false;
   Path = FPaths::ProjectSavedDir() / TEXT("Automation") / (FGuid::NewGuid().ToString() + TEXT(".json"));
   IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
@@ -113,13 +111,26 @@ struct FUnifiedBattleWorld
   Instance->RemoveFromRoot();
   IFileManager::Get().Delete(*Path);
  }
- bool Dispatch(const FString& User, const FString& Text)
+ //채팅 한 줄을 실제 디스패처로 그대로 보냄 (로그인 확인 포함)
+ bool DispatchRaw(const FString& User, const FString& Text)
  {
   FParsedCommand C;
   if (!FChatCommandParser::TryParse(User, Text, C)) return false;
   C.Username = TEXT("Visible name");
   Chat->GetCommandDispatcher()->Execute(C);
   return true;
+ }
+ //전투 명령 전에 아직 로그인하지 않았으면 실제 시청자처럼 '!로그인 글라디우스'를 먼저 보냄
+ bool Dispatch(const FString& User, const FString& Text)
+ {
+  FParsedCommand C;
+  EBattleAction Action;
+  if (FChatCommandParser::TryParse(User, Text, C) && FChatCommandParser::TryGetBattleAction(C.CommandType, Action)
+   && !Battle->IsPlayerLoggedIn(User))
+  {
+   DispatchRaw(User, TEXT("!로그인 글라디우스"));
+  }
+  return DispatchRaw(User, Text);
  }
 };
 }
@@ -177,17 +188,20 @@ bool FUnifiedBattleRoutingTest::RunTest(const FString& Parameters)
  B->MaxPlayers = 1;
  B->StartBattle();
  TestTrue(TEXT("Starts in BattleStart"), B->Phase == EBattlePhase::BattleStart);
- T.Dispatch(TEXT("A"), TEXT("!공격 1"));
- TestEqual(TEXT("No join before preparation"), B->GetBattlePlayers().Num(), 0);
+ T.DispatchRaw(TEXT("A"), TEXT("!로그인 글라디우스"));
+ TestEqual(TEXT("No login before preparation"), B->GetBattlePlayers().Num(), 0);
  FBattleUnificationTestAccess::Prepare(B);
  TestTrue(TEXT("Telegraph belongs to Prepare"), B->Phase == EBattlePhase::Prepare);
- T.Dispatch(TEXT("A"), TEXT("!공격 1"));
- TestEqual(TEXT("Dispatcher joins through BattleManager"), B->GetBattlePlayers().Num(), 1);
+ T.DispatchRaw(TEXT("A"), TEXT("!공격 1"));
+ TestEqual(TEXT("Battle command without login is ignored"), B->GetBattlePlayers().Num(), 0);
+ T.DispatchRaw(TEXT("A"), TEXT("!로그인 글라디우스"));
+ TestEqual(TEXT("Login joins through BattleManager"), B->GetBattlePlayers().Num(), 1);
+ T.DispatchRaw(TEXT("A"), TEXT("!공격 1"));
  const FBattlePlayer* P = B->GetBattlePlayers().Find(TEXT("A"));
  if (!TestNotNull(TEXT("Player exists"), P)) return false;
  TestEqual(TEXT("Display name preserved"), P->DisplayName, FString(TEXT("Visible name")));
  TestTrue(TEXT("Attack one routed"), P->PendingAction == EBattleAction::Attack1);
- T.Dispatch(TEXT("B"), TEXT("!공격 2"));
+ T.DispatchRaw(TEXT("B"), TEXT("!로그인 세라"));
  TestEqual(TEXT("Single participation limit"), B->GetBattlePlayers().Num(), 1);
  FBattleUnificationTestAccess::Select(B);
  TestTrue(TEXT("Selection remains Prepare"), B->Phase == EBattlePhase::Prepare);
@@ -209,8 +223,49 @@ bool FUnifiedBattleRoutingTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Logout removes actual participant"), B->GetBattlePlayers().Num(), 0);
  TestNotNull(TEXT("Logout preserves persistent record"), FBattleUnificationTestAccess::Record(B,TEXT("A")));
  B->StopBattle();
- T.Dispatch(TEXT("A"), TEXT("!공격 1"));
+ T.DispatchRaw(TEXT("A"), TEXT("!로그인 글라디우스"));
  TestEqual(TEXT("Stopped battle rejects participation"), B->GetBattlePlayers().Num(), 0);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleLoginLogoutTest, "Gladius.BattleUnified.LoginLogout",
+ EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBattleLoginLogoutTest::RunTest(const FString& Parameters)
+{
+ FParsedCommand Parsed;
+ TestTrue(TEXT("Login command parses"), FChatCommandParser::TryParse(TEXT("u"), TEXT("!로그인 세라"), Parsed));
+ TestTrue(TEXT("Login command type"), Parsed.CommandType == ECommandType::Login);
+ TestEqual(TEXT("Login carries character name"), Parsed.Argument, FString(TEXT("세라")));
+ TestFalse(TEXT("Login needs a character"), FChatCommandParser::TryParse(TEXT("u"), TEXT("!로그인"), Parsed));
+ TestTrue(TEXT("Logout still parses"), FChatCommandParser::TryParse(TEXT("u"), TEXT("!로그아웃"), Parsed) && Parsed.CommandType == ECommandType::Logout);
+
+ FUnifiedBattleWorld T;
+ auto* B = T.Battle;
+ B->StartBattle();
+ FBattleUnificationTestAccess::Prepare(B);
+ TestEqual(TEXT("Korean name resolves to class id"), B->ResolveCharacterId(TEXT("글라디우스")), FString(TEXT("gladius")));
+
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 기사"));
+ TestFalse(TEXT("Unknown character cannot log in"), B->IsPlayerLoggedIn(TEXT("u")));
+
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 세라"));
+ TestTrue(TEXT("Login joins the battle"), B->IsPlayerLoggedIn(TEXT("u")));
+ const FPlayerRecord* Record = FBattleUnificationTestAccess::Record(B, TEXT("u"));
+ TestTrue(TEXT("Chosen character is recorded"), Record && Record->CharacterId == TEXT("sera"));
+
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 글라디우스"));
+ Record = FBattleUnificationTestAccess::Record(B, TEXT("u"));
+ TestTrue(TEXT("Logged-in user keeps character until logout"), Record && Record->CharacterId == TEXT("sera"));
+
+ T.DispatchRaw(TEXT("u"), TEXT("!회피 좌"));
+ TestTrue(TEXT("Logged-in command reaches the player"), B->GetBattlePlayers().FindChecked(TEXT("u")).PendingAction == EBattleAction::AvoidL);
+
+ T.DispatchRaw(TEXT("u"), TEXT("!로그아웃"));
+ TestFalse(TEXT("Logout leaves the battle"), B->IsPlayerLoggedIn(TEXT("u")));
+
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 글라디우스"));
+ Record = FBattleUnificationTestAccess::Record(B, TEXT("u"));
+ TestTrue(TEXT("Re-login switches character"), B->IsPlayerLoggedIn(TEXT("u")) && Record && Record->CharacterId == TEXT("gladius"));
  return true;
 }
 
@@ -423,8 +478,9 @@ bool FYouTubeBattleSubscriptionTest::RunTest(const FString& Parameters)
  auto* Dispatcher=T.Chat->GetCommandDispatcher();
  Dispatcher->BindBattleManager(B);
  Dispatcher->BindBattleManager(B);
+ T.Chat->OnReceiveYouTubeCommentWithUsername(TEXT("yt-login"),TEXT("yt-viewer"),TEXT("YouTube name"),TEXT("!로그인 세라"));
  T.Chat->OnReceiveYouTubeCommentWithUsername(TEXT("yt-first"),TEXT("yt-viewer"),TEXT("YouTube name"),TEXT("!공격 1"));
- TestEqual(TEXT("Received YouTube chat joins exactly one player"),B->GetBattlePlayers().Num(),1);
+ TestEqual(TEXT("Received YouTube login joins exactly one player"),B->GetBattlePlayers().Num(),1);
  auto* Player=B->GetBattlePlayers().Find(TEXT("yt-viewer"));
  if (!TestNotNull(TEXT("Subscribed receiver reached BattleManager"),Player)) return false;
  TestEqual(TEXT("YouTube display name carried through parser"),Player->DisplayName,FString(TEXT("YouTube name")));
@@ -785,11 +841,10 @@ bool FKeyboardSkillRejectsRollTest::RunTest(const FString& Parameters)
   if(!TestNotNull(TEXT("Animation instance exists"),Anim)) return false;
   auto* Roll=LoadObject<UAnimMontage>(nullptr,TEXT("/Game/Asset/Battle/gladius/AnimationMontage/AM_Gladius_Roll.AM_Gladius_Roll"));
   T.World->SpawnActor<APlayerController>();
-  FBattleUnificationTestAccess::BindKeys(B);
   Anim->Montage_Play(Roll);
   TestTrue(TEXT("Reproduction begins with an active Roll montage"),Anim->Montage_IsPlaying(Roll));
-  TestTrue(TEXT("Actual numeric skill key is bound"),FBattleUnificationTestAccess::PressKey(B,Skill==1?EKeys::Two:EKeys::Three));
-  TestTrue(TEXT("Numeric key selects the requested skill"),Subject->GetSelectedAction()==(Skill==1?EBattleAction::Attack1:EBattleAction::Attack2));
+  TestTrue(TEXT("Skill command is accepted"),B->SubmitAction(TEXT("@testuser00"),TEXT("Keyboard user"),Skill==1?EBattleAction::Attack1:EBattleAction::Attack2));
+  TestTrue(TEXT("Command selects the requested skill"),Subject->GetSelectedAction()==(Skill==1?EBattleAction::Attack1:EBattleAction::Attack2));
   TestFalse(TEXT("Selecting a skill immediately stops an existing Roll montage"),Anim->Montage_IsPlaying(Roll));
   Subject->OnEvadeRoll(0.8f,200.f);
   TestFalse(TEXT("Roll animation request cannot play during a selected skill"),Anim->Montage_IsPlaying(Roll));

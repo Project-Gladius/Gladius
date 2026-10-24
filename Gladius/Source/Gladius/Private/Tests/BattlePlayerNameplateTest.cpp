@@ -75,7 +75,10 @@ struct FPlayerNameplateTestAccess
 		Test.TestEqual(TEXT("Other actions hide details"), UI->CritChanceText->GetVisibility(), ESlateVisibility::Collapsed);
 		Test.TestEqual(TEXT("Other actions hide critical icons"), UI->CritDamageIcon->GetVisibility(), ESlateVisibility::Collapsed);
 		Test.TestEqual(TEXT("Migrated default layout retained"), Cast<UCanvasPanelSlot>(UI->HealthText->Slot)->GetPosition(), UI->DefaultLayout.HealthText.Position);
-		Test.TestEqual(TEXT("Result icon position is invariant"), Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition(), IconPosition);
+		//행동 페이지마다 아이콘 위치는 디자이너가 따로 정함. 데이터 갱신으로 그 위치가 움직이지 않아야 함
+		const FVector2D DefenseIconPosition=Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition();
+		UI->SetDisplayData(Data);
+		Test.TestEqual(TEXT("Result icon keeps designer position on refresh"), Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition(), DefenseIconPosition);
 		Test.TestNull(TEXT("No stale result texture"), UI->ActionIcon->GetBrush().GetResourceObject());
 		Data.HP=100; Data.MaxHP=100; UI->SetDisplayData(Data);
 		Test.TestEqual(TEXT("Invalid legacy HP is clamped"), UI->HealthText->GetText().ToString(), FString(TEXT("HP 6/6")));

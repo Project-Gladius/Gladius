@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Interfaces/IHttpRequest.h"
 #include "GladiusTypes.h"
+#include "Scripts/Backend/YouTubeApiKeyPool.h"
 #include "YouTubeChatManager.generated.h"
 
 class UCommandDispatcher;
@@ -46,6 +47,8 @@ protected:
 public:
 	virtual void Tick(float DeltaTime) override;
 
+	//키 목록은 Config/YouTubeApiKeys.txt에서 읽음 (할당량이 바닥나면 다음 키로 교체)
+	//이 값은 목록의 맨 뒤에 붙는 예비 키. 파일이 없으면 이 키 하나만 씀
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
 	FString ApiKey;
 
@@ -105,7 +108,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "YouTube")
 	void OnReceiveYouTubeCommentWithUsername(FString CommentId, FString UserId, FString Username, FString Content);
 
+	//API 응답이 '이 키로는 더 못 씀'(할당량 초과, 잘못된 키, API 미사용 설정)인지
+	static bool IsKeyUnusableResponse(int32 ResponseCode, const FString& Body);
+
 private:
+	//API 키 목록 (게임 인스턴스의 ChatLogSubsystem에 있음. 없으면 LocalKeyPool)
+	FYouTubeApiKeyPool* KeyPool = nullptr;
+	FYouTubeApiKeyPool LocalKeyPool;
+	void InitializeKeyPool();
+	FString CurrentApiKey();
+	//UsedKey가 쓸 수 없다고 표시. 다른 키가 남아 있으면 true
+	bool SwitchApiKey(const FString& UsedKey, const FString& Body);
+	bool bLiveChatIdInFlight = false;
+
 	//현재 전투/신전 상태를 들고 있는 GameManager 참조. 에디터에서 직접 지정하지 않으면 BeginPlay에서 월드를 검색해 채움
 	UPROPERTY(EditInstanceOnly, Category = "Game State")
 	TObjectPtr<AGameManager> GameManagerRef;
@@ -128,10 +143,10 @@ private:
 
 	//Http 요청 응답 및 콜백 함수
 	void RequestLiveChatId();
-	void OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+	void OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, FString UsedKey);
 
 	void RequestMessages();
-	void OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+	void OnChatMessagesResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, FString UsedKey);
 	void FinishFetch(bool bSuccess, float NextPollDelay);
 
 	//채팅 한 건 처리. PostedAt: 채팅이 올라온 시각 (도배 판정 기준)

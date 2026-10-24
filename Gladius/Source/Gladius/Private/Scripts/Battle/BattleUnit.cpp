@@ -456,3 +456,63 @@ void ABattleUnit::ApplyLabel()
 		Widget->SetText(PendingLabel);
 	}
 }
+
+// ===== 전투 명령 실행 함수 (C++ 기본 구현) =====
+
+void ABattleUnit::DodgeLeft_Implementation(const FVector& RollTo, float RollSeconds, float RollDistance)
+{
+	OnEvadeRoll(RollSeconds, RollDistance);
+	MoveTo(RollTo, RollSeconds, EMoveGait::Roll);
+}
+
+void ABattleUnit::DodgeMid_Implementation(const FVector& RollTo, float RollSeconds, float RollDistance)
+{
+	OnEvadeRoll(RollSeconds, RollDistance);
+	MoveTo(RollTo, RollSeconds, EMoveGait::Roll);
+}
+
+void ABattleUnit::DodgeRight_Implementation(const FVector& RollTo, float RollSeconds, float RollDistance)
+{
+	OnEvadeRoll(RollSeconds, RollDistance);
+	MoveTo(RollTo, RollSeconds, EMoveGait::Roll);
+}
+
+void ABattleUnit::CastSkill1_Implementation(bool bCrit, bool bFeverHighlight)
+{
+	NotifyAttack(1, bCrit, bFeverHighlight);
+}
+
+void ABattleUnit::CastSkill2_Implementation(bool bCrit, bool bFeverHighlight)
+{
+	NotifyAttack(2, bCrit, bFeverHighlight);
+}
+
+void ABattleUnit::Defend_Implementation()
+{
+	OnDefend();
+	//펼치는 모션이 끝나면 밑에 깔린 '버티는 자세'가 드러나도록 상태로 둔다
+	SetDefending(true);
+}
+
+void ABattleUnit::PerformDodge(EBattleAction Action, const FVector& RollTo, float RollSeconds, float RollDistance)
+{
+	switch (Action)
+	{
+	case EBattleAction::AvoidL: DodgeLeft(RollTo, RollSeconds, RollDistance); break;
+	case EBattleAction::AvoidM: DodgeMid(RollTo, RollSeconds, RollDistance); break;
+	case EBattleAction::AvoidR: DodgeRight(RollTo, RollSeconds, RollDistance); break;
+	default: break;
+	}
+}
+
+void ABattleUnit::PerformSkill(int32 AttackIndex, bool bCrit, bool bFeverHighlight)
+{
+	if (AttackIndex == 2)
+	{
+		CastSkill2(bCrit, bFeverHighlight);
+	}
+	else
+	{
+		CastSkill1(bCrit, bFeverHighlight);
+	}
+}
