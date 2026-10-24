@@ -40,15 +40,15 @@ namespace
 void UBattlePlayerNameplate::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
-	SetPanelDimensions(FVector2D(300.f, 200.f));
+	if (!IsDesignTime()) SetPanelDimensions(FVector2D(300.f, 200.f));
 	RefreshAppearance();
 }
 
 void UBattlePlayerNameplate::NativePreConstruct()
 {
 	Super::NativePreConstruct();
-	// Rebuilds start from a fixed base size, independently of saved BP values or prior instances.
-	SetPanelDimensions(FVector2D(300.f, 200.f));
+	// Runtime uses a fixed base size; the Designer owns its preview dimensions.
+	if (!IsDesignTime()) SetPanelDimensions(FVector2D(300.f, 200.f));
 	if (IsDesignTime()) Data = PreviewData;
 	RefreshAppearance();
 }
@@ -58,9 +58,25 @@ void UBattlePlayerNameplate::ResolveDesignerWidgets()
 	if (!WidgetTree) return;
 	PanelSizeBox = Cast<USizeBox>(WidgetTree->FindWidget(TEXT("PlateSize")));
 	Panel = Cast<UBorder>(WidgetTree->FindWidget(TEXT("PlatePanel")));
-	const FString Prefix = ActionPrefix(Data.Action);
+	FString Prefix = ActionPrefix(Data.Action);
 	if (UWidgetSwitcher* Pages = Cast<UWidgetSwitcher>(WidgetTree->FindWidget(TEXT("ActionPages"))))
-		if (UWidget* Page = WidgetTree->FindWidget(FName(*(TEXT("State_") + Prefix)))) Pages->SetActiveWidget(Page);
+	{
+		if (IsDesignTime())
+		{
+			// Keep the state selected in the Designer instead of resetting to PreviewData.Action.
+			if (UWidget* SelectedPage = Pages->GetActiveWidget())
+				for (EBattleAction Action : {EBattleAction::Idle, EBattleAction::Attack1, EBattleAction::Attack2,
+					EBattleAction::AvoidL, EBattleAction::AvoidM, EBattleAction::AvoidR, EBattleAction::Defense})
+					if (SelectedPage->GetFName() == FName(*(TEXT("State_") + ActionPrefix(Action))))
+					{
+						Data.Action = Action;
+						Prefix = ActionPrefix(Action);
+						break;
+					}
+		}
+		else if (UWidget* Page = WidgetTree->FindWidget(FName(*(TEXT("State_") + Prefix))))
+			Pages->SetActiveWidget(Page);
+	}
 	auto Find = [&](const TCHAR* Name) { return WidgetTree->FindWidget(FName(*(Prefix + TEXT("_") + Name))); };
 	NameText = Cast<UTextBlock>(Find(TEXT("PlayerName")));
 	HealthIcon = Cast<UImage>(Find(TEXT("HealthIcon")));
