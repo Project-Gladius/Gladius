@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -499,15 +499,15 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
 
- //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대)
+ //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<ULeaderboardRotatorWidget> LeaderboardWidgetClass;
 
- //상단 중앙 보스 행동 암시 텍스트
+ //보스 행동 암시 텍스트. 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UBossTelegraphWidget> BossTelegraphWidgetClass;
 
- //최상단 중앙 상단 UI (턴, 안내 문구, 게이지, 남은 시간)
+ //최상단 중앙 상단 UI (턴, 안내 문구, 게이지, 남은 시간). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UBattleTopHudWidget> TopHudWidgetClass;
 
@@ -709,6 +709,9 @@ private:
  FString CutSceneAttackUserId;
  float CutSceneAttackStartTime = 0.f;
  bool bCutSceneAttackCrit = false;
+ // Keep the selected Gladius on walk/run speed choices through this turn's return movement.
+ TWeakObjectPtr<ABattleUnit> WalkRunOnlyCutSceneUnit;
+ EMoveGait ChooseMovementGait(const ABattleUnit* Unit, float Distance, float Seconds) const;
  void HandleSelectedGladiusAttackStarted(int32 AttackIndex);
  void StartSelectedGladiusAttack();
  void StartMoveCutScenes();
@@ -808,6 +811,9 @@ private:
 
 	//이번 턴 보스 행동. 패턴이 끝났으면 새 패턴을 먼저 뽑는다
 	FBossAction NextBossAction();
+
+	//입력 종료 후, 회피 이동과 피버 증감 전에 단 한 번 확정한다.
+	void ResolveBattleStartTarget();
 
 	//남은 턴에 들어가는 패턴 중 가중 랜덤으로 하나. 못 고르면 nullptr.
 	//PreviousId는 직전에 끝난 패턴 (연속 재선택 금지에 쓴다)

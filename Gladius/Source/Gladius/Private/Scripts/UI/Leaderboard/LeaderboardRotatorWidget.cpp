@@ -2,6 +2,7 @@
 #include "Scripts/UI/Leaderboard/LeaderboardBoardWidget.h"
 #include "Scripts/UI/Leaderboard/LeaderboardBuilder.h"
 #include "Scripts/Battle/BattleManager.h"
+#include "Scripts/UI/UIWidgetBuild.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -10,7 +11,16 @@
 void ULeaderboardRotatorWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
-	BuildWidgetTree();
+
+	//Designer에서 만든 레이아웃이 없을 때(C++ 클래스 단독 사용)만 기본 레이아웃 생성
+	if (WidgetTree && !WidgetTree->RootWidget)
+	{
+		BuildDefaultLayout(WidgetTree);
+	}
+	if (!Board && WidgetTree)
+	{
+		Board = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("Board")));
+	}
 }
 
 void ULeaderboardRotatorWidget::NativeConstruct()
@@ -41,35 +51,33 @@ void ULeaderboardRotatorWidget::BindToBattleManager(ABattleManager* InBattleMana
 	RefreshCurrentPage();
 }
 
-void ULeaderboardRotatorWidget::BuildWidgetTree()
+void ULeaderboardRotatorWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 {
-	if (!WidgetTree || WidgetTree->RootWidget)
+	if (!Tree)
 	{
 		return;
 	}
 
-	UCanvasPanel* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
-	WidgetTree->RootWidget = Canvas;
+	UCanvasPanel* Canvas = GladiusUI::ConstructNamed<UCanvasPanel>(Tree, TEXT("RootCanvas"));
+	Tree->RootWidget = Canvas;
 
-	if (!BoardWidgetClass)
-	{
-		BoardWidgetClass = ULeaderboardBoardWidget::StaticClass();
-	}
-	Board = CreateWidget<ULeaderboardBoardWidget>(this, BoardWidgetClass);
-	if (!Board)
+	const TSubclassOf<ULeaderboardBoardWidget> BoardClass = GladiusUI::ResolveWidgetClass<ULeaderboardBoardWidget>(BoardWidgetClass, GladiusUI::AssetPaths::LeaderboardBoard);
+	ULeaderboardBoardWidget* BoardWidget = Tree->ConstructWidget<ULeaderboardBoardWidget>(BoardClass, TEXT("Board"));
+	if (!BoardWidget)
 	{
 		return;
 	}
+	BoardWidget->bIsVariable = true;
 
 	//좌측 상단 고정. 크기는 내용에 맞추고 배율만 조정해 글자가 잘리지 않게 함
-	UCanvasPanelSlot* BoardSlot = Canvas->AddChildToCanvas(Board);
+	UCanvasPanelSlot* BoardSlot = Canvas->AddChildToCanvas(BoardWidget);
 	BoardSlot->SetAnchors(FAnchors(0.0f, 0.0f));
 	BoardSlot->SetAlignment(FVector2D(0.0f, 0.0f));
 	BoardSlot->SetPosition(ScreenOffset);
 	BoardSlot->SetAutoSize(true);
 
-	Board->SetRenderTransformPivot(FVector2D(0.0f, 0.0f));
-	Board->SetRenderScale(FVector2D(BoardScale, BoardScale));
+	BoardWidget->SetRenderTransformPivot(FVector2D(0.0f, 0.0f));
+	BoardWidget->SetRenderScale(FVector2D(BoardScale, BoardScale));
 }
 
 void ULeaderboardRotatorWidget::AdvancePage()
