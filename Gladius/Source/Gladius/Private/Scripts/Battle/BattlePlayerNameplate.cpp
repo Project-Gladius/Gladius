@@ -161,7 +161,27 @@ bool UBattlePlayerNameplate::ConvertToDesignerBlueprint(UObject* Asset)
 	UWidgetBlueprint* BP = Cast<UWidgetBlueprint>(Asset);
 	if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(StaticClass()) || !BP->WidgetTree) return false;
 	UWidgetTree* Tree = BP->WidgetTree;
-	if (Tree->FindWidget(TEXT("ActionPages"))) return true;
+	if (Tree->FindWidget(TEXT("ActionPages")))
+	{
+		UCanvasPanel* Root = Cast<UCanvasPanel>(Tree->FindWidget(TEXT("PlateCanvas")));
+		if (!Root) return false;
+		BP->Modify(); Tree->Modify();
+		UImage* Icon = Cast<UImage>(Tree->FindWidget(TEXT("SharedActionIcon")));
+		if (!Icon)
+		{
+			Icon = Tree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("SharedActionIcon"));
+			const auto* Defaults = BP->GeneratedClass->GetDefaultObject<UBattlePlayerNameplate>();
+			UCanvasPanelSlot* Slot = Root->AddChildToCanvas(Icon);
+			Slot->SetPosition(Defaults->ActionIconPlacement.Position);
+			Slot->SetSize(Defaults->ActionIconPlacement.Size);
+		}
+		if (!BP->WidgetVariableNameToGuidMap.Contains(Icon->GetFName()))
+			BP->OnVariableAdded(Icon->GetFName());
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+		FKismetEditorUtilities::CompileBlueprint(BP);
+		BP->MarkPackageDirty();
+		return BP->Status != BS_Error;
+	}
 	// Never replace a user-authored hierarchy.
 	if (Tree->RootWidget) return false;
 	const UBattlePlayerNameplate* Defaults = BP->GeneratedClass->GetDefaultObject<UBattlePlayerNameplate>();
