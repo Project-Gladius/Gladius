@@ -70,6 +70,14 @@ struct FPlayerRecordFile
 	UPROPERTY() TArray<FPlayerRecord> Records;
 };
 
+//보스에게 들어간 타격 한 대. 피해는 ResolveTurn에서 정해지고, 화면에는
+//블루프린트가 '지금 맞았다'고 알리는 순간(ABattleUnit::ReportHit) 하나씩 나간다
+struct FPendingHit
+{
+	int32 Damage = 0;
+	bool bCrit = false;
+};
+
 USTRUCT()
 struct FBattlePlayer
 {
@@ -117,8 +125,18 @@ struct FBattlePlayer
 	//보스가 실제로 휘두르는 순간에 재생해야 해서 여기 담아 둔다
 	UPROPERTY() int32 DamageTakenThisTurn = 0;
 
+	//깎였지만 칼이 닿기 전이라 아직 안 보여 준 체력. 이름표는 HP에 이걸 더해 그린다
+	UPROPERTY() int32 HPLossToShow = 0;
+
 	//이번 턴에 쓰러졌는지. 사망 모션도 피격과 같은 순간에 나가야 한다
 	UPROPERTY() bool bDiedThisTurn = false;
+
+	//보스에게 넣은 타격 중 아직 화면에 안 나간 것. 스킬 한 대 뒤에 피버 평타가 순서대로 선다
+	TArray<FPendingHit> HitsToShow;
+
+	//피해가 정해지기 전에 온 타격 보고 수. 세라 컷신은 ResolveTurn 전에 쏘아서
+	//투사체가 먼저 도착할 수 있다 — 정해지는 즉시 그만큼 띄운다
+	int32 EarlyHitReports = 0;
 
 	UPROPERTY() TObjectPtr<ABattleUnit> Unit;
 
@@ -457,6 +475,11 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	int32 BossDamageTaken = 0;
 
+	//그중 화면에 띄운 만큼. 계산은 ResolveTurn에서 한 번에 들어가지만 이름표는
+	//칼이 닿는 순간마다 오른다. EndTurn에서 BossDamageTaken과 맞춘다
+	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
+	int32 BossDamageShown = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	int32 TurnIndex = 0;
 
@@ -762,6 +785,10 @@ private:
 
 	//Lane에 칼이 닿는 순간. 그 구역에 선 사람의 피격·사망 모션이 나간다
 	void LandBossStrike(EBattleLane Lane);
+
+	//UserId의 유닛이 ReportHit을 불렀다. 그 사람의 다음 타격 한 대를 화면에 띄운다
+	void HandleHitLanded(FString UserId);
+	void ShowBossHit(const FString& UserId, const FPendingHit& Hit);
 
 	//거리와 시간에서 나온 속도로 걸음걸이를 고른다. 시간이 0 이하면 가장 빠른 것으로 본다
 	static EMoveGait ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed);

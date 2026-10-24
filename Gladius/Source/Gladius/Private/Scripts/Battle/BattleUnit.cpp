@@ -70,6 +70,45 @@ void ABattleUnit::NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlig
     OnAttackStarted.Broadcast(AttackIndex);
 }
 
+void ABattleUnit::ReportHit(float Delay)
+{
+	if (Delay <= 0.f)
+	{
+		OnHitLanded.Broadcast();
+		return;
+	}
+
+	//투사체마다 따로 날아가므로 타이머를 하나로 돌려쓰지 않는다 — 연타 중 앞 발이 덮인다
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle,
+		FTimerDelegate::CreateWeakLambda(this, [this]() { OnHitLanded.Broadcast(); }), Delay, false);
+}
+
+void ABattleUnit::OnDamageShown_Implementation(int32 Damage, bool bCrit)
+{
+	// ponytail: 임시 팝업 — 제자리에 잠깐 떴다 사라진다. 떠오르기·색 구분은 WBP로 바꿀 때 넣는다
+	UWidgetComponent* Popup = NewObject<UWidgetComponent>(this);
+	Popup->SetupAttachment(Root);
+	Popup->SetWidgetSpace(EWidgetSpace::Screen);
+	Popup->SetDrawAtDesiredSize(true);
+	Popup->SetWidgetClass(UUnitNameplate::StaticClass());
+
+	//이름표 조금 위. 피버 연타가 한 점에 겹치지 않게 조금씩 흩는다
+	Popup->SetRelativeLocation(Nameplate->GetRelativeLocation() + FVector(
+		FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(40.f, 100.f)));
+	Popup->RegisterComponent();
+	Popup->InitWidget();
+
+	if (UUnitNameplate* Text = Cast<UUnitNameplate>(Popup->GetUserWidgetObject()))
+	{
+		Text->SetText(bCrit ? FString::Printf(TEXT("%d!"), Damage) : FString::FromInt(Damage));
+	}
+
+	FTimerHandle Handle;
+	GetWorldTimerManager().SetTimer(Handle,
+		FTimerDelegate::CreateWeakLambda(Popup, [Popup]() { Popup->DestroyComponent(); }), 1.f, false);
+}
+
 void ABattleUnit::NotifyDied()
 {
 	bDead = true;

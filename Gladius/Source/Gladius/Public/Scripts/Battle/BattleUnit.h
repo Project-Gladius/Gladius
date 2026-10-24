@@ -15,6 +15,7 @@ struct FBattlePlayerUIData;
 
 DECLARE_MULTICAST_DELEGATE(FOnBattleUnitMovementFinished);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBattleUnitAttackStarted, int32);
+DECLARE_MULTICAST_DELEGATE(FOnBattleUnitHitLanded);
 
 //전투에 등장하는 유닛. 메시·크기·이름표 위치는 블루프린트에서 지정한다.
 //BattleManager가 PlayerUnitClass / BossUnitClass로 어떤 블루프린트를 쓸지 고른다
@@ -55,6 +56,15 @@ public:
 	// The Blueprint starts its montage synchronously; observers run after that start.
 	FOnBattleUnitAttackStarted OnAttackStarted;
 	void NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
+
+	//내 공격이 보스에게 **지금** 닿았다고 알린다. 칼이 닿거나 빔·투사체가 도착하는 순간
+	//블루프린트가 부른다 — 스킬 한 번, 피버 평타 한 대마다 한 번씩.
+	//피해는 이미 ResolveTurn에서 정해져 있고, 매니저가 그중 다음 한 대를 화면에 띄운다.
+	//Delay를 주면 그만큼 뒤에 알린다. 투사체처럼 날아가는 시간을 블루프린트가 아는 경우에 쓴다
+	UFUNCTION(BlueprintCallable, Category = "Battle|Motion")
+	void ReportHit(float Delay = 0.f);
+
+	FOnBattleUnitHitLanded OnHitLanded;
 
 	// ---- ABP가 읽어 가는 상태 ----
 	//
@@ -191,6 +201,11 @@ public:
 	//쓰러진 뒤 일어날지는 이 값으로 갈린다. OnDied를 기다려서는 늦는다
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnHit(int32 Damage, bool bLethal);
+
+	//이 유닛이 맞은 피해를 화면에 띄우는 순간. 보스는 플레이어 타격마다, 플레이어는
+	//칼이 닿을 때 온다. 기본 구현은 머리 위에 숫자를 잠깐 띄우고, 블루프린트가 덮어쓸 수 있다
+	UFUNCTION(BlueprintNativeEvent, Category = "Battle|Motion")
+	void OnDamageShown(int32 Damage, bool bCrit);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnDied();

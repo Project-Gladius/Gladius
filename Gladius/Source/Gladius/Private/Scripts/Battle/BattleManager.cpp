@@ -229,6 +229,7 @@ void ABattleManager::StartBattle()
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->SetCombatAutoPollingEnabled(false);
  BossDamageTaken = 0;
+	BossDamageShown = 0;
 	TurnIndex = 0;
 
 	//패턴 진행도는 한 판에 속한 값이다. 안 지우면 다음 판이 중간부터 시작한다
@@ -945,6 +946,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 			BossLocation(), FRotator::ZeroRotator);
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
+		NewPlayer.Unit->OnHitLanded.AddUObject(this, &ABattleManager::HandleHitLanded, UserId);
 
 		//플레이어는 평소에 보스를 본다. 이동 중에만 진행 방향을 보고 도착하면 되돌아온다.
 		//보스에게는 지정하지 않는다 — 스폰할 때 준 각도를 그대로 유지해야 한다
@@ -1039,6 +1041,7 @@ void ABattleManager::StartTurn()
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		Pair.Value.PendingAction = EBattleAction::Idle;
+		Pair.Value.EarlyHitReports = 0;
 
 		//준비 자세를 풀라는 신호. 유닛은 턴이 바뀐 걸 알 방법이 없어서
 		//여기서 Idle을 한 번 쏴 줘야 지난 턴 자세로 계속 서 있지 않는다
@@ -1645,6 +1648,10 @@ void ABattleManager::ResolveTurn()
 				? bCutSceneAttackCrit : FMath::FRand() < Chance;
 			int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, Resist, bCrit, CritDamage);
 
+			//화면에는 블루프린트가 타격을 알릴 때 한 대씩 나간다. 스킬이 먼저, 평타가 그 뒤다
+			P.HitsToShow.Reset();
+			P.HitsToShow.Add({ Dealt, bCrit });
+
 			Crits += bCrit ? 1 : 0;
 
 			//피버 한 칸이 평타 한 대다. 한 대는 고정 피해에 구역 내성이 걸리고,
@@ -1659,7 +1666,9 @@ void ABattleManager::ResolveTurn()
 				FeverCrits.Add(bFeverCrit);
 
 				//강화 공격력은 스킬에만 붙는다 — 평타는 고정값이다
-				Dealt += DamageToBoss(FeverAttackDamage, 0, Resist, bFeverCrit, CritDamage);
+				const int32 FeverDealt = DamageToBoss(FeverAttackDamage, 0, Resist, bFeverCrit, CritDamage);
+				Dealt += FeverDealt;
+				P.HitsToShow.Add({ FeverDealt, bFeverCrit });
 				Crits += bFeverCrit ? 1 : 0;
 			}
 
@@ -1679,8 +1688,8 @@ void ABattleManager::ResolveTurn()
 			AttackCues.Add(MoveTemp(Cue));
 
 			//Records는 방송 전체 누적이라 초기화되지 않는다. 판 단위 순위는 이쪽이다
+			//순위판(SessionStats)은 화면 표시라 ShowBossHit에서 한 대씩 쌓는다
 			P.DamageDealt += Dealt;
-			SessionStats.AddDamage(Pair.Key, Dealt);
 
 			if (Record)
 			{
@@ -1688,11 +1697,20 @@ void ABattleManager::ResolveTurn()
 			}
 
 			P.Fever += FeverIncrement;
+
+			//세라 컷신처럼 피해가 정해지기 전에 이미 맞은 타격이 있으면 지금 띄운다
+			for (; P.EarlyHitReports > 0 && P.HitsToShow.Num() > 0; --P.EarlyHitReports)
+			{
+				ShowBossHit(Pair.Key, P.HitsToShow[0]);
+				P.HitsToShow.RemoveAt(0);
+			}
 		}
 
 		const int32 Taken = DamageToPlayer(P.PendingAction,
 			Boss.DamageByZone[(int32)P.Lane], Boss.HitCount, Classes[P.ClassIndex].DefenseDamageRatio);
+		const int32 HPBefore = P.HP;
 		SetPlayerHealth(Pair.Key, P.HP - Taken);
+		P.HPLossToShow = HPBefore - P.HP;
 
 		//피격 모션은 여기서 재생하지 않는다. 보스가 아직 휘두르지도 않았는데
 		//맞는 모션이 먼저 나가면 순서가 뒤집힌다. BossAttackBeat에서 꺼내 쓴다
@@ -2141,6 +2159,7 @@ void ABattleManager::LandBossStrike(EBattleLane Lane)
 				//쓰러질 타격인지 지금 알려준다. OnDied는 뒤에 오므로
 				//블루프린트가 그걸 기다리면 이미 일어나는 모션이 섞인 뒤다
 				P.Unit->OnHit(P.DamageTakenThisTurn, P.bDiedThisTurn);
+				P.Unit->OnDamageShown(P.DamageTakenThisTurn, false);
 
 				//막는 모션이 나갔으니 버티는 자세는 여기서 끝난다.
 				//막기가 끝나면 그 밑은 평소 자세여야지 다시 막고 서 있으면 안 된다
@@ -2152,8 +2171,42 @@ void ABattleManager::LandBossStrike(EBattleLane Lane)
 			}
 		}
 
+		//이름표 체력은 지금 깎인다. 쓰러진 사람의 이름표도 여기서 사라진다
 		P.DamageTakenThisTurn = 0;
+		P.HPLossToShow = 0;
 		P.bDiedThisTurn = false;
+	}
+	RefreshPlayerUI();
+}
+
+void ABattleManager::HandleHitLanded(FString UserId)
+{
+	FBattlePlayer* P = Players.Find(UserId);
+	if (!P)
+	{
+		return;
+	}
+
+	if (P->HitsToShow.Num() == 0)
+	{
+		//아직 피해가 안 정해졌다. ResolveTurn이 정하자마자 띄운다
+		++P->EarlyHitReports;
+		return;
+	}
+
+	ShowBossHit(UserId, P->HitsToShow[0]);
+	P->HitsToShow.RemoveAt(0);
+}
+
+void ABattleManager::ShowBossHit(const FString& UserId, const FPendingHit& Hit)
+{
+	BossDamageShown += Hit.Damage;
+	SessionStats.AddDamage(UserId, Hit.Damage);
+
+	if (BossUnit)
+	{
+		BossUnit->SetLabelText(FString::Printf(TEXT("BOSS\n%d"), BossDamageShown));
+		BossUnit->OnDamageShown(Hit.Damage, Hit.bCrit);
 	}
 }
 
@@ -2175,6 +2228,19 @@ void ABattleManager::EndTurn()
 				ChooseMovementGait(P.Unit, Distance, ReturnSeconds));
 		}
 	}
+
+	//블루프린트가 알리지 않은 타격(배선이 없는 모션, 턴 도중 이탈 등)은 숫자 없이 합계에만 넣는다.
+	//안 그러면 표시가 실제 누적 피해보다 계속 모자란다
+	for (TPair<FString, FBattlePlayer>& Pair : Players)
+	{
+		for (const FPendingHit& Hit : Pair.Value.HitsToShow)
+		{
+			SessionStats.AddDamage(Pair.Key, Hit.Damage);
+		}
+		Pair.Value.HitsToShow.Reset();
+		Pair.Value.HPLossToShow = 0;
+	}
+	BossDamageShown = BossDamageTaken;
 
 	//체력 변화와 사망 숨김은 모션이 끝난 지금 반영한다
 	UpdateVisuals();
@@ -2520,7 +2586,7 @@ void ABattleManager::UpdateVisuals()
 	{
 		//체력이 없으니 남은 양이 아니라 쌓인 피해를 보여준다.
 		//때려도 아무 반응이 없으면 공격이 들어가는지 알 수 없다
-		BossUnit->SetLabelText(FString::Printf(TEXT("BOSS\n%d"), BossDamageTaken));
+		BossUnit->SetLabelText(FString::Printf(TEXT("BOSS\n%d"), BossDamageShown));
 	}
 
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
@@ -2551,7 +2617,8 @@ void ABattleManager::RefreshPlayerUI()
 
 		FBattlePlayerUIData Data;
 		Data.DisplayName = Player.DisplayName;
-		Data.HP = Player.HP;
+		//칼이 닿기 전에는 깎이기 전 체력을 그린다
+		Data.HP = Player.HP + Player.HPLossToShow;
 		Data.MaxHP = Player.MaxHP;
 		Data.Fever = Player.Fever;
 		Data.Action = (Phase == EBattlePhase::Prepare || Phase == EBattlePhase::Collect)
@@ -2580,7 +2647,8 @@ void ABattleManager::RefreshPlayerUI()
 		}
 
 		Player.Unit->SetPlayerUI(Data);
-		Player.Unit->SetPlayerUIVisible(bShowInPhase && Player.ReviveCountdown == 0
+		//이번 턴에 쓰러질 사람도 칼이 닿을 때까지는 이름표를 남긴다
+		Player.Unit->SetPlayerUIVisible(bShowInPhase && (Player.ReviveCountdown == 0 || Player.HPLossToShow > 0)
 			&& (!bCutScenePlaying || Pair.Key == CutSceneUserId));
 	}
 }
