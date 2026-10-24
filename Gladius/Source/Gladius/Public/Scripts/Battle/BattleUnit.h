@@ -10,10 +10,12 @@ class UAnimMontage;
 class UWidgetComponent;
 class UCurveFloat;
 class UBattlePlayerNameplate;
+class UAnimMontage;
 struct FBattlePlayerUIData;
 
 DECLARE_MULTICAST_DELEGATE(FOnBattleUnitMovementFinished);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBattleUnitAttackStarted, int32);
+DECLARE_MULTICAST_DELEGATE(FOnBattleUnitHitLanded);
 
 //전투에 등장하는 유닛. 메시·크기·이름표 위치는 블루프린트에서 지정한다.
 //BattleManager가 PlayerUnitClass / BossUnitClass로 어떤 블루프린트를 쓸지 고른다
@@ -89,6 +91,15 @@ public:
 	//공격 번호로 위 함수를 골라 호출 (1 -> CastSkill1, 2 -> CastSkill2)
 	void PerformSkill(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
 
+	//내 공격이 보스에게 **지금** 닿았다고 알린다. 칼이 닿거나 빔·투사체가 도착하는 순간
+	//블루프린트가 부른다 — 스킬 한 번, 피버 평타 한 대마다 한 번씩.
+	//피해는 이미 ResolveTurn에서 정해져 있고, 매니저가 그중 다음 한 대를 화면에 띄운다.
+	//Delay를 주면 그만큼 뒤에 알린다. 투사체처럼 날아가는 시간을 블루프린트가 아는 경우에 쓴다
+	UFUNCTION(BlueprintCallable, Category = "Battle|Motion")
+	void ReportHit(float Delay = 0.f);
+
+	FOnBattleUnitHitLanded OnHitLanded;
+
 	// ---- ABP가 읽어 가는 상태 ----
 	//
 	//**애님 블루프린트는 이것들을 BlueprintUpdateAnimation에서 직접 읽는다.**
@@ -156,6 +167,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	FVector GetFacingTarget() const { return bHasFaceTarget ? FaceTarget : GetActorLocation(); }
 
+	//몬타주에 찍힌 노티파이의 시각을 읽는다. 타격·발사 시점을 손으로 적지 않고
+	//애셋에서 가져오기 위한 것이다 — 아트팀이 모션을 다시 뽑아도 따라온다.
+	//
+	//`Play Montage`의 `On Notify Begin`은 이 프로젝트에서 동작하지 않지만(CLAUDE.md
+	//"타격 시점은 Delay 오프셋으로 잡습니다") 노티파이 **데이터**는 멀쩡하다.
+	//델리게이트를 안 타고 배열만 읽으므로 그 고장과 겹치지 않는다.
+	//
+	//SectionName을 주면 그 구간의 노티파이만 보고, 시각도 **섹션 시작 기준**으로
+	//돌려준다. `Play Montage`에 StartingSection을 주면 시간이 거기서부터 흐르기 때문이다.
+	//같은 이름이 여러 개면 Occurrence로 고른다. 못 찾으면 0을 주고 경고를 남긴다
+	UFUNCTION(BlueprintPure, Category = "Battle|Motion")
+	static float NotifyTimeIn(const UAnimMontage* Montage, FName NotifyName,
+	                          FName SectionName, int32 Occurrence = 0);
+
 	// ---- 블루프린트 훅 ----
 	//
 	//모션이 준비되면 블루프린트에서 이 이벤트들에 애니메이션을 연결한다.
@@ -211,6 +236,11 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnHit(int32 Damage, bool bLethal);
 
+	//이 유닛이 맞은 피해를 화면에 띄우는 순간. 보스는 플레이어 타격마다, 플레이어는
+	//칼이 닿을 때 온다. 기본 구현은 머리 위에 숫자를 잠깐 띄우고, 블루프린트가 덮어쓸 수 있다
+	UFUNCTION(BlueprintNativeEvent, Category = "Battle|Motion")
+	void OnDamageShown(int32 Damage, bool bCrit);
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnDied();
 
@@ -244,6 +274,13 @@ public:
 	//예고한 그 공격을 실제로 휘두르는 순간
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnBossAttack(const FString& StateId, int32 HitCount);
+
+	//이 상태에서 휘두를 공격 몬타주. 블루프린트의 StrikeMontage 맵을 찾아 돌려주면 된다.
+	//매니저가 여기서 칼이 닿는 시각을 **미리** 읽어 피격과 구르기를 그 순간에 맞춘다 —
+	//닿는 순간 블루프린트가 알려 주는 방식으로는 그보다 먼저 시작하는 구르기를 맞출 수 없다.
+	//공격이 없는 상태(Defense 등)는 null이고, 그러면 휘두르기 시작과 동시에 맞는다
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	UAnimMontage* GetStrikeMontage(const FString& StateId) const;
 
 	//스폰 시 스케일이 1로 덮이므로, 크기는 Mesh 컴포넌트 쪽에서 준다.
 	//그래서 액터 루트는 빈 SceneComponent로 두고 Mesh를 그 아래 붙인다

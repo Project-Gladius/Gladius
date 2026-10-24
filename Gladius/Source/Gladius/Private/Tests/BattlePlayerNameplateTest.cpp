@@ -12,6 +12,7 @@
 
 struct FPlayerNameplateTestAccess
 {
+ static void RebuildPreview(UBattlePlayerNameplate* UI) { UI->NativePreConstruct(); }
  static void CheckStartupSize(FAutomationTestBase& Test, UBattlePlayerNameplate* UI)
  {
   for (int32 Rebuild=0;Rebuild<5;++Rebuild)
@@ -74,7 +75,10 @@ struct FPlayerNameplateTestAccess
 		Test.TestEqual(TEXT("Other actions hide details"), UI->CritChanceText->GetVisibility(), ESlateVisibility::Collapsed);
 		Test.TestEqual(TEXT("Other actions hide critical icons"), UI->CritDamageIcon->GetVisibility(), ESlateVisibility::Collapsed);
 		Test.TestEqual(TEXT("Migrated default layout retained"), Cast<UCanvasPanelSlot>(UI->HealthText->Slot)->GetPosition(), UI->DefaultLayout.HealthText.Position);
-		Test.TestEqual(TEXT("Result icon position is invariant"), Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition(), IconPosition);
+		//행동 페이지마다 아이콘 위치는 디자이너가 따로 정함. 데이터 갱신으로 그 위치가 움직이지 않아야 함
+		const FVector2D DefenseIconPosition=Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition();
+		UI->SetDisplayData(Data);
+		Test.TestEqual(TEXT("Result icon keeps designer position on refresh"), Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition(), DefenseIconPosition);
 		Test.TestNull(TEXT("No stale result texture"), UI->ActionIcon->GetBrush().GetResourceObject());
 		Data.HP=100; Data.MaxHP=100; UI->SetDisplayData(Data);
 		Test.TestEqual(TEXT("Invalid legacy HP is clamped"), UI->HealthText->GetText().ToString(), FString(TEXT("HP 6/6")));
@@ -168,6 +172,45 @@ bool FPlayerNameplateStateIconsTest::RunTest(const FString& Parameters)
   TestEqual(TEXT("Other state changes preserve independent placement"),Cast<UCanvasPanelSlot>(Icon->Slot)->GetPosition(),FVector2D(10.f+Index*11.f,20.f+Index*9.f));
  }
  TestNull(TEXT("No shared root icon remains"),UI->WidgetTree->FindWidget(TEXT("SharedActionIcon")));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateDesignerStateTest, "Gladius.BattleUI.DesignerStateAndPlacement", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPlayerNameplateDesignerStateTest::RunTest(const FString& Parameters)
+{
+ UClass* Class=LoadClass<UBattlePlayerNameplate>(nullptr,TEXT("/Game/Blueprints/UI/MyBattlePlayerNameplate.MyBattlePlayerNameplate_C"));
+ if (!TestNotNull(TEXT("Nameplate Blueprint loads"),Class)) return false;
+ auto* UI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class);
+ UI->SetDesignerFlags(EWidgetDesignFlags::Designing);
+ UI->Initialize(); UI->TakeWidget();
+ auto* Pages=Cast<UWidgetSwitcher>(UI->WidgetTree->FindWidget(TEXT("ActionPages")));
+ auto* Page=UI->WidgetTree->FindWidget(TEXT("State_Attack1"));
+ auto* Icon=UI->WidgetTree->FindWidget(TEXT("Attack1_ActionIcon"));
+ auto* Size=Cast<USizeBox>(UI->WidgetTree->FindWidget(TEXT("PlateSize")));
+ if (!TestNotNull(TEXT("State switcher exists"),Pages) || !TestNotNull(TEXT("Attack1 exists"),Page)
+  || !TestNotNull(TEXT("Attack1 icon exists"),Icon) || !TestNotNull(TEXT("Panel size exists"),Size)) return false;
+ auto* Slot=Cast<UCanvasPanelSlot>(Icon->Slot);
+ if (!TestNotNull(TEXT("Attack1 icon has a Designer slot"),Slot)) return false;
+ UI->PreviewData.Action=EBattleAction::Idle;
+ Pages->SetActiveWidget(Page);
+ Slot->SetPosition(FVector2D(73,91)); Slot->SetSize(FVector2D(47,53));
+ Size->SetWidthOverride(410); Size->SetHeightOverride(260);
+ for (int32 Rebuild=0; Rebuild<3; ++Rebuild)
+ {
+  FPlayerNameplateTestAccess::RebuildPreview(UI);
+  UI->RefreshAppearance();
+  TestEqual(TEXT("Designer keeps Attack1 selected"),Pages->GetActiveWidget(),Page);
+  TestTrue(TEXT("Preview data matches the edited state"),UI->Data.Action==EBattleAction::Attack1);
+  TestEqual(TEXT("Designer preserves the moved Attack1 icon"),Slot->GetPosition(),FVector2D(73,91));
+  TestEqual(TEXT("Designer preserves the resized Attack1 icon"),Slot->GetSize(),FVector2D(47,53));
+  TestEqual(TEXT("Designer preserves panel width"),Size->GetWidthOverride(),410.f);
+  TestEqual(TEXT("Designer preserves panel height"),Size->GetHeightOverride(),260.f);
+ }
+ auto* RuntimeUI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class);
+ RuntimeUI->Initialize(); RuntimeUI->TakeWidget();
+ FBattlePlayerUIData Data; Data.Action=EBattleAction::Attack2; RuntimeUI->SetDisplayData(Data);
+ auto* RuntimePages=Cast<UWidgetSwitcher>(RuntimeUI->WidgetTree->FindWidget(TEXT("ActionPages")));
+ TestEqual(TEXT("Runtime still selects the actual action"),RuntimePages->GetActiveWidget()->GetFName(),FName(TEXT("State_Attack2")));
  return true;
 }
 

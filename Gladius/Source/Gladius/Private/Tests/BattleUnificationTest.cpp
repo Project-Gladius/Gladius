@@ -58,6 +58,7 @@ struct FBattleUnificationTestAccess
  static void Move(ABattleManager* B) { B->GetWorldTimerManager().ClearTimer(B->PhaseTimerHandle); B->BeginMove(); }
  static float PhaseRemaining(ABattleManager* B) { return B->GetWorldTimerManager().GetTimerRemaining(B->PhaseTimerHandle); }
  static void Resolve(ABattleManager* B) { B->ResolveTurn(); }
+ static void Land(ABattleManager* B, EBattleLane Lane) { B->LandBossStrike(Lane); }
  static EMoveGait MovementGait(ABattleManager* B, const ABattleUnit* Unit, float Distance, float Seconds) { return B->ChooseMovementGait(Unit,Distance,Seconds); }
  static int32 ShotIndex(ABattleManager* B) { return B->CutSceneIndex; }
  static FString StartedCutSceneAttack(ABattleManager* B) { return B->CutSceneAttackUserId; }
@@ -938,6 +939,54 @@ bool FPopulationBossTargetTest::RunTest(const FString& Parameters)
    TestEqual(TEXT("Ties stay within the best lanes"),FBattleUnificationTestAccess::BossAction(B).DamageByZone[2],0);
   }
  B->RunSelfTest();
+ return true;
+}
+
+//피해는 ResolveTurn에서 정해지지만 화면(보스 누적·순위판·이름표 체력)은 타격이 닿는 순간에 바뀐다
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleHitDisplayTimingTest,"Gladius.BattleUnified.HitDisplayFollowsImpact",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBattleHitDisplayTimingTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ const FString Id=TEXT("@hit");
+ FBossAction Strike; Strike.Id=TEXT("Test"); Strike.HitCount=1;
+ for(int32& Damage : Strike.DamageByZone) Damage=2;
+ auto Shown=[&](){ const FBattleSessionEntry* E=B->GetSessionStats().GetEntries().Find(Id); return E?E->DamageDealt:-1; };
+
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ TestTrue(TEXT("Attacker joins"),B->SubmitAction(Id,TEXT("Hit"),EBattleAction::Attack1));
+ FBattleUnificationTestAccess::Fever(B,Id,5);
+ FBattleUnificationTestAccess::SetBossAction(B,Strike);
+ const FBattlePlayer& P=B->GetBattlePlayers().FindChecked(Id);
+ const int32 HPBefore=P.HP;
+ FBattleUnificationTestAccess::Resolve(B);
+
+ int32 Queued=0; for(const FPendingHit& Hit : P.HitsToShow) Queued+=Hit.Damage;
+ TestTrue(TEXT("Skill and fever hits are queued separately"),P.HitsToShow.Num()>1);
+ TestEqual(TEXT("Queued hits add up to the resolved damage"),Queued,B->BossDamageTaken);
+ TestEqual(TEXT("Nothing shows before the hit lands"),B->BossDamageShown,0);
+ TestEqual(TEXT("Leaderboard waits too"),Shown(),(int64)0);
+ TestTrue(TEXT("Player HP is already cut but held for display"),P.HPLossToShow>0&&P.HP+P.HPLossToShow==HPBefore);
+
+ const int32 First=P.HitsToShow[0].Damage;
+ P.Unit->ReportHit();
+ TestEqual(TEXT("One report shows one hit"),B->BossDamageShown,First);
+ TestEqual(TEXT("Leaderboard follows the shown hit"),Shown(),(int64)First);
+
+ FBattleUnificationTestAccess::Land(B,P.Lane);
+ TestEqual(TEXT("Blade landing releases the held HP"),P.HPLossToShow,0);
+
+ FBattleUnificationTestAccess::EndTurn(B);
+ TestEqual(TEXT("Unreported hits are settled at turn end"),B->BossDamageShown,B->BossDamageTaken);
+ TestEqual(TEXT("Leaderboard is settled too"),Shown(),(int64)B->BossDamageTaken);
+
+ //세라 컷신처럼 피해가 정해지기 전에 맞으면, 정해지는 즉시 띄운다
+ const int32 Before=B->BossDamageTaken;
+ FBattleUnificationTestAccess::Prepare(B);
+ B->SubmitAction(Id,TEXT("Hit"),EBattleAction::Attack1);
+ P.Unit->ReportHit();
+ TestEqual(TEXT("Early report waits for the damage"),B->BossDamageShown,Before);
+ FBattleUnificationTestAccess::Resolve(B);
+ TestTrue(TEXT("Early report shows as soon as damage is resolved"),B->BossDamageShown>Before);
  return true;
 }
 
