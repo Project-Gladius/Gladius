@@ -1007,6 +1007,7 @@ void ABattleManager::StartMoveCutScenes()
  CutSceneIds.Reset();
  ActiveCutSceneIds.Reset();
  CutSceneIndex = 0;
+ CutSceneAttackUserId.Reset();
  if (!bEnableTurnCutScenes) return;
  CutSceneUserId = SelectTurnCutSceneUser(Players, Classes, PreviousCutSceneClassId, SelectedCutSceneUsers, CutSceneRandom);
  const FBattlePlayer* Selected = Players.Find(CutSceneUserId);
@@ -1014,6 +1015,7 @@ void ABattleManager::StartMoveCutScenes()
  const FString ClassId = Classes[Selected->ClassIndex].Id;
  CutSceneIds = CutSceneIdsFor(ClassId, Selected->PendingAction);
  ActiveCutSceneIds = CutSceneIds;
+
  PreviousCutSceneClassId = ClassId;
  SelectedCutSceneUsers.Add(CutSceneUserId);
  if (!IsValid(CutSceneApplier))
@@ -1040,6 +1042,18 @@ void ABattleManager::PlayNextCutScene()
   const FName Id = ActiveCutSceneIds[CutSceneIndex++];
   if (CutSceneApplier->ApplyCutSceneForUser(CutSceneUserId, Id))
   {
+   if (Id == FName(TEXT("SeraSkill2")))
+   {
+    if (const FBattlePlayer* P = Players.Find(CutSceneUserId); P && IsValid(P->Unit) && Classes.IsValidIndex(P->ClassIndex))
+    {
+     // The camera starts the skill immediately, independently of movement and attack groups.
+     CutSceneAttackUserId = CutSceneUserId;
+     CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
+     const FAttackDef& Attack = Classes[P->ClassIndex].Attacks[1];
+     bCutSceneAttackCrit = FMath::FRand() < FMath::Min(Attack.CritChance + P->CritChanceBonus, CritChanceCap);
+     P->Unit->OnAttack(2, bCutSceneAttackCrit, true);
+    }
+   }
    RefreshPlayerUI();
    return;
   }
@@ -1049,6 +1063,7 @@ void ABattleManager::PlayNextCutScene()
 
 void ABattleManager::StopTurnCutScenes()
 {
+ CutSceneAttackUserId.Reset();
  if (IsValid(CutSceneApplier))
  {
   CutSceneApplier->OnCutSceneEnded.RemoveDynamic(this, &ABattleManager::HandleCutSceneEnded);
@@ -1414,7 +1429,8 @@ void ABattleManager::ResolveTurn()
 			const float CritDamage = Attack.CritDamage + P.CritDamageBonus;
 
 			//**스킬 피해에 피버는 들어가지 않는다.** 피버는 뒤이어 나가는 평타 횟수다
-			const bool bCrit = FMath::FRand() < Chance;
+			const bool bCrit = (bAttack2 && Pair.Key == CutSceneAttackUserId)
+				? bCutSceneAttackCrit : FMath::FRand() < Chance;
 			int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, Resist, bCrit, CritDamage);
 
 			Crits += bCrit ? 1 : 0;
@@ -1662,7 +1678,9 @@ void ABattleManager::FlushAttackCues()
 		{
 			if (P->Unit)
 			{
-				P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
+				const bool bSkillAlreadyStarted = Cue.AttackIndex == 2 && Cue.UserId == CutSceneAttackUserId;
+				if (!bSkillAlreadyStarted)
+					P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
 
 				//평타는 스킬 모션이 끝난 뒤부터 이어진다. 그 길이를 AttackMotionSeconds가
 				//이미 BattleTime에서 예약해 뒀으므로, 마지막 대가 보스 공격과 맞물린다
@@ -1670,7 +1688,9 @@ void ABattleManager::FlushAttackCues()
 				{
 					const FCharacterMotionTimes& Motion = MotionTimesFor(Cue.ClassIndex);
 					const float SkillSeconds = Cue.AttackIndex == 1 ? Motion.Skill1 : Motion.Skill2;
-					P->Unit->PlayFeverFlurry(Cue.FeverCrits, SkillSeconds, Motion.FeverAttacks);
+					const float RemainingSkillSeconds = bSkillAlreadyStarted
+						? FMath::Max(0.f, SkillSeconds - (GetWorld()->GetTimeSeconds() - CutSceneAttackStartTime)) : SkillSeconds;
+					P->Unit->PlayFeverFlurry(Cue.FeverCrits, RemainingSkillSeconds, Motion.FeverAttacks);
 				}
 			}
 		}

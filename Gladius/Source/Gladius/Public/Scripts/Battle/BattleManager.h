@@ -642,6 +642,9 @@ private:
  TSet<FString> SelectedCutSceneUsers;
  FRandomStream CutSceneRandom;
  int32 CutSceneIndex = 0;
+ FString CutSceneAttackUserId;
+ float CutSceneAttackStartTime = 0.f;
+ bool bCutSceneAttackCrit = false;
  void StartMoveCutScenes();
  void StopTurnCutScenes();
  void PlayNextCutScene();
