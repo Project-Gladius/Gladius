@@ -77,7 +77,7 @@ public:
 	UPROPERTY() FBattlePlayerUILayout DefaultLayout;
 	// Missing actions use DefaultLayout. Add an entry for each action you want to customize.
 	UPROPERTY() TMap<EBattleAction, FBattlePlayerUILayout> ActionLayouts;
-	// The result icon deliberately keeps the same position for every action.
+	// Legacy seed placement; each Designer state now owns its action icon geometry.
 	UPROPERTY() FBattleUIPlacement ActionIconPlacement = {FVector2D(8, 90), FVector2D(20, 20)};
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle UI|Images") TObjectPtr<UTexture2D> HealthIconTexture;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle UI|Images") TObjectPtr<UTexture2D> HealthFilledTexture;

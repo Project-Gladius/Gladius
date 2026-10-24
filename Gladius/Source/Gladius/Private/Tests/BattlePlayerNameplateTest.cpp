@@ -12,6 +12,17 @@
 
 struct FPlayerNameplateTestAccess
 {
+ static void CheckStartupSize(FAutomationTestBase& Test, UBattlePlayerNameplate* UI)
+ {
+  for (int32 Rebuild=0;Rebuild<5;++Rebuild)
+  {
+   UI->SetPanelDimensions(FVector2D(600.f+Rebuild*100.f,400.f+Rebuild*100.f));
+   UI->NativePreConstruct();
+   Test.TestEqual(TEXT("Rebuild restores width"),UI->PanelSizeBox->GetWidthOverride(),300.f);
+   Test.TestEqual(TEXT("Rebuild restores height"),UI->PanelSizeBox->GetHeightOverride(),200.f);
+  }
+ }
+
 	static void Check(FAutomationTestBase& Test, UBattlePlayerNameplate* UI)
 	{
 		UI->GladiusActionIconTextures.Reset();
@@ -102,5 +113,56 @@ bool FPlayerNameplateLayoutTest::RunTest(const FString& Parameters)
 	FPlayerNameplateTestAccess::Check(*this, UI);
 	TestEqual(TEXT("Defense selects its Designer page"), Pages->GetActiveWidget()->GetFName(), FName(TEXT("State_Defense")));
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateStateIconsTest, "Gladius.BattleUI.PerStateActionIcons", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPlayerNameplateStateIconsTest::RunTest(const FString& Parameters)
+{
+ UClass* Class=LoadClass<UBattlePlayerNameplate>(nullptr,TEXT("/Game/Blueprints/UI/MyBattlePlayerNameplate.MyBattlePlayerNameplate_C"));
+ if (!TestNotNull(TEXT("Nameplate Blueprint loads"),Class)) return false;
+ auto* UI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class); UI->Initialize(); UI->TakeWidget();
+ auto* Gladius=UTexture2D::CreateTransient(1,1); auto* Sera=UTexture2D::CreateTransient(1,1);
+ const TCHAR* States[]={TEXT("Idle"),TEXT("Attack1"),TEXT("Attack2"),TEXT("AvoidL"),TEXT("AvoidM"),TEXT("AvoidR"),TEXT("Defense")};
+ FBattlePlayerUIData Data; Data.HP=5; Data.MaxHP=5;
+ for(int32 Index=0;Index<7;++Index)
+ {
+  const auto Action=static_cast<EBattleAction>(Index);
+  const FString Prefix=States[Index];
+  auto* Icon=Cast<UImage>(UI->WidgetTree->FindWidget(FName(*(Prefix+TEXT("_ActionIcon")))));
+  if (!TestNotNull(*Prefix,Icon)) return false;
+  TestEqual(TEXT("Icon belongs to its state"),Icon->GetParent()->GetFName(),FName(*(TEXT("State_")+Prefix)));
+  auto* Slot=Cast<UCanvasPanelSlot>(Icon->Slot);
+  const FVector2D Position(10.f+Index*11.f,20.f+Index*9.f); Slot->SetPosition(Position);
+  UI->GladiusActionIconTextures.Add(Action,Gladius); UI->SeraActionIconTextures.Add(Action,Sera);
+  Data.Action=Action; Data.CharacterId=TEXT("gladius"); UI->SetDisplayData(Data);
+  TestTrue(TEXT("Gladius image applied to selected state"),Icon->GetBrush().GetResourceObject()==Gladius);
+  Data.CharacterId=TEXT("sera"); UI->SetDisplayData(Data);
+  TestTrue(TEXT("Sera image applied to selected state"),Icon->GetBrush().GetResourceObject()==Sera);
+  TestEqual(TEXT("Refresh preserves state placement"),Slot->GetPosition(),Position);
+ }
+ for(int32 Index=0;Index<7;++Index)
+ {
+  auto* Icon=Cast<UImage>(UI->WidgetTree->FindWidget(FName(*(FString(States[Index])+TEXT("_ActionIcon")))));
+  TestEqual(TEXT("Other state changes preserve independent placement"),Cast<UCanvasPanelSlot>(Icon->Slot)->GetPosition(),FVector2D(10.f+Index*11.f,20.f+Index*9.f));
+ }
+ TestNull(TEXT("No shared root icon remains"),UI->WidgetTree->FindWidget(TEXT("SharedActionIcon")));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerNameplateStartupSizeTest, "Gladius.BattleUI.FixedStartupSize", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPlayerNameplateStartupSizeTest::RunTest(const FString& Parameters)
+{
+ UClass* Class=LoadClass<UBattlePlayerNameplate>(nullptr,TEXT("/Game/Blueprints/UI/MyBattlePlayerNameplate.MyBattlePlayerNameplate_C"));
+ if (!TestNotNull(TEXT("Nameplate Blueprint loads"),Class)) return false;
+ for (int32 Instance=0;Instance<3;++Instance)
+ {
+  auto* UI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class); UI->Initialize(); UI->TakeWidget();
+  auto* Size=Cast<USizeBox>(UI->WidgetTree->FindWidget(TEXT("PlateSize")));
+  if (!TestNotNull(TEXT("Plate size box exists"),Size)) return false;
+  TestEqual(TEXT("New widget starts at width 300"),Size->GetWidthOverride(),300.f);
+  TestEqual(TEXT("New widget starts at height 200"),Size->GetHeightOverride(),200.f);
+  FPlayerNameplateTestAccess::CheckStartupSize(*this,UI);
+ }
+ return true;
 }
 #endif

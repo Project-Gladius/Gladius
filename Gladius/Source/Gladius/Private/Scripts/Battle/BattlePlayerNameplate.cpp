@@ -40,12 +40,15 @@ namespace
 void UBattlePlayerNameplate::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
+	SetPanelDimensions(FVector2D(300.f, 200.f));
 	RefreshAppearance();
 }
 
 void UBattlePlayerNameplate::NativePreConstruct()
 {
 	Super::NativePreConstruct();
+	// Rebuilds start from a fixed base size, independently of saved BP values or prior instances.
+	SetPanelDimensions(FVector2D(300.f, 200.f));
 	if (IsDesignTime()) Data = PreviewData;
 	RefreshAppearance();
 }
@@ -69,7 +72,8 @@ void UBattlePlayerNameplate::ResolveDesignerWidgets()
 	CritChanceText = Cast<UTextBlock>(Find(TEXT("CritChanceValue")));
 	CritDamageIcon = Cast<UImage>(Find(TEXT("CritDamageIcon")));
 	CritDamageText = Cast<UTextBlock>(Find(TEXT("CritDamageValue")));
-	ActionIcon = Cast<UImage>(WidgetTree->FindWidget(TEXT("SharedActionIcon")));
+	ActionIcon = Cast<UImage>(Find(TEXT("ActionIcon")));
+	if (!ActionIcon) ActionIcon = Cast<UImage>(WidgetTree->FindWidget(TEXT("SharedActionIcon")));
 	HealthSegments.Reset();
 	for (int32 Index=1; Index<=6; ++Index)
 		HealthSegments.Add(Cast<UImage>(Find(*FString::Printf(TEXT("HealthSegment%d"), Index))));
@@ -161,22 +165,57 @@ bool UBattlePlayerNameplate::ConvertToDesignerBlueprint(UObject* Asset)
 	UWidgetBlueprint* BP = Cast<UWidgetBlueprint>(Asset);
 	if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(StaticClass()) || !BP->WidgetTree) return false;
 	UWidgetTree* Tree = BP->WidgetTree;
+	// Persist the same base size in the Designer preview and the saved widget template.
+	auto* StartupDefaults = BP->GeneratedClass->GetDefaultObject<UBattlePlayerNameplate>();
+	StartupDefaults->Modify();
+	StartupDefaults->PanelSize = FVector2D(300.f, 200.f);
+	StartupDefaults->DesignTimeSize = FVector2D(300.f, 200.f);
+	StartupDefaults->DesignSizeMode = EDesignPreviewSizeMode::Custom;
+	if (auto* Size = Cast<USizeBox>(Tree->FindWidget(TEXT("PlateSize"))))
+	{
+		Size->Modify();
+		Size->SetWidthOverride(300.f);
+		Size->SetHeightOverride(200.f);
+	}
 	if (Tree->FindWidget(TEXT("ActionPages")))
 	{
-		UCanvasPanel* Root = Cast<UCanvasPanel>(Tree->FindWidget(TEXT("PlateCanvas")));
-		if (!Root) return false;
 		BP->Modify(); Tree->Modify();
-		UImage* Icon = Cast<UImage>(Tree->FindWidget(TEXT("SharedActionIcon")));
-		if (!Icon)
+		UImage* Shared = Cast<UImage>(Tree->FindWidget(TEXT("SharedActionIcon")));
+		const UCanvasPanelSlot* SharedSlot = Shared ? Cast<UCanvasPanelSlot>(Shared->Slot) : nullptr;
+		const auto* Defaults = BP->GeneratedClass->GetDefaultObject<UBattlePlayerNameplate>();
+		for (EBattleAction Action : {EBattleAction::Idle, EBattleAction::Attack1, EBattleAction::Attack2,
+			EBattleAction::AvoidL, EBattleAction::AvoidM, EBattleAction::AvoidR, EBattleAction::Defense})
 		{
-			Icon = Tree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("SharedActionIcon"));
-			const auto* Defaults = BP->GeneratedClass->GetDefaultObject<UBattlePlayerNameplate>();
-			UCanvasPanelSlot* Slot = Root->AddChildToCanvas(Icon);
-			Slot->SetPosition(Defaults->ActionIconPlacement.Position);
-			Slot->SetSize(Defaults->ActionIconPlacement.Size);
+			const FString Prefix = ActionPrefix(Action);
+			UCanvasPanel* Page = Cast<UCanvasPanel>(Tree->FindWidget(FName(*(TEXT("State_") + Prefix))));
+			if (!Page) return false;
+			const FName IconName(*(Prefix + TEXT("_ActionIcon")));
+			if (!Tree->FindWidget(IconName))
+			{
+				UImage* Icon = Shared ? DuplicateObject<UImage>(Shared, Tree, IconName)
+					: Tree->ConstructWidget<UImage>(UImage::StaticClass(), IconName);
+				Icon->Slot = nullptr;
+				UCanvasPanelSlot* Slot = Page->AddChildToCanvas(Icon);
+				if (SharedSlot)
+				{
+					Slot->SetLayout(SharedSlot->GetLayout());
+					Slot->SetAutoSize(SharedSlot->GetAutoSize());
+					Slot->SetZOrder(SharedSlot->GetZOrder());
+				}
+				else
+				{
+					Slot->SetPosition(Defaults->ActionIconPlacement.Position);
+					Slot->SetSize(Defaults->ActionIconPlacement.Size);
+				}
+			}
+			if (!BP->WidgetVariableNameToGuidMap.Contains(IconName)) BP->OnVariableAdded(IconName);
 		}
-		if (!BP->WidgetVariableNameToGuidMap.Contains(Icon->GetFName()))
-			BP->OnVariableAdded(Icon->GetFName());
+		if (Shared)
+		{
+			Tree->RemoveWidget(Shared);
+			BP->OnVariableRemoved(Shared->GetFName());
+			Shared->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors);
+		}
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
 		FKismetEditorUtilities::CompileBlueprint(BP);
 		BP->MarkPackageDirty();
@@ -231,13 +270,12 @@ bool UBattlePlayerNameplate::ConvertToDesignerBlueprint(UObject* Asset)
 		Image(TEXT("FeverIcon"), L.FeverIcon, Defaults->FeverIconTexture);
 		Text(TEXT("FeverValue"), 13, L.FeverText)->SetText(FText::FromString(TEXT("0")));
 		Text(TEXT("ActionValue"), 13, L.ActionText)->SetText(FText::FromString(Prefix));
+		Image(TEXT("ActionIcon"), Defaults->ActionIconPlacement, nullptr);
 		Image(TEXT("CritChanceIcon"), L.CritChanceIcon, Defaults->CritChanceIconTexture);
 		Text(TEXT("CritChanceValue"), 13, L.CritChanceText)->SetText(FText::FromString(TEXT("+25%")));
 		Image(TEXT("CritDamageIcon"), L.CritDamageIcon, Defaults->CritDamageIconTexture);
 		Text(TEXT("CritDamageValue"), 13, L.CritDamageText)->SetText(FText::FromString(TEXT("+50%")));
 	}
-	auto Icon = Tree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("SharedActionIcon"));
-	Place(Root->AddChildToCanvas(Icon), Defaults->ActionIconPlacement);
 	Pages->SetActiveWidgetIndex(0);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
 	FKismetEditorUtilities::CompileBlueprint(BP);
