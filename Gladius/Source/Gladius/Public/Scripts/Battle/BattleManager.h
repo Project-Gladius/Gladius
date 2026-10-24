@@ -468,6 +468,13 @@ public:
 	const TMap<FString, FBattlePlayer>& GetBattlePlayers() const { return Players; }
 	ABattleUnit* GetBossUnit() const { return BossUnit.Get(); }
 
+	//보스가 휘두르기 시작한 뒤 Lane에 칼이 닿기까지의 시간. 몬타주 `Strike` 섹션 기준이다.
+	//구역 전용 노티파이(LeftHit / RightHit)가 있으면 그것을, 없으면 Hit을 쓴다 —
+	//LeftRight는 왼쪽을 먼저 치므로 구역마다 닿는 시각이 다르다. 몬타주가 없으면 0.
+	//보스 블루프린트도 카메라 흔들림을 맞추려고 쓴다 (Left를 주면 첫 접촉 시각이다)
+	UFUNCTION(BlueprintPure, Category = "Battle|Motion")
+	static float StrikeImpactSeconds(const UAnimMontage* Montage, EBattleLane Lane);
+
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
  bool bAutoStartBattle = true;
 
@@ -683,19 +690,23 @@ private:
 	//이 상태의 공격 모션 길이. 맵에 없으면 BossActionSeconds
 	float BossStrikeSecondsFor(const FString& StateId) const;
 
-	//회피자가 구르기 시작점까지 달려간다. 도착하는 순간이 구르기 시작이다
-	void BeginEvadeApproach();
+	//Leaving 구역을 떠나는 회피자가 구르기 시작점까지 달려간다. 도착하는 순간이 구르기 시작이다.
+	//칼이 구역마다 다른 시각에 닿으므로 출발 구역별로 따로 불린다
+	void BeginEvadeApproach(EBattleLane Leaving);
 
 	//From에서 To로 갈 때 **마지막으로 넘는** 경계를 돌려준다.
 	//좌→우면 중/우 경계다 — 목적 구역 바로 앞의 선을 넘어야 '들어갔다'가 된다.
 	//레벨에 그 표식이 없으면 false (회피는 목표 자리에 내려놓는 식으로 돈다)
 	bool TryGetLaneBoundary(EBattleLane From, EBattleLane To, FVector& OutBoundary) const;
 
-	//회피자 전원이 구른다. 보스가 휘두르기 RollLead초 전이다
-	void BeginEvadeRolls();
+	//Leaving 구역을 떠나는 회피자가 구른다. 그 구역에 칼이 닿기 RollLead초 전이다
+	void BeginEvadeRolls(EBattleLane Leaving);
 
-	//플레이어 공격이 다 끝나고 보스가 치는 순간 (기획서 M2의 BossAttack 단계)
+	//플레이어 공격이 다 끝나고 보스가 휘두르기 시작하는 순간 (기획서 M2의 BossAttack 단계)
 	void BossAttackBeat();
+
+	//Lane에 칼이 닿는 순간. 그 구역에 선 사람의 피격·사망 모션이 나간다
+	void LandBossStrike(EBattleLane Lane);
 
 	//거리와 시간에서 나온 속도로 걸음걸이를 고른다. 시간이 0 이하면 가장 빠른 것으로 본다
 	static EMoveGait ChooseGait(float Distance, float Seconds, float RunSpeed, float RollSpeed);
@@ -797,14 +808,22 @@ private:
 	//공격 연출을 끊어 보여주는 타이머. 단계 타이머와 동시에 돌기 때문에 따로 둔다
 	FTimerHandle AttackCueHandle;
 
+	//아래 셋은 EBattleLane으로 찾는다. 칼이 구역마다 다른 시각에 닿기 때문이다
+
 	//구르기는 보스 공격보다 먼저 시작하므로 단계 타이머와 겹친다
-	FTimerHandle EvadeRollHandle;
+	FTimerHandle EvadeRollHandles[3];
 
 	//접근 달리기는 구르기보다 더 먼저 시작한다
-	FTimerHandle EvadeApproachHandle;
+	FTimerHandle EvadeApproachHandles[3];
+
+	//칼이 닿는 순간. 휘두르기 시작(BossAttackBeat)보다 뒤다
+	FTimerHandle StrikeLandHandles[3];
 
 	//그 달리기에 쓸 시간. BeginEvadeApproach가 꺼내 쓴다
-	float EvadeApproachSeconds = 0.f;
+	float EvadeApproachSeconds[3] = { 0.f, 0.f, 0.f };
+
+	//휘두르기 시작부터 마지막 구역에 칼이 닿기까지. 그 전에 턴을 끝내면 안 된다
+	float StrikeLandsWithin = 0.f;
 
 	//이번 턴에 재생할 공격 연출. 피해 계산은 ResolveTurn에서 이미 끝났고 보여주기만 남았다.
 	//UObject를 들지 않으므로 UPROPERTY가 필요 없다

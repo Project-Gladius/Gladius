@@ -213,8 +213,12 @@ void ABattleManager::StopBattle()
   Chat->CancelPendingChatFetch();
  }
  GetWorldTimerManager().ClearTimer(PhaseTimerHandle);
-	GetWorldTimerManager().ClearTimer(EvadeRollHandle);
-	GetWorldTimerManager().ClearTimer(EvadeApproachHandle);
+	for (int32 Lane = 0; Lane < 3; ++Lane)
+	{
+		GetWorldTimerManager().ClearTimer(EvadeRollHandles[Lane]);
+		GetWorldTimerManager().ClearTimer(EvadeApproachHandles[Lane]);
+		GetWorldTimerManager().ClearTimer(StrikeLandHandles[Lane]);
+	}
 
 	//공격 연출 타이머는 반복이라 따로 끄지 않으면 전투가 끝나도 계속 돈다
 	GetWorldTimerManager().ClearTimer(AttackCueHandle);
@@ -1703,37 +1707,57 @@ void ABattleManager::ResolveTurn()
 	//여기는 이미 MoveSeconds가 지난 뒤라 그만큼 뺀다
 	const float BossDelay = BossStrikeDelay(FlurrySeconds, BattleTime - MoveSeconds);
 
-	//구르기는 보스가 휘두르기 RollLead초 전에 시작한다. 동시에 걸면 같은 순간에 오는
-	//피격 모션이 구르기를 곧바로 덮어, 구른 것은 안 보이고 미끄러지는 것만 보인다
-	const float RollAt = FMath::Max(0.f, BossDelay - RollLead);
+	//BossDelay는 **휘두르기 시작**이다. 칼은 그보다 뒤에, 구역마다 다른 시각에 닿는다
+	//(LeftRight는 왼쪽을 먼저 친다). 피격과 구르기는 닿는 순간에 맞춘다 — 시작에 맞추면
+	//칼이 오기도 전에 맞는 모션이 나가고, 회피자는 다 구른 뒤 멈춰 서서 칼을 맞는다
+	const UAnimMontage* Strike = BossUnit ? BossUnit->GetStrikeMontage(TelegraphedAction.Id) : nullptr;
+	StrikeLandsWithin = 0.f;
 
-	//회피자는 **여기서 바로 움직이지 않는다.** 구르기 직전에 달려가 구르기 시작점에
-	//도착해야 하므로, 달리기에 쓸 시간만큼 앞에서 출발한다.
-	//**BossDelay를 그대로 쓰면 안 된다** — 피버 연타가 길어지면 BossDelay가 20초까지
-	//늘어나는데, 그만큼을 이동에 주면 걸어가는 것처럼 기어간다
-	EvadeApproachSeconds = FMath::Min(MoveSeconds, RollAt);
-	const float ApproachAt = RollAt - EvadeApproachSeconds;
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		const EBattleLane Lane = static_cast<EBattleLane>(Index);
+		const float Impact = StrikeImpactSeconds(Strike, Lane);
+		const float LandAt = BossDelay + Impact;
+		StrikeLandsWithin = FMath::Max(StrikeLandsWithin, Impact);
 
-	if (ApproachAt > KINDA_SMALL_NUMBER)
-	{
-		GetWorldTimerManager().SetTimer(EvadeApproachHandle, this, &ABattleManager::BeginEvadeApproach,
-			ApproachAt, false);
-	}
-	else
-	{
-		//기다릴 틈이 없으면 지금 출발한다
-		BeginEvadeApproach();
-	}
+		GetWorldTimerManager().SetTimer(StrikeLandHandles[Index],
+			FTimerDelegate::CreateUObject(this, &ABattleManager::LandBossStrike, Lane),
+			FMath::Max(KINDA_SMALL_NUMBER, LandAt), false);
 
-	if (RollAt > KINDA_SMALL_NUMBER)
-	{
-		GetWorldTimerManager().SetTimer(EvadeRollHandle, this, &ABattleManager::BeginEvadeRolls,
-			RollAt, false);
-	}
-	else
-	{
-		//보스가 바로 친다. 달려갈 틈이 없으니 그 자리에서 구른다
-		BeginEvadeRolls();
+		//구르기는 칼이 닿기 RollLead초 전에 시작한다. 동시에 걸면 같은 순간에 오는
+		//피격 모션이 구르기를 곧바로 덮어, 구른 것은 안 보이고 미끄러지는 것만 보인다
+		const float RollAt = FMath::Max(0.f, LandAt - RollLead);
+
+		//회피자는 **여기서 바로 움직이지 않는다.** 구르기 직전에 달려가 구르기 시작점에
+		//도착해야 하므로, 달리기에 쓸 시간만큼 앞에서 출발한다.
+		//**RollAt을 그대로 쓰면 안 된다** — 피버 연타가 길어지면 BossDelay가 20초까지
+		//늘어나는데, 그만큼을 이동에 주면 걸어가는 것처럼 기어간다
+		EvadeApproachSeconds[Index] = FMath::Min(MoveSeconds, RollAt);
+		const float ApproachAt = RollAt - EvadeApproachSeconds[Index];
+
+		if (ApproachAt > KINDA_SMALL_NUMBER)
+		{
+			GetWorldTimerManager().SetTimer(EvadeApproachHandles[Index],
+				FTimerDelegate::CreateUObject(this, &ABattleManager::BeginEvadeApproach, Lane),
+				ApproachAt, false);
+		}
+		else
+		{
+			//기다릴 틈이 없으면 지금 출발한다
+			BeginEvadeApproach(Lane);
+		}
+
+		if (RollAt > KINDA_SMALL_NUMBER)
+		{
+			GetWorldTimerManager().SetTimer(EvadeRollHandles[Index],
+				FTimerDelegate::CreateUObject(this, &ABattleManager::BeginEvadeRolls, Lane),
+				RollAt, false);
+		}
+		else
+		{
+			//보스가 바로 친다. 달려갈 틈이 없으니 그 자리에서 구른다
+			BeginEvadeRolls(Lane);
+		}
 	}
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BossAttackBeat,
@@ -1861,15 +1885,17 @@ float ABattleManager::BossStrikeSecondsFor(const FString& StateId) const
 	return FMath::Max(0.f, BossActionSeconds);
 }
 
-void ABattleManager::BeginEvadeApproach()
+void ABattleManager::BeginEvadeApproach(EBattleLane Leaving)
 {
 	//구르기 시작점까지 달려간다. 도착하는 순간이 곧 BeginEvadeRolls다.
 	//회피 한 번은 세 토막으로 나뉜다 — 경계 앞까지 달리기 / 구르며 경계 넘기 /
 	//남은 거리를 걸어 자리로 (마지막은 EndTurn의 원위치 이동이 맡는다)
+	const float ApproachSeconds = EvadeApproachSeconds[static_cast<int32>(Leaving)];
+
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
+		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction) || P.LaneBeforeMove != Leaving)
 		{
 			continue;
 		}
@@ -1916,20 +1942,20 @@ void ABattleManager::BeginEvadeApproach()
 		}
 
 		const FVector Waypoint = From + Dir * Lead;
-		P.Unit->MoveTo(Waypoint, EvadeApproachSeconds,
-			ChooseGait(Lead, EvadeApproachSeconds, RunSpeed, RollSpeed));
+		P.Unit->MoveTo(Waypoint, ApproachSeconds,
+			ChooseGait(Lead, ApproachSeconds, RunSpeed, RollSpeed));
 	}
 }
 
-void ABattleManager::BeginEvadeRolls()
+void ABattleManager::BeginEvadeRolls(EBattleLane Leaving)
 {
-	//보스가 휘두르기 RollLead초 전. 구르기를 먼저 보여 주고, 그 끝자락에
-	//BossAttackBeat의 피격 모션이 덮는다 — 구르다 걸린 것처럼 보인다.
+	//떠나는 구역에 칼이 닿기 RollLead초 전. 구르기를 먼저 보여 주고, 그 끝자락에
+	//LandBossStrike의 피격 모션이 덮는다 — 구르다 걸린 것처럼 보인다.
 	//구르기 전까지는 원래 구역에 서 있었으므로, 구역을 넘는 것이 곧 이 구르기다
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction))
+		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction) || P.LaneBeforeMove != Leaving)
 		{
 			continue;
 		}
@@ -1961,12 +1987,59 @@ void ABattleManager::BossAttackBeat()
 		BossUnit->OnBossAttack(TelegraphedAction.Id, TelegraphedAction.HitCount);
 	}
 
-	//보스가 휘두르는 바로 이 순간에 맞는 쪽 반응이 나간다.
+	//맞는 쪽 반응은 여기가 아니라 칼이 닿는 LandBossStrike에서 나간다.
+	//공격 모션이 끝나야 다음 턴으로 간다. 상태마다 길이가 2.7초~8.4초로 갈린다.
+	//마지막 구역에 칼이 닿기 전에 끝나면 맞는 모션이 다음 턴으로 넘어가므로 그보다는 길게 잡는다
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn,
+		FMath::Max(BossStrikeSecondsFor(TelegraphedAction.Id), StrikeLandsWithin + KINDA_SMALL_NUMBER), false);
+}
+
+float ABattleManager::StrikeImpactSeconds(const UAnimMontage* Montage, EBattleLane Lane)
+{
+	if (!Montage)
+	{
+		return 0.f;
+	}
+
+	const FName LaneHit = Lane == EBattleLane::Left ? FName(TEXT("LeftHit"))
+		: Lane == EBattleLane::Right ? FName(TEXT("RightHit"))
+		: NAME_None;
+
+	//구역 전용 → 공용 → 아무 구역 순으로 찾는다. LeftRight처럼 가운데를 안 치는 공격에서
+	//가운데를 떠나는 회피자는 먼저 닿는 쪽(LeftHit)에 맞춰 구른다.
+	//NotifyTimeIn은 못 찾으면 경고를 남기므로, 있는지는 여기서 먼저 본다
+	const FName Candidates[] = { LaneHit, TEXT("Hit"), TEXT("LeftHit"), TEXT("RightHit") };
+	for (const FName& Name : Candidates)
+	{
+		const bool bHas = !Name.IsNone() && Montage->Notifies.ContainsByPredicate(
+			[&Name](const FAnimNotifyEvent& Event) { return Event.NotifyName == Name; });
+		if (bHas)
+		{
+			return ABattleUnit::NotifyTimeIn(Montage, Name, TEXT("Strike"));
+		}
+	}
+
+	//공격 몬타주인데 타격 표시가 없다. 조용히 넘어가면 휘두르기 시작에 맞는 그림이 나와
+	//원인을 짚기 어렵다
+	UE_LOG(LogTemp, Warning, TEXT("StrikeImpactSeconds: %s 에 Hit / LeftHit / RightHit 노티파이가 없다"),
+		*Montage->GetName());
+	return 0.f;
+}
+
+void ABattleManager::LandBossStrike(EBattleLane Lane)
+{
+	//칼이 이 구역에 닿는 바로 이 순간에 맞는 쪽 반응이 나간다.
 	//방어한 사람도 여기로 들어오므로 막는 모션과 그냥 맞는 모션은 블루프린트가 가른다.
-	//이번 턴에 쓰러진 사람은 맞는 모션까지 보여준 뒤 쓰러진다
+	//이번 턴에 쓰러진 사람은 맞는 모션까지 보여준 뒤 쓰러진다.
+	//구역은 **옮긴 뒤** 자리다 — 피해도 그 자리 기준으로 계산됐다
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
+		if (P.Lane != Lane)
+		{
+			continue;
+		}
+
 		if (P.Unit)
 		{
 			if (P.DamageTakenThisTurn > 0)
@@ -1988,10 +2061,6 @@ void ABattleManager::BossAttackBeat()
 		P.DamageTakenThisTurn = 0;
 		P.bDiedThisTurn = false;
 	}
-
-	//공격 모션이 끝나야 다음 턴으로 간다. 상태마다 길이가 2.7초~8.4초로 갈린다
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::EndTurn,
-		BossStrikeSecondsFor(TelegraphedAction.Id), false);
 }
 
 void ABattleManager::EndTurn()
@@ -3038,6 +3107,47 @@ void ABattleManager::RunSelfTest()
 		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Nope"), NAME_None), 0.f));
 		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Fire"), TEXT("Nope")), 0.f));
 		check(FMath::IsNearlyEqual(ABattleUnit::NotifyTimeIn(Attack1, TEXT("Fire"), NAME_None, 9), 0.f));
+	}
+
+	// --- 보스 칼이 닿는 시각 ---
+	//
+	//절대 시각은 에디터에서 읽어 둔 값이 없으므로 관계만 본다 —
+	//Strike 섹션 안에서 닿고, 휘두르기 시작보다는 뒤이며, LeftRight는 왼쪽을 먼저 친다
+	{
+		const auto Load = [](const TCHAR* Name) -> UAnimMontage*
+		{
+			const FString Path = FString::Printf(
+				TEXT("/Game/Asset/Battle/Trudon/Animation/AnimationMontage/%s.%s"), Name, Name);
+			return LoadObject<UAnimMontage>(nullptr, *Path);
+		};
+
+		const auto StrikeLength = [](const UAnimMontage* Montage)
+		{
+			float Start = 0.f;
+			float End = 0.f;
+			Montage->GetSectionStartAndEndTime(Montage->GetSectionIndex(TEXT("Strike")), Start, End);
+			return End - Start;
+		};
+
+		UAnimMontage* const Center = Load(TEXT("AM_Trudon_SingleStrikeCenter"));
+		UAnimMontage* const LeftRight = Load(TEXT("AM_Trudon_LeftRight"));
+		check(Center && LeftRight);
+
+		//구역 전용 노티파이가 없으면 어느 구역이든 같은 Hit을 쓴다
+		const float CenterHit = StrikeImpactSeconds(Center, EBattleLane::Mid);
+		check(CenterHit > 0.f && CenterHit <= StrikeLength(Center));
+		check(FMath::IsNearlyEqual(StrikeImpactSeconds(Center, EBattleLane::Left), CenterHit));
+		check(FMath::IsNearlyEqual(StrikeImpactSeconds(Center, EBattleLane::Right), CenterHit));
+
+		//LeftRight는 카메라 기준 왼쪽을 먼저 친다. 가운데는 안 맞지만,
+		//가운데를 떠나는 회피자는 먼저 닿는 쪽에 맞춰 구른다
+		const float LeftHit = StrikeImpactSeconds(LeftRight, EBattleLane::Left);
+		const float RightHit = StrikeImpactSeconds(LeftRight, EBattleLane::Right);
+		check(LeftHit > 0.f && LeftHit < RightHit && RightHit <= StrikeLength(LeftRight));
+		check(FMath::IsNearlyEqual(StrikeImpactSeconds(LeftRight, EBattleLane::Mid), LeftHit));
+
+		//공격이 없는 상태는 몬타주가 없다. 휘두르기 시작과 동시에 처리된다
+		check(FMath::IsNearlyEqual(StrikeImpactSeconds(nullptr, EBattleLane::Mid), 0.f));
 	}
 
 	// --- 돌진 좌표 ---

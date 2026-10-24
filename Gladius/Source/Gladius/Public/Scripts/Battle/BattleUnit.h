@@ -212,6 +212,13 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnBossAttack(const FString& StateId, int32 HitCount);
 
+	//이 상태에서 휘두를 공격 몬타주. 블루프린트의 StrikeMontage 맵을 찾아 돌려주면 된다.
+	//매니저가 여기서 칼이 닿는 시각을 **미리** 읽어 피격과 구르기를 그 순간에 맞춘다 —
+	//닿는 순간 블루프린트가 알려 주는 방식으로는 그보다 먼저 시작하는 구르기를 맞출 수 없다.
+	//공격이 없는 상태(Defense 등)는 null이고, 그러면 휘두르기 시작과 동시에 맞는다
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	UAnimMontage* GetStrikeMontage(const FString& StateId) const;
+
 	//스폰 시 스케일이 1로 덮이므로, 크기는 Mesh 컴포넌트 쪽에서 준다.
 	//그래서 액터 루트는 빈 SceneComponent로 두고 Mesh를 그 아래 붙인다
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
