@@ -57,6 +57,40 @@ public:
 	FOnBattleUnitAttackStarted OnAttackStarted;
 	void NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
 
+	// ===== 전투 명령 실행 함수 =====
+	//채팅 명령(!회피 좌/중/우, !공격 1/2, !방어)은 입력 시간이 끝난 뒤 행동 턴에 BattleManager가 이 함수들로 실행한다.
+	//C++ 기본 구현이 지금의 이동·모션을 그대로 수행하며, 블루프린트에서 덮어써 연출을 바꿀 수 있다
+
+	//!회피 좌: 왼쪽 구역으로 구르기. RollTo까지 RollSeconds 동안 RollDistance만큼 이동
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Battle|Command")
+	void DodgeLeft(const FVector& RollTo, float RollSeconds, float RollDistance);
+
+	//!회피 중: 가운데 구역으로 구르기
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Battle|Command")
+	void DodgeMid(const FVector& RollTo, float RollSeconds, float RollDistance);
+
+	//!회피 우: 오른쪽 구역으로 구르기
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Battle|Command")
+	void DodgeRight(const FVector& RollTo, float RollSeconds, float RollDistance);
+
+	//!공격 1: 스킬1 시전
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Battle|Command")
+	void CastSkill1(bool bCrit, bool bFeverHighlight);
+
+	//!공격 2: 스킬2 시전
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Battle|Command")
+	void CastSkill2(bool bCrit, bool bFeverHighlight);
+
+	//!방어: 막는 자세
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Battle|Command")
+	void Defend();
+
+	//행동 종류로 위 함수를 골라 호출 (AvoidL/M/R -> DodgeLeft/Mid/Right)
+	void PerformDodge(EBattleAction Action, const FVector& RollTo, float RollSeconds, float RollDistance);
+
+	//공격 번호로 위 함수를 골라 호출 (1 -> CastSkill1, 2 -> CastSkill2)
+	void PerformSkill(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
+
 	//내 공격이 보스에게 **지금** 닿았다고 알린다. 칼이 닿거나 빔·투사체가 도착하는 순간
 	//블루프린트가 부른다 — 스킬 한 번, 피버 평타 한 대마다 한 번씩.
 	//피해는 이미 ResolveTurn에서 정해져 있고, 매니저가 그중 다음 한 대를 화면에 띄운다.
@@ -212,6 +246,10 @@ public:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnRevived();
+
+	//!로그아웃으로 전투에서 나가기 직전 (유닛은 곧 제거됨). 퇴장 연출용
+	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
+	void OnLoggedOut();
 
 	// ---- 보스 전용 훅 ----
 	//

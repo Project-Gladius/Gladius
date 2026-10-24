@@ -56,6 +56,9 @@ enum class ECommandType : uint8
 	Enhance4,
 	Talk,
 	TravelToCombat, // !전투: 신전에서 전투 이동 요청
+
+	// ===== 전투상태 (참가) =====
+	Login, // !로그인 글라디우스 / !로그인 세라. Argument: 캐릭터 이름
 };
 
 // 채팅 한 줄을 파싱한 결과

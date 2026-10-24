@@ -250,6 +250,9 @@ struct FBattleBalance
 	int32 InitialCritChanceLevel = 0;
 	int32 InitialCritDamageLevel = 0;
 
+	//회복 축복(blessings의 id 1)의 회복량 (amount). 파일에 없으면 -1 = BattleManager의 기본값 사용
+	int32 BlessingHealAmount = -1;
+
 	//각 파일의 revision. 어떤 개정판으로 돌았는지 로그에 남긴다
 	int32 AbilitiesRevision = 0;
 	int32 EnhancementsRevision = 0;

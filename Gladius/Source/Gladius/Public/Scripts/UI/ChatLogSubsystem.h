@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Scripts/Backend/YouTubeApiKeyPool.h"
 #include "ChatLogSubsystem.generated.h"
 
 UENUM(BlueprintType)
@@ -53,7 +54,11 @@ public:
 	void SetYouTubeSource(const FString& InApiKey, const FString& InVideoId, const TSet<FString>& InAdminUserIds);
 	bool GetYouTubeSource(FString& OutApiKey, FString& OutVideoId, TSet<FString>& OutAdminUserIds) const;
 
+	//레벨이 바뀌어도 바닥난 키를 기억하도록 게임 인스턴스에 둠
+	FYouTubeApiKeyPool& GetApiKeyPool() { return ApiKeyPool; }
+
 private:
+	FYouTubeApiKeyPool ApiKeyPool;
 	UPROPERTY(Transient)
 	TArray<FChatLogEntry> Entries;
 	TSet<FString> SeenMessageIds;

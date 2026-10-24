@@ -15,6 +15,7 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/GameInstance.h"
+#include "Scripts/Time/RealTimeSettings.h"
 
 ATempleCycleController::ATempleCycleController()
 {
@@ -36,6 +37,12 @@ void ATempleCycleController::BeginPlay()
  }
 
 	CommandQueue = NewObject<UTempleCommandQueue>(this);
+	//!강화는 전투 종료 때 지급된 남은 축복 횟수(저장된 기록)만큼만 받음
+	CommandQueue->GetRemainingBlessings = [WeakThis = TWeakObjectPtr<ATempleCycleController>(this)](const FString& UserId)
+	{
+		const ATempleCycleController* Self = WeakThis.Get();
+		return Self && IsValid(Self->BattleManager) ? Self->BattleManager->GetRemainingBlessings(UserId) : 0;
+	};
 	BatchClient = NewObject<UTempleAIBatchClient>(this);
 	BatchClient->EndpointUrl = TempleAIBatchEndpointUrl;
 	BatchClient->ClientToken = TempleAIClientToken;
@@ -179,6 +186,14 @@ void ATempleCycleController::HandleCycleTimer()
 {
 	if (bLeavingTemple) return;
 
+	//정해진 사이클을 모두 마쳤으면(마지막 사이클의 40초가 지난 지금) 전투로 이동
+	if (CyclesBeforeCombat > 0 && CompletedCycles >= CyclesBeforeCombat)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d회 완료, 전투로 이동"), CompletedCycles);
+		RequestCombatTravel();
+		return;
+	}
+
 	if (ChatManager)
 	{
 		ChatManager->RequestChatFetch(); //완료되면 HandleChatFetchFinished에서 사이클 시작
@@ -280,6 +295,13 @@ void ATempleCycleController::RequestCombatTravel()
 {
 	if (bLeavingTemple) return;
 	ResolveReferences();
+	//레벨에 GameManager나 전투 레벨 지정이 없으면 프로젝트 설정(Real Time > Battle Map)을 사용 (시간표 이동과 같은 방식)
+	if (bAutoTravelOnCombatRequest)
+	{
+		const URealTimeSettings* Settings = GetDefault<URealTimeSettings>();
+		if (!GameManager && !Settings->BattleMap.IsNull()) GameManager = GetWorld()->SpawnActor<AGameManager>();
+		if (GameManager && GameManager->CombatLevel.IsNull()) GameManager->CombatLevel = Settings->BattleMap;
+	}
 	if (bAutoTravelOnCombatRequest && (!GameManager || GameManager->CombatLevel.IsNull()))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[신전] 전투 이동 불가: GameManager와 CombatLevel을 지정하세요."));

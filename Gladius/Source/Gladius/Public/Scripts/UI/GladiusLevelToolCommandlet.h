@@ -14,7 +14,11 @@
 //   ... -spawn="/Script/Gladius.TempleCycleController|TempleCycleController|0,0,0|0,0,0"
 // 플레이어 카메라로 쓸 카메라 지정 (라벨):
 //   ... -viewcamera=CameraActor
-// -set / -spawn / -viewcamera가 있으면 레벨을 저장한다
+// 속성 값 출력 (라벨|속성,속성):
+//   ... -getprop="BattleManager|TelegraphSeconds,PlayerSelectCountdown"
+// 속성 값 설정 (라벨|속성|값, 여러 개는 ; 로 구분. 값은 에디터 복사/붙여넣기와 같은 텍스트 형식):
+//   ... -setprop="BattleManager|TelegraphSeconds|8;BattleManager|CollectSeconds|10"
+// -set / -spawn / -viewcamera / -setprop이 있으면 레벨을 저장한다 (World Partition 외부 액터 포함)
 UCLASS()
 class GLADIUS_API UGladiusLevelToolCommandlet : public UCommandlet
 {

@@ -32,6 +32,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|Cycle", meta = (ClampMin = "1.0"))
 	float CycleSeconds = 40.0f;
 
+	//이 횟수만큼 사이클이 끝나면 전투 레벨로 이동 (0이면 자동 이동 안 함, !전투·시간표로만 이동)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|Cycle", meta = (ClampMin = "0"))
+	int32 CyclesBeforeCombat = 5;
+
 	UPROPERTY(BlueprintAssignable, Category = "Temple|Travel")
 	FOnTempleCombatRequested OnCombatRequested;
 
