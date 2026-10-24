@@ -11,6 +11,9 @@ class UCurveFloat;
 class UBattlePlayerNameplate;
 struct FBattlePlayerUIData;
 
+DECLARE_MULTICAST_DELEGATE(FOnBattleUnitMovementFinished);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnBattleUnitAttackStarted, int32);
+
 //전투에 등장하는 유닛. 메시·크기·이름표 위치는 블루프린트에서 지정한다.
 //BattleManager가 PlayerUnitClass / BossUnitClass로 어떤 블루프린트를 쓸지 고른다
 UCLASS()
@@ -44,6 +47,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsMoving() const { return bMoving; }
 
+	// Fired in the arrival frame, after the Blueprint switches out of locomotion.
+	FOnBattleUnitMovementFinished OnMovementFinished;
+
+	// The Blueprint starts its montage synchronously; observers run after that start.
+	FOnBattleUnitAttackStarted OnAttackStarted;
+	void NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight);
+
 	// ---- ABP가 읽어 가는 상태 ----
 	//
 	//**애님 블루프린트는 이것들을 BlueprintUpdateAnimation에서 직접 읽는다.**
@@ -62,6 +72,8 @@ public:
 	//마지막 이동의 걸음걸이가 걷기보다 빠른가
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsRunning() const { return LastGait != EMoveGait::Walk; }
+
+	EMoveGait GetMoveGait() const { return LastGait; }
 
 	UFUNCTION(BlueprintPure, Category = "Battle")
 	bool IsDead() const { return bDead; }

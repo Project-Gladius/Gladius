@@ -83,8 +83,9 @@ void AGladiusRunCamera::AdvanceYaw(float TargetYaw, float DeltaSeconds, float Sp
 
 bool AGladiusRunCamera::InitializeCamera_Implementation()
 {
-    const ABattleUnit* Subject = GetSubject();
+    ABattleUnit* Subject = GetSubject();
     if (!Subject) { return false; }
+    Subject->OnAttackStarted.RemoveAll(this);
     AngularVelocity = 0.f;
     CurrentYaw = Subject->GetActorRotation().Yaw;
     if (const ABattleUnit* Boss = GetBattleManager()->GetBossUnit())
@@ -94,7 +95,23 @@ bool AGladiusRunCamera::InitializeCamera_Implementation()
         if (Direction.Normalize()) { CurrentYaw = Direction.Rotation().Yaw; }
     }
     GetDesiredYaw(CurrentYaw);
-    return UpdatePose();
+    if (!UpdatePose()) return false;
+    Subject->OnAttackStarted.AddUObject(this, &AGladiusRunCamera::HandleSubjectAttackStarted);
+    return true;
+}
+
+void AGladiusRunCamera::StopCutScene()
+{
+    if (ABattleUnit* Subject = GetSubject()) Subject->OnAttackStarted.RemoveAll(this);
+    Super::StopCutScene();
+}
+
+void AGladiusRunCamera::HandleSubjectAttackStarted(int32 AttackIndex)
+{
+    if (AttackIndex != 1 && AttackIndex != 2) return;
+    // The attack montage has started; change cameras in this same call/frame.
+    StopCutScene();
+    OnFinished.Broadcast(false);
 }
 
 void AGladiusRunCamera::UpdateCamera_Implementation(float RealDeltaSeconds)

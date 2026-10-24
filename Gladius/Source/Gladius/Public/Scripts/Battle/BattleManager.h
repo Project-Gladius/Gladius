@@ -10,6 +10,7 @@ class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
 class UChatLogWidget;
+class UBattleDataResetWidget;
 
 //BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
@@ -480,6 +481,14 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
  int32 HPPerBonus = 1;
 
+ // Temporary buttons are only displayed in MainBattle.
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
+ bool bShowTemporaryDataResetButtons = true;
+
+ // Clears JSON records and removes matching participants. Test accounts use @testuser + digits.
+ UFUNCTION(BlueprintCallable, Category = "Battle|Debug")
+ bool ResetSavedUserData(bool bTestUsersOnly);
+
  void InitializePlayerRecords();
 
  UFUNCTION(BlueprintCallable, Category = "Battle|Temple")
@@ -621,6 +630,9 @@ public:
 private:
  UPROPERTY(Transient)
  TObjectPtr<UChatLogWidget> ChatLogWidget;
+ UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;
+ TWeakObjectPtr<APlayerController> DataResetController;
+ bool bMouseCursorBeforeDataReset = false;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
  bool bRecordLoadFailed = false;
@@ -645,6 +657,8 @@ private:
  FString CutSceneAttackUserId;
  float CutSceneAttackStartTime = 0.f;
  bool bCutSceneAttackCrit = false;
+ void HandleSelectedGladiusAttackStarted(int32 AttackIndex);
+ void StartSelectedGladiusAttack();
  void StartMoveCutScenes();
  void StopTurnCutScenes();
  void PlayNextCutScene();

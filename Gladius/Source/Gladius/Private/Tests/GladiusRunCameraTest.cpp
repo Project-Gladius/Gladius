@@ -180,4 +180,23 @@ bool FRunCameraPlaybackTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Cancel restores original view target"), Controller->GetViewTarget(), GameCamera);
     return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRunCameraAttackSignalTest,"Gladius.CutSceneApplier.GladiusRun.AttackStartSignal",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FRunCameraAttackSignalTest::RunTest(const FString& Parameters)
+{
+    FRunCameraWorld Context;
+    auto* Applier=Context.World->SpawnActor<ACutSceneApplier>();
+    Applier->BattleManager=Context.Manager;
+    if(!TestTrue(TEXT("Run shot starts"),Applier->ApplyCutSceneForUser(TEXT("A"),TEXT("GladiusRun")))) return false;
+    Context.Subject->OnMovementFinished.Broadcast();
+    TestTrue(TEXT("Arrival alone does not start a skill camera before the attack"),Applier->IsPlaying());
+    Context.Subject->NotifyAttack(1,false,true);
+    TestFalse(TEXT("Attack start ends the run shot synchronously"),Applier->IsPlaying());
+    TestFalse(TEXT("Attack listener removed when shot ends"),Context.Subject->OnAttackStarted.IsBound());
+    TestTrue(TEXT("Second run shot starts"),Applier->ApplyCutSceneForUser(TEXT("A"),TEXT("GladiusRun")));
+    Applier->CancelCutScene();
+    TestFalse(TEXT("Cancelled run leaves no attack listener"),Context.Subject->OnAttackStarted.IsBound());
+    return true;
+}
+
 #endif

@@ -4,7 +4,6 @@
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/CutSceneCamera.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
-#include "Scripts/Battle/GladiusSkill1Camera.h"
 #include "Components/SceneComponent.h"
 #include "DefaultLevelSequenceInstanceData.h"
 #include "Engine/World.h"
@@ -29,11 +28,8 @@ ACutSceneApplier::ACutSceneApplier()
     FCutSceneDefinition GladiusRun;
     GladiusRun.CameraClass = AGladiusRunCamera::StaticClass();
     CutScenes.Add(TEXT("GladiusRun"), GladiusRun);
-    FCutSceneDefinition GladiusSkill1;
-    GladiusSkill1.CameraClass = AGladiusSkill1Camera::StaticClass();
-    CutScenes.Add(TEXT("GladiusSkill1"), GladiusSkill1);
     // Keep editable entries available without loading camera templates during CDO construction.
-    for (const TCHAR* Id : {TEXT("GladiusSkill2"), TEXT("SeraSkill1"), TEXT("SeraSkill2")})
+    for (const TCHAR* Id : {TEXT("GladiusSkill1"), TEXT("GladiusSkill2"), TEXT("SeraSkill1"), TEXT("SeraSkill2")})
     {
         FCutSceneDefinition& Def = CutScenes.Add(FName(Id));
         Def.WorldTimeScale = 1.f;
@@ -44,7 +40,7 @@ ACutSceneApplier::ACutSceneApplier()
 void ACutSceneApplier::EnsureDefaultCutScenes()
 {
     // Existing designer-assigned sequences/cameras always win.
-    for (const TCHAR* Id : {TEXT("GladiusSkill2"), TEXT("SeraSkill1"), TEXT("SeraSkill2")})
+    for (const TCHAR* Id : {TEXT("GladiusSkill1"), TEXT("GladiusSkill2"), TEXT("SeraSkill1"), TEXT("SeraSkill2")})
     {
         FCutSceneDefinition& Def = CutScenes.FindOrAdd(FName(Id));
         if (IsValid(Def.Sequence) || Def.CameraClass) continue;

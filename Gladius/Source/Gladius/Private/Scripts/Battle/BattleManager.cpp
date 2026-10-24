@@ -8,6 +8,7 @@
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
 #include "Scripts/UI/ChatLogWidget.h"
+#include "Scripts/UI/BattleDataResetWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
@@ -112,6 +113,24 @@ void ABattleManager::BeginPlay()
    ChatLogWidget->AddToViewport(1);
   }
  }
+ if (bShowTemporaryDataResetButtons && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("MainBattle"))
+ {
+  if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+  {
+   DataResetWidget = CreateWidget<UBattleDataResetWidget>(PC, UBattleDataResetWidget::StaticClass());
+   if (DataResetWidget)
+   {
+    DataResetWidget->SetBattleManager(this);
+    DataResetWidget->AddToViewport(100);
+    DataResetController = PC;
+    bMouseCursorBeforeDataReset = PC->bShowMouseCursor;
+    PC->bShowMouseCursor = true;
+    FInputModeGameAndUI InputMode;
+    InputMode.SetHideCursorDuringCapture(false);
+    PC->SetInputMode(InputMode);
+   }
+  }
+ }
  GatherSpots();
 
 	for (const FCharacterDef& Class : Classes)
@@ -137,6 +156,8 @@ void ABattleManager::BeginPlay()
 
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+ if (DataResetWidget) DataResetWidget->RemoveFromParent();
+ if (DataResetController.IsValid()) DataResetController->bShowMouseCursor = bMouseCursorBeforeDataReset;
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->GetCommandDispatcher()->UnbindBattleManager(this);
@@ -530,6 +551,56 @@ void ABattleManager::SaveRecords()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] 유저 기록 %d명 저장"), File.Records.Num());
+}
+
+bool ABattleManager::ResetSavedUserData(bool bTestUsersOnly)
+{
+ InitializePlayerRecords();
+ // A selective reset cannot preserve real users if their source file could not be read.
+ if (bTestUsersOnly && bRecordLoadFailed) return false;
+ auto Matches = [bTestUsersOnly](const FString& Id)
+ {
+  if (!bTestUsersOnly) return true;
+  const FString Prefix = TEXT("@testuser");
+  if (!Id.StartsWith(Prefix, ESearchCase::CaseSensitive)) return false;
+  const FString Suffix = Id.Mid(Prefix.Len());
+  if (Suffix.IsEmpty()) return false;
+  for (TCHAR Digit : Suffix) if (Digit < TEXT('0') || Digit > TEXT('9')) return false;
+  return true;
+ };
+ auto Remaining = Records;
+ for (const auto& Pair : Players)
+  if (FPlayerRecord* Record = Remaining.Find(Pair.Key)) Record->CurrentHealth = Pair.Value.HP;
+ for (auto It = Remaining.CreateIterator(); It; ++It)
+  if (Matches(It.Key())) It.RemoveCurrent();
+ FPlayerRecordFile File;
+ Remaining.GenerateValueArray(File.Records);
+ FString Json;
+ // Persist first: failed writes must leave live participants and progression intact.
+ if (!FJsonObjectConverter::UStructToJsonObjectString(File, Json)
+     || !FFileHelper::SaveStringToFile(Json, *RecordFilePath(), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+ {
+  UE_LOG(LogTemp, Error, TEXT("[Battle] 유저 데이터 초기화 저장 실패: %s"), *RecordFilePath());
+  return false;
+ }
+ if (Matches(CutSceneUserId))
+ {
+  StopTurnCutScenes();
+  CutSceneUserId.Reset();
+  CutSceneIds.Reset();
+ }
+ TArray<FString> RemoveIds;
+ for (const auto& Pair : Players) if (Matches(Pair.Key)) RemoveIds.Add(Pair.Key);
+ for (const FString& Id : RemoveIds) RemovePlayer(Id);
+ Records = MoveTemp(Remaining);
+ bRecordLoadFailed = false;
+ for (auto It = SelectedCutSceneUsers.CreateIterator(); It; ++It)
+  if (Matches(*It)) It.RemoveCurrent();
+ if (!bTestUsersOnly && bBattleRunning) StartBattle();
+ UpdateVisuals();
+ RefreshPlayerUI();
+ UE_LOG(LogTemp, Log, TEXT("[Battle] %s 유저 데이터 초기화 완료"), bTestUsersOnly ? TEXT("테스트") : TEXT("전체"));
+ return true;
 }
 
 void ABattleManager::LoadRecords()
@@ -1032,6 +1103,39 @@ void ABattleManager::StartMoveCutScenes()
  }
 
  PlayNextCutScene();
+ if (ClassId == TEXT("gladius") && IsValid(Selected->Unit))
+ {
+  Selected->Unit->OnAttackStarted.RemoveAll(this);
+  Selected->Unit->OnAttackStarted.AddUObject(this, &ABattleManager::HandleSelectedGladiusAttackStarted);
+  Selected->Unit->OnMovementFinished.RemoveAll(this);
+  Selected->Unit->OnMovementFinished.AddUObject(this, &ABattleManager::StartSelectedGladiusAttack);
+  if (!Selected->Unit->IsMoving()) StartSelectedGladiusAttack();
+ }
+}
+
+void ABattleManager::HandleSelectedGladiusAttackStarted(int32 AttackIndex)
+{
+ // Also support designer-provided run sequences; the camera changes only after the montage start.
+ if ((AttackIndex == 1 || AttackIndex == 2) && bBattleRunning && CutSceneIndex == 1
+     && CutSceneIndex < ActiveCutSceneIds.Num() && IsValid(CutSceneApplier) && CutSceneApplier->IsPlaying())
+  CutSceneApplier->CancelCutScene();
+}
+
+void ABattleManager::StartSelectedGladiusAttack()
+{
+ if (!bBattleRunning || (Phase != EBattlePhase::Move && Phase != EBattlePhase::BossAction)
+     || CutSceneAttackUserId == CutSceneUserId) return;
+ const FBattlePlayer* P = Players.Find(CutSceneUserId);
+ if (!P || !IsValid(P->Unit) || P->HP <= 0 || P->ReviveCountdown > 0
+     || !Classes.IsValidIndex(P->ClassIndex) || Classes[P->ClassIndex].Id != TEXT("gladius")
+     || (P->PendingAction != EBattleAction::Attack1 && P->PendingAction != EBattleAction::Attack2)) return;
+ P->Unit->OnMovementFinished.RemoveAll(this);
+ const int32 AttackIndex = P->PendingAction == EBattleAction::Attack1 ? 1 : 2;
+ const FAttackDef& Attack = Classes[P->ClassIndex].Attacks[AttackIndex - 1];
+ CutSceneAttackUserId = CutSceneUserId;
+ CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
+ bCutSceneAttackCrit = FMath::FRand() < FMath::Min(Attack.CritChance + P->CritChanceBonus, CritChanceCap);
+ P->Unit->NotifyAttack(AttackIndex, bCutSceneAttackCrit, true);
 }
 
 void ABattleManager::PlayNextCutScene()
@@ -1042,16 +1146,17 @@ void ABattleManager::PlayNextCutScene()
   const FName Id = ActiveCutSceneIds[CutSceneIndex++];
   if (CutSceneApplier->ApplyCutSceneForUser(CutSceneUserId, Id))
   {
-   if (Id == FName(TEXT("SeraSkill2")))
+   if (Id == TEXT("SeraSkill1") || Id == TEXT("SeraSkill2"))
    {
     if (const FBattlePlayer* P = Players.Find(CutSceneUserId); P && IsValid(P->Unit) && Classes.IsValidIndex(P->ClassIndex))
     {
      // The camera starts the skill immediately, independently of movement and attack groups.
      CutSceneAttackUserId = CutSceneUserId;
      CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
-     const FAttackDef& Attack = Classes[P->ClassIndex].Attacks[1];
+     const int32 AttackIndex = P->PendingAction == EBattleAction::Attack1 ? 1 : 2;
+     const FAttackDef& Attack = Classes[P->ClassIndex].Attacks[AttackIndex - 1];
      bCutSceneAttackCrit = FMath::FRand() < FMath::Min(Attack.CritChance + P->CritChanceBonus, CritChanceCap);
-     P->Unit->OnAttack(2, bCutSceneAttackCrit, true);
+     P->Unit->NotifyAttack(AttackIndex, bCutSceneAttackCrit, true);
     }
    }
    RefreshPlayerUI();
@@ -1063,6 +1168,12 @@ void ABattleManager::PlayNextCutScene()
 
 void ABattleManager::StopTurnCutScenes()
 {
+ for (const auto& Pair : Players)
+  if (IsValid(Pair.Value.Unit))
+  {
+   Pair.Value.Unit->OnMovementFinished.RemoveAll(this);
+   Pair.Value.Unit->OnAttackStarted.RemoveAll(this);
+  }
  CutSceneAttackUserId.Reset();
  if (IsValid(CutSceneApplier))
  {
@@ -1232,8 +1343,11 @@ void ABattleManager::BeginMove()
 			? P.TargetLocation : ChargeLocation(P.TargetLocation);
 		const float Distance = FVector::Dist(P.Unit->GetActorLocation(), Target);
 
-		P.Unit->MoveTo(Target, MoveSecondsForMe,
-			ChooseGait(Distance, MoveSecondsForMe, RunSpeed, RollSpeed));
+		EMoveGait ApproachGait = ChooseGait(Distance, MoveSecondsForMe, RunSpeed, RollSpeed);
+		// An attacking Gladius charges straight into the skill; rolls belong to evade actions.
+		if (Classes.IsValidIndex(P.ClassIndex) && Classes[P.ClassIndex].Id == TEXT("gladius")
+			&& ApproachGait == EMoveGait::Roll) ApproachGait = EMoveGait::Run;
+		P.Unit->MoveTo(Target, MoveSecondsForMe, ApproachGait);
 	}
 
 	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::ResolveTurn, FMath::Max(0.001f, MoveSeconds), false);
@@ -1429,7 +1543,7 @@ void ABattleManager::ResolveTurn()
 			const float CritDamage = Attack.CritDamage + P.CritDamageBonus;
 
 			//**스킬 피해에 피버는 들어가지 않는다.** 피버는 뒤이어 나가는 평타 횟수다
-			const bool bCrit = (bAttack2 && Pair.Key == CutSceneAttackUserId)
+			const bool bCrit = (Pair.Key == CutSceneAttackUserId)
 				? bCutSceneAttackCrit : FMath::FRand() < Chance;
 			int32 Dealt = DamageToBoss(Attack.BaseDamage, P.DamageBonus, Resist, bCrit, CritDamage);
 
@@ -1678,9 +1792,19 @@ void ABattleManager::FlushAttackCues()
 		{
 			if (P->Unit)
 			{
-				const bool bSkillAlreadyStarted = Cue.AttackIndex == 2 && Cue.UserId == CutSceneAttackUserId;
+				const bool bSkillAlreadyStarted = Cue.UserId == CutSceneAttackUserId;
 				if (!bSkillAlreadyStarted)
-					P->Unit->OnAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
+				{
+					// Fallback for an attack dispatched before the selected unit's arrival callback.
+					if (Cue.UserId == CutSceneUserId)
+					{
+						P->Unit->OnMovementFinished.RemoveAll(this);
+						CutSceneAttackUserId = Cue.UserId;
+						CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
+						bCutSceneAttackCrit = Cue.bCrit;
+					}
+					P->Unit->NotifyAttack(Cue.AttackIndex, Cue.bCrit, Cue.bFeverHighlight);
+				}
 
 				//평타는 스킬 모션이 끝난 뒤부터 이어진다. 그 길이를 AttackMotionSeconds가
 				//이미 BattleTime에서 예약해 뒀으므로, 마지막 대가 보스 공격과 맞물린다

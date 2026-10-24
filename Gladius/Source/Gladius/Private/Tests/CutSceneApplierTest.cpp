@@ -2,6 +2,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 #include "BattleCameraTestAccess.h"
+#include "Scripts/Battle/CutSceneCamera.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Engine/Engine.h"
@@ -402,6 +403,149 @@ bool FSeraImportedCameraTest::RunTest(const FString& Parameters)
     Applier->CancelCutScene();
     TestFalse(TEXT("Shot ends cleanly"), Applier->IsPlaying());
     TestEqual(TEXT("Previous view restored"), Controller->GetViewTarget(), PreviousCamera);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGladiusAuthoredCamerasTest, "Gladius.CutSceneApplier.GladiusAuthoredSkills",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGladiusAuthoredCamerasTest::RunTest(const FString& Parameters)
+{
+    FCutSceneTestWorld Context;
+    auto* Manager = Context.World->SpawnActor<ABattleManager>();
+    FCharacterDef Character; Character.Id = TEXT("gladius"); Character.BaseHP = 5;
+    Manager->Classes = {Character};
+    FBattleCameraTestAccess::Prepare(Manager);
+    if (!Manager->SubmitAction(TEXT("camera-user"), TEXT("Gladius"), EBattleAction::Attack1, TEXT("gladius"))) return false;
+    Manager->StopBattle();
+    auto* Subject = Manager->GetBattlePlayers().FindChecked(TEXT("camera-user")).Unit.Get();
+    auto* Boss = Manager->GetBossUnit();
+    auto* Controller = Context.World->SpawnActor<APlayerController>();
+    auto* LocalPlayer = NewObject<ULocalPlayer>(GEngine);
+    Context.Instance->AddLocalPlayer(LocalPlayer, FPlatformUserId::CreateFromInternalId(0));
+    Controller->SetPlayer(LocalPlayer);
+    auto* PreviousCamera = Context.World->SpawnActor<AActor>();
+    Controller->SetViewTarget(PreviousCamera);
+    auto* Applier = Context.World->SpawnActor<ACutSceneApplier>();
+    Applier->BattleManager = Manager;
+    Applier->EnsureDefaultCutScenes();
+    for (const TCHAR* Id : {TEXT("GladiusSkill1"), TEXT("GladiusSkill2")})
+    {
+        const auto& Def = Applier->CutScenes.FindChecked(FName(Id));
+        if (!TestTrue(TEXT("Authored sequence is default and has no procedural camera"), IsValid(Def.Sequence) && !Def.CameraClass)) return false;
+        TestEqual(TEXT("Camera-only bindings"), static_cast<const UMovieScene*>(Def.Sequence->GetMovieScene())->GetBindings().Num(), 4);
+        TestEqual(TEXT("Normal world speed"), Def.WorldTimeScale, 1.f);
+        FVector LocalCamera;
+        for (int32 Pass = 0; Pass < 2; ++Pass)
+        {
+            Subject->SetActorLocation(Pass ? FVector(-700, 500, 100) : FVector(1000, 200, 300));
+            Boss->SetActorLocation(Subject->GetActorLocation() + (Pass ? FVector(0, 1000, 0) : FVector(1000, 0, 0)));
+            if (!TestTrue(TEXT("Shot starts without Art map"), Applier->ApplyCutSceneForUser(TEXT("camera-user"), FName(Id)))) return false;
+            ULevelSequencePlayer* Player = nullptr;
+            for (TActorIterator<ALevelSequenceActor> It(Context.World); It; ++It) if (IsValid(*It)) Player = It->GetSequencePlayer();
+            if (!TestNotNull(TEXT("Sequence player exists"), Player)) return false;
+            auto Sample = [&](int32 Frame)
+            {
+                Player->SetPlaybackPosition(FMovieSceneSequencePlaybackParams(FFrameTime(FFrameNumber(Frame)), EUpdatePositionMethod::Jump));
+                auto Runner = Player->GetTickManager()->GetRunner(FMovieSceneSequenceTickInterval());
+                if (Runner) Runner->Flush();
+                return Player->GetActiveCameraComponent();
+            };
+            Player->Update(0.01f);
+            Player->GetTickManager()->RunLatentActions();
+            auto* First = Sample(1);
+            if (!TestNotNull(TEXT("First authored camera resolves"), First)) return false;
+            const auto Origin = ACutSceneApplier::MakeOrigin(*Subject, *Boss);
+            const FVector Position = Origin.InverseTransformPosition(First->GetComponentLocation());
+            if (!Pass) LocalCamera = Position;
+            else TestTrue(TEXT("Camera follows selected unit position and boss direction"), Position.Equals(LocalCamera, 0.1));
+            const auto* Cuts = Def.Sequence->GetMovieScene()->GetCameraCutTrack();
+            for (auto* Section : Cuts->GetAllSections())
+            {
+                const auto* Cut = static_cast<UMovieSceneCameraCutSection*>(Section);
+                TestEqual(TEXT("Cut references spawned camera"), Player->FindBoundObjects(Cut->GetCameraBindingID().GetGuid(), MovieSceneSequenceID::Root).Num(), 1);
+            }
+            const int32 SwitchFrame = FString(Id) == TEXT("GladiusSkill1") ? 20 : 30;
+            auto* Second = Sample(SwitchFrame + 1);
+            TestNotNull(TEXT("Second authored camera resolves"), Second);
+            TestTrue(TEXT("Camera cut switches cameras"), Second && Second != First);
+            Applier->CancelCutScene();
+            TestFalse(TEXT("Shot stops"), Applier->IsPlaying());
+            TestEqual(TEXT("View restored"), Controller->GetViewTarget(), PreviousCamera);
+        }
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSera1AuthoredCamerasTest, "Gladius.CutSceneApplier.Sera1AuthoredSkill",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSera1AuthoredCamerasTest::RunTest(const FString& Parameters)
+{
+    FCutSceneTestWorld Context;
+    auto* Manager = Context.World->SpawnActor<ABattleManager>();
+    FCharacterDef Character; Character.Id = TEXT("sera"); Character.BaseHP = 5;
+    Manager->Classes = {Character};
+    FBattleCameraTestAccess::Prepare(Manager);
+    if (!Manager->SubmitAction(TEXT("camera-user"), TEXT("Sera"), EBattleAction::Attack1, TEXT("sera"))) return false;
+    Manager->StopBattle();
+    auto* Subject = Manager->GetBattlePlayers().FindChecked(TEXT("camera-user")).Unit.Get();
+    auto* Boss = Manager->GetBossUnit();
+    auto* Controller = Context.World->SpawnActor<APlayerController>();
+    auto* LocalPlayer = NewObject<ULocalPlayer>(GEngine);
+    Context.Instance->AddLocalPlayer(LocalPlayer, FPlatformUserId::CreateFromInternalId(0));
+    Controller->SetPlayer(LocalPlayer);
+    auto* PreviousCamera = Context.World->SpawnActor<AActor>();
+    Controller->SetViewTarget(PreviousCamera);
+    auto* Applier = Context.World->SpawnActor<ACutSceneApplier>();
+    Applier->BattleManager = Manager;
+    Applier->EnsureDefaultCutScenes();
+    for (const TCHAR* Id : {TEXT("SeraSkill1")})
+    {
+        const auto& Def = Applier->CutScenes.FindChecked(FName(Id));
+        if (!TestTrue(TEXT("Authored sequence is default and has no procedural camera"), IsValid(Def.Sequence) && !Def.CameraClass)) return false;
+        TestEqual(TEXT("Camera-only bindings"), static_cast<const UMovieScene*>(Def.Sequence->GetMovieScene())->GetBindings().Num(), 6);
+        TestEqual(TEXT("Normal world speed"), Def.WorldTimeScale, 1.f);
+        FVector LocalCamera;
+        for (int32 Pass = 0; Pass < 2; ++Pass)
+        {
+            Subject->SetActorLocation(Pass ? FVector(-700, 500, 100) : FVector(1000, 200, 300));
+            Boss->SetActorLocation(Subject->GetActorLocation() + (Pass ? FVector(0, 1000, 0) : FVector(1000, 0, 0)));
+            if (!TestTrue(TEXT("Shot starts without Art map"), Applier->ApplyCutSceneForUser(TEXT("camera-user"), FName(Id)))) return false;
+            ULevelSequencePlayer* Player = nullptr;
+            for (TActorIterator<ALevelSequenceActor> It(Context.World); It; ++It) if (IsValid(*It)) Player = It->GetSequencePlayer();
+            if (!TestNotNull(TEXT("Sequence player exists"), Player)) return false;
+            auto Sample = [&](int32 Frame)
+            {
+                Player->SetPlaybackPosition(FMovieSceneSequencePlaybackParams(FFrameTime(FFrameNumber(Frame)), EUpdatePositionMethod::Jump));
+                auto Runner = Player->GetTickManager()->GetRunner(FMovieSceneSequenceTickInterval());
+                if (Runner) Runner->Flush();
+                return Player->GetActiveCameraComponent();
+            };
+            Player->Update(0.01f);
+            Player->GetTickManager()->RunLatentActions();
+            auto* First = Sample(1);
+            if (!TestNotNull(TEXT("First authored camera resolves"), First)) return false;
+            const auto Origin = ACutSceneApplier::MakeOrigin(*Subject, *Boss);
+            const FVector Position = Origin.InverseTransformPosition(First->GetComponentLocation());
+            if (!Pass) LocalCamera = Position;
+            else TestTrue(TEXT("Camera follows selected unit position and boss direction"), Position.Equals(LocalCamera, 0.1));
+            const auto* Cuts = Def.Sequence->GetMovieScene()->GetCameraCutTrack();
+            for (auto* Section : Cuts->GetAllSections())
+            {
+                const auto* Cut = static_cast<UMovieSceneCameraCutSection*>(Section);
+                TestEqual(TEXT("Cut references spawned camera"), Player->FindBoundObjects(Cut->GetCameraBindingID().GetGuid(), MovieSceneSequenceID::Root).Num(), 1);
+            }
+            const int32 SwitchFrame = 61;
+            auto* Second = Sample(SwitchFrame + 1);
+            TestNotNull(TEXT("Second authored camera resolves"), Second);
+            TestTrue(TEXT("Camera cut switches cameras"), Second && Second != First);
+            auto* Third = Sample(90);
+            TestNotNull(TEXT("Third authored camera resolves"), Third);
+            TestTrue(TEXT("Third cut switches cameras"), Third && Third != Second && Third != First);
+            Applier->CancelCutScene();
+            TestFalse(TEXT("Shot stops"), Applier->IsPlaying());
+            TestEqual(TEXT("View restored"), Controller->GetViewTarget(), PreviousCamera);
+        }
+    }
     return true;
 }
 
