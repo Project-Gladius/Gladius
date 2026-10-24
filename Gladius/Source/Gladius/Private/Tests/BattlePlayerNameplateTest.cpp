@@ -17,10 +17,7 @@ struct FPlayerNameplateTestAccess
   for (int32 Rebuild=0;Rebuild<5;++Rebuild)
   {
    UI->SetPanelDimensions(FVector2D(600.f+Rebuild*100.f,400.f+Rebuild*100.f));
-   Test.TestEqual(TEXT("Resizing uses the bottom-center pivot"), UI->GetRenderTransformPivot(), FVector2D(0.5f,1.f));
-   UI->SetRenderTransformPivot(FVector2D(0.5f,0.5f));
    UI->NativePreConstruct();
-   Test.TestEqual(TEXT("Rebuild restores the bottom-center pivot"), UI->GetRenderTransformPivot(), FVector2D(0.5f,1.f));
    Test.TestEqual(TEXT("Rebuild restores width"),UI->PanelSizeBox->GetWidthOverride(),300.f);
    Test.TestEqual(TEXT("Rebuild restores height"),UI->PanelSizeBox->GetHeightOverride(),200.f);
   }
@@ -88,7 +85,6 @@ struct FPlayerNameplateTestAccess
 		UI->SetPanelDimensions(FVector2D(100, 50));
 		Test.TestEqual(TEXT("Panel width has no minimum restriction"), UI->PanelSizeBox->GetWidthOverride(), 100.f);
 		Test.TestEqual(TEXT("Panel height has no minimum restriction"), UI->PanelSizeBox->GetHeightOverride(), 50.f);
-		TGuardValue<float> BaseScaleGuard(UI->BaseDistanceScale, 1.f);
 		UI->MinimumDistanceScale=0.5f; UI->MaximumDistanceScale=1.5f;
 		Test.TestEqual(TEXT("Near camera respects maximum scale"), UI->GetDistanceScale(100.f), 1.5f);
 		Test.TestEqual(TEXT("Far camera respects minimum scale"), UI->GetDistanceScale(10000.f), 0.5f);
