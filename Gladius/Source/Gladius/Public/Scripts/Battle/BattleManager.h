@@ -23,6 +23,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBossTelegraphSignature, const FS
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBattlePlayerLoggedIn, const FString&, UserId, const FString&, DisplayName, const FString&, CharacterId);
 //!로그아웃으로 전투에서 나갔을 때
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBattlePlayerLoggedOut, const FString&, UserId, const FString&, DisplayName);
+//신전에서 축복(!강화)이 적용됐을 때. Tier: 1 회복 / 2 힘 / 3 민첩 / 4 예리함, Remaining: 남은 축복 횟수
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnBlessingApplied, const FString&, UserId, const FString&, DisplayName, int32, Tier, int32, Remaining);
 
 //BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
@@ -64,6 +66,9 @@ struct FPlayerRecord
 
 	//방송 전체 누적. 게임 단위로 초기화하지 않는다
 	UPROPERTY() int64 TotalDamageDealt = 0;
+
+	//신전에서 쓸 수 있는 남은 축복(!강화) 횟수. 전투가 끝날 때 참가자에게 BlessingsPerBattle로 다시 맞춰진다
+	UPROPERTY() int32 BlessingsAvailable = 0;
 };
 
 //저장 파일의 최상위 형태. { "records": [ ... ] }
@@ -530,8 +535,23 @@ public:
 
  void InitializePlayerRecords();
 
+ //신전에서 여신이 축복(!강화)을 처리할 때 호출. 남은 축복 횟수가 있어야 적용되고 1 차감된다
  UFUNCTION(BlueprintCallable, Category = "Battle|Temple")
  bool ApplyTempleEnhancement(const FString& UserId, const FString& DisplayName, int32 Tier);
+
+ //남은 축복 횟수 (기록이 없으면 0)
+ UFUNCTION(BlueprintPure, Category = "Battle|Temple")
+ int32 GetRemainingBlessings(const FString& UserId) const;
+
+ //전투가 끝날 때 그 전투 참가자에게 주는 축복 횟수 (남은 횟수를 이 값으로 다시 맞춤, 누적 안 함)
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Temple", meta = (ClampMin = "0"))
+ int32 BlessingsPerBattle = 3;
+
+ UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
+ FOnBlessingApplied OnBlessingApplied;
+
+ //현재 전장의 참가자에게 축복 횟수를 지급 (FinishBattle에서 호출)
+ void GrantBlessingsToParticipants();
 
  UFUNCTION(BlueprintPure, Category = "Battle|State")
  bool IsBattleRunning() const { return bBattleRunning; }

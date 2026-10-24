@@ -25,6 +25,13 @@ struct FBattleCameraTestAccess
   Manager->StartTurn();
  }
  static FPlayerRecord& Record(ABattleManager* Manager, const FString& Id) { return Manager->Records.FindChecked(Id); }
+ //전투 종료 때 받는 축복 횟수를 직접 지급 (기록이 없으면 생성)
+ static FPlayerRecord& GrantBlessings(ABattleManager* Manager, const FString& Id, const FString& Name, int32 Count)
+ {
+  FPlayerRecord& R = Manager->GetOrCreateRecord(Id, Name);
+  R.BlessingsAvailable = Count;
+  return R;
+ }
  static void Prepare(ABattleManager* Manager)
  {
   Manager->TestRecordPath = FPaths::ProjectSavedDir() / TEXT("Automation") / (FGuid::NewGuid().ToString() + TEXT(".json"));

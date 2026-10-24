@@ -227,6 +227,8 @@ void ABattleManager::StartBattle()
 void ABattleManager::FinishBattle()
 {
  if (!bBattleRunning) return;
+ //신전으로 가기 전에 이번 전투 참가자에게 축복 횟수 지급 (StopBattle이 저장)
+ GrantBlessingsToParticipants();
  StopBattle();
  const TSoftObjectPtr<UWorld>& TempleMap = GetDefault<URealTimeSettings>()->TempleMap;
  if (TempleMap.IsNull())
@@ -1275,7 +1277,15 @@ bool ABattleManager::ApplyTempleEnhancement(const FString& UserId, const FString
  if (UserId.TrimStartAndEnd().IsEmpty() || Tier < 1 || Tier > 4 || IsBattleRunning()) return false;
  InitializePlayerRecords();
  if (bRecordLoadFailed) return false;
+ //축복 횟수는 전투가 끝날 때 참가자에게만 지급된다. 남은 횟수가 없으면 적용하지 않음
+ FPlayerRecord* Existing = Records.Find(UserId);
+ if (!Existing || Existing->BlessingsAvailable <= 0)
+ {
+  UE_LOG(LogTemp, Log, TEXT("[Temple] 남은 축복이 없어 강화 무시: %s (강화 %d)"), *UserId, Tier);
+  return false;
+ }
  FPlayerRecord& Record = GetOrCreateRecord(UserId, DisplayName);
+ --Record.BlessingsAvailable;
  switch (Tier)
  {
  case 1: Record.CurrentHealth = FMath::Clamp(Record.CurrentHealth + BlessingHealAmount, 0, MaxHPFor(Record)); break;
@@ -1289,7 +1299,25 @@ bool ABattleManager::ApplyTempleEnhancement(const FString& UserId, const FString
   SetPlayerHealth(UserId, Record.CurrentHealth);
  }
  SaveRecords();
+ UE_LOG(LogTemp, Log, TEXT("[Temple] 축복 적용: %s 강화 %d (남은 %d회)"), *UserId, Tier, Record.BlessingsAvailable);
+ OnBlessingApplied.Broadcast(UserId, Record.DisplayName, Tier, Record.BlessingsAvailable);
  return true;
+}
+
+int32 ABattleManager::GetRemainingBlessings(const FString& UserId) const
+{
+ const FPlayerRecord* Record = Records.Find(UserId);
+ return Record ? FMath::Max(0, Record->BlessingsAvailable) : 0;
+}
+
+void ABattleManager::GrantBlessingsToParticipants()
+{
+ for (const TPair<FString, FBattlePlayer>& Pair : Players)
+ {
+  FPlayerRecord& Record = GetOrCreateRecord(Pair.Key, Pair.Value.DisplayName);
+  Record.BlessingsAvailable = FMath::Max(0, BlessingsPerBattle);
+ }
+ UE_LOG(LogTemp, Log, TEXT("[Battle] 전투 종료: 참가자 %d명에게 축복 %d회 지급"), Players.Num(), BlessingsPerBattle);
 }
 
 bool ABattleManager::SetPlayerHealth(const FString& UserId, int32 CurrentHealth)
@@ -2228,6 +2256,7 @@ void ABattleManager::ApplyBalanceFiles()
 	CritChancePerBonus = Balance.CritChancePerLevel;
 	CritDamagePerBonus = Balance.CritDamagePerLevel;
 	CritChanceCap = Balance.CritChanceCap;
+	if (Balance.BlessingHealAmount >= 0) BlessingHealAmount = Balance.BlessingHealAmount;
 
 	Turns = Balance.Turns;
 

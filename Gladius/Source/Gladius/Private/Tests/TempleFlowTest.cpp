@@ -19,8 +19,8 @@
 struct FTempleFlowTestAccess
 {
  static void Cycle(ATempleCycleController* C) { C->HandleCycleTimer(); }
- static void AllowAllBlessings(ATempleCycleController* C) { C->CommandQueue->AvailableBless = 4; }
  static bool Leaving(ATempleCycleController* C) { return C->bLeavingTemple; }
+ static FTempleCycleCommands Snapshot(ATempleCycleController* C) { return C->CommandQueue->TakeSnapshot(); }
 };
 namespace
 {
@@ -191,6 +191,7 @@ public:
   Test->TestEqual(TEXT("Strength increases damage level once"),R.DamageBonus,1);
   Test->TestEqual(TEXT("Agility increases crit chance level once"),R.CritChanceBonus,1);
   Test->TestEqual(TEXT("Sharpness increases crit damage level once"),R.CritDamageBonus,1);
+  Test->TestEqual(TEXT("Every granted blessing is used"),R.BlessingsAvailable,0);
   const TArray<FChatLogEntry>& Entries=T->Instance->GetSubsystem<UChatLogSubsystem>()->GetEntries();
   Test->TestEqual(TEXT("Only applied blessings enter the chat log"),Entries.Num(),4);
   if(Entries.Num()==4)
@@ -235,12 +236,11 @@ bool FTempleEnhancementIntegrationTest::RunTest(const FString& Parameters)
  auto T=MakeShared<FTempleTestWorld>();
  T->Records->BlessingHealAmount=2;
  TestFalse(TEXT("Temple record manager never starts battle"),T->Records->IsBattleRunning());
- T->Records->ApplyTempleEnhancement(TEXT("temple-viewer"),TEXT("Temple user"),2);
- auto& R=FBattleCameraTestAccess::Record(T->Records,TEXT("temple-viewer"));
+ //전투를 마친 참가자처럼 축복 4회를 가진 상태로 시작
+ auto& R=FBattleCameraTestAccess::GrantBlessings(T->Records,TEXT("temple-viewer"),TEXT("Temple user"),4);
  R.MaxHPBonus=2;R.DamageBonus=0;R.CurrentHealth=T->Records->MaxHPFor(R)-2;
  T->Records->SaveRecords();
  T->Chat->MaxAllowedComments=100;
- FTempleFlowTestAccess::AllowAllBlessings(T->Controller);
  for(int32 Tier=1;Tier<=4;++Tier)
   T->Chat->OnReceiveYouTubeCommentWithUsername(FString::Printf(TEXT("blessing-%d"),Tier),TEXT("temple-viewer"),TEXT("Temple user"),FString::Printf(TEXT("!강화 %d"),Tier));
  TestEqual(TEXT("Queueing alone does not apply strength"),R.DamageBonus,0);
@@ -268,6 +268,57 @@ bool FTempleBlessLimitTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Allowance survives cycles and is independent per user"),Next.EnhanceTiers[1].Commands.Num(),1);
  TestEqual(TEXT("Only second user accepted"),Next.EnhanceTiers[1].Commands[0].UserId,FString(TEXT("B")));
  Q->Unbind();
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleBlessingAllowanceTest,"Gladius.Temple.Flow.BlessingsFromBattle",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTempleBlessingAllowanceTest::RunTest(const FString& Parameters)
+{
+ FTempleTestWorld T;
+ ABattleManager* B=T.Records;
+ TestEqual(TEXT("Viewer without a battle has no blessings"),B->GetRemainingBlessings(TEXT("stranger")),0);
+ TestFalse(TEXT("Blessing without allowance is rejected"),B->ApplyTempleEnhancement(TEXT("stranger"),TEXT("Stranger"),2));
+
+ FBattleCameraTestAccess::GrantBlessings(B,TEXT("fighter"),TEXT("Fighter"),B->BlessingsPerBattle);
+ TestEqual(TEXT("Battle grants three blessings"),B->GetRemainingBlessings(TEXT("fighter")),3);
+ for(int32 I=0;I<3;++I) TestTrue(TEXT("Granted blessing applies"),B->ApplyTempleEnhancement(TEXT("fighter"),TEXT("Fighter"),2));
+ TestFalse(TEXT("Fourth blessing is rejected"),B->ApplyTempleEnhancement(TEXT("fighter"),TEXT("Fighter"),2));
+ TestEqual(TEXT("Remaining blessings reach zero"),B->GetRemainingBlessings(TEXT("fighter")),0);
+
+ //큐잉 단계도 기록 기준: 남은 2회면 한 사이클에 2개만 받고, 기록이 없는 시청자는 0개
+ FBattleCameraTestAccess::GrantBlessings(B,TEXT("fighter"),TEXT("Fighter"),2);
+ T.Chat->MaxAllowedComments=100;
+ for(int32 I=0;I<3;++I)
+  T.Chat->OnReceiveYouTubeCommentWithUsername(FString::Printf(TEXT("q-%d"),I),TEXT("fighter"),TEXT("Fighter"),FString::Printf(TEXT("!강화 %d"),I+1));
+ T.Chat->OnReceiveYouTubeCommentWithUsername(TEXT("q-stranger"),TEXT("stranger"),TEXT("Stranger"),TEXT("!강화 1"));
+ int32 Queued=0;
+ for(const FTempleEnhanceTier& Tier : FTempleFlowTestAccess::Snapshot(T.Controller).EnhanceTiers) Queued+=Tier.Commands.Num();
+ TestEqual(TEXT("Queue accepts only remaining blessings"),Queued,2);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleGrantsBlessingsTest,"Gladius.Temple.Flow.BattleEndGrantsParticipants",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBattleGrantsBlessingsTest::RunTest(const FString& Parameters)
+{
+ FTempleTestWorld T;
+ auto* Battle=T.World->SpawnActor<ABattleManager>();
+ FBattleCameraTestAccess::RecordsOnly(Battle);
+ Battle->InitializePlayerRecords();
+ FBattleCameraTestAccess::BeginPrepared(Battle);
+ TestTrue(TEXT("Participant logs in"),Battle->LoginPlayer(TEXT("fighter"),TEXT("Fighter"),TEXT("글라디우스")));
+ FBattleCameraTestAccess::GrantBlessings(Battle,TEXT("fighter"),TEXT("Fighter"),1);
+ FBattleCameraTestAccess::GrantBlessings(Battle,TEXT("watcher"),TEXT("Watcher"),0);
+ Battle->GrantBlessingsToParticipants();
+ TestEqual(TEXT("Participant is reset to three, not accumulated"),Battle->GetRemainingBlessings(TEXT("fighter")),3);
+ TestEqual(TEXT("Non-participant gets nothing"),Battle->GetRemainingBlessings(TEXT("watcher")),0);
+ Battle->GrantBlessingsToParticipants();
+ TestEqual(TEXT("Second battle end still gives three"),Battle->GetRemainingBlessings(TEXT("fighter")),3);
+ Battle->SaveRecords();
+ auto* Reloaded=T.World->SpawnActor<ABattleManager>();
+ FBattleCameraTestAccess::RecordsOnly(Reloaded);
+ FBattleCameraTestAccess::UsePath(Reloaded,FBattleCameraTestAccess::Path(Battle));
+ Reloaded->InitializePlayerRecords();
+ TestEqual(TEXT("Blessing count survives save and reload"),Reloaded->GetRemainingBlessings(TEXT("fighter")),3);
  return true;
 }
 

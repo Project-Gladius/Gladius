@@ -37,6 +37,12 @@ void ATempleCycleController::BeginPlay()
  }
 
 	CommandQueue = NewObject<UTempleCommandQueue>(this);
+	//!강화는 전투 종료 때 지급된 남은 축복 횟수(저장된 기록)만큼만 받음
+	CommandQueue->GetRemainingBlessings = [WeakThis = TWeakObjectPtr<ATempleCycleController>(this)](const FString& UserId)
+	{
+		const ATempleCycleController* Self = WeakThis.Get();
+		return Self && IsValid(Self->BattleManager) ? Self->BattleManager->GetRemainingBlessings(UserId) : 0;
+	};
 	BatchClient = NewObject<UTempleAIBatchClient>(this);
 	BatchClient->EndpointUrl = TempleAIBatchEndpointUrl;
 	BatchClient->ClientToken = TempleAIClientToken;
