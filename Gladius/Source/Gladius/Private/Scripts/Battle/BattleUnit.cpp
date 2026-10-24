@@ -2,6 +2,8 @@
 #include "Scripts/Battle/UnitNameplate.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "Components/WidgetComponent.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
@@ -49,7 +51,16 @@ void ABattleUnit::BeginPlay()
 void ABattleUnit::NotifyActionSelected(EBattleAction Action)
 {
 	SelectedAction = Action;
+    if (!CanPlayEvadeRoll() && IsValid(EvadeRollMontage) && IsValid(Mesh))
+    {
+        if (UAnimInstance* Anim = Mesh->GetAnimInstance()) Anim->Montage_Stop(0.f, EvadeRollMontage);
+    }
 	OnActionSelected(Action);
+}
+
+bool ABattleUnit::CanPlayEvadeRoll() const
+{
+    return SelectedAction != EBattleAction::Attack1 && SelectedAction != EBattleAction::Attack2;
 }
 
 void ABattleUnit::NotifyAttack(int32 AttackIndex, bool bCrit, bool bFeverHighlight)

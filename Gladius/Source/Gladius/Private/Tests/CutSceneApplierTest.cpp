@@ -20,6 +20,9 @@
 #include "LevelSequenceActor.h"
 #include "LevelSequencePlayer.h"
 #include "MovieScene.h"
+#include "Channels/MovieSceneDoubleChannel.h"
+#include "Channels/MovieSceneChannelProxy.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "MovieSceneSequenceTickManager.h"
 #include "EntitySystem/MovieSceneEntitySystemRunner.h"
 #include "Misc/AutomationTest.h"
@@ -544,6 +547,134 @@ bool FSera1AuthoredCamerasTest::RunTest(const FString& Parameters)
             Applier->CancelCutScene();
             TestFalse(TEXT("Shot stops"), Applier->IsPlaying());
             TestEqual(TEXT("View restored"), Controller->GetViewTarget(), PreviousCamera);
+        }
+    }
+    return true;
+}
+
+
+// Compare evaluated runtime cameras against the original assets, including frames
+// between keys. Checking only the first frame missed unequal X/Y channel layouts.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFourAuthoredCameraPathsTest, "Gladius.CutSceneApplier.AllFourOriginalCameraPaths",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFourAuthoredCameraPathsTest::RunTest(const FString& Parameters)
+{
+    struct FSpec { const TCHAR* Id; const TCHAR* Source; const TCHAR* Character; FVector ArtOrigin; double ArtScale; };
+    const FSpec Specs[] = {
+        {TEXT("GladiusSkill1"), TEXT("/Game/Asset/Battle/gladius/gladius/animation/gladius_skill01.gladius_skill01"), TEXT("G"), FVector(240,40,0), 1},
+        {TEXT("GladiusSkill2"), TEXT("/Game/Asset/Battle/gladius/gladius/animation/gladius_skill02.gladius_skill02"), TEXT("G"), FVector(240,40,0), 1},
+        {TEXT("SeraSkill1"), TEXT("/Game/Asset/Battle/Sera/Animation/Sera_Animation/Sera_Attack/sera_skill01.sera_skill01"), TEXT("S"), FVector(30,0,0), 1},
+        {TEXT("SeraSkill2"), TEXT("/Game/Asset/Battle/Sera/CutScene/CutScene_Attack2.CutScene_Attack2"), TEXT("S"), FVector(690,3420,460), 9.75}
+    };
+    FCutSceneTestWorld Context;
+    auto* Manager = Context.World->SpawnActor<ABattleManager>();
+    FCharacterDef Character; Character.Id = TEXT("camera-path-test"); Character.BaseHP = 5;
+    Manager->Classes = {Character};
+    FBattleCameraTestAccess::Prepare(Manager);
+    if (!Manager->SubmitAction(TEXT("camera-path-user"), TEXT("Test"), EBattleAction::Attack1, Character.Id)) return false;
+    Manager->StopBattle();
+    auto* Subject = Manager->GetBattlePlayers().FindChecked(TEXT("camera-path-user")).Unit.Get();
+    auto* Boss = Manager->GetBossUnit();
+    auto* Controller = Context.World->SpawnActor<APlayerController>();
+    auto* LocalPlayer = NewObject<ULocalPlayer>(GEngine);
+    Context.Instance->AddLocalPlayer(LocalPlayer, FPlatformUserId::CreateFromInternalId(0));
+    Controller->SetPlayer(LocalPlayer);
+    auto* PreviousCamera = Context.World->SpawnActor<AActor>();
+    Controller->SetViewTarget(PreviousCamera);
+    auto* Applier = Context.World->SpawnActor<ACutSceneApplier>();
+    Applier->BattleManager = Manager;
+    Applier->EnsureDefaultCutScenes();
+    for (const auto& Spec : Specs)
+    {
+        auto* Source = LoadObject<ULevelSequence>(nullptr, Spec.Source);
+        const auto& Def = Applier->CutScenes.FindChecked(FName(Spec.Id));
+        UClass* UnitClass = LoadClass<ABattleUnit>(nullptr, *FString::Printf(
+            TEXT("/Game/Blueprints/ScaledBattleUnits/BP_BattleUnit%s_DevBattle.BP_BattleUnit%s_DevBattle_C"), Spec.Character, Spec.Character));
+        if (!TestNotNull(TEXT("Original sequence exists"), Source) || !TestNotNull(TEXT("Battle unit class exists"), UnitClass)) return false;
+        const auto MeshTransform = UnitClass->GetDefaultObject<ABattleUnit>()->Mesh->GetRelativeTransform();
+        const double Scale = MeshTransform.GetScale3D().X / Spec.ArtScale;
+        auto* SourceScene = Source->GetMovieScene();
+        auto* RuntimeScene = Def.Sequence->GetMovieScene();
+        for (const auto& SourceBinding : SourceScene->GetBindings())
+        {
+            auto BindingName = [](UMovieScene* Scene, const FGuid& Id) -> FString
+            {
+                if (const auto* Spawnable = Scene->FindSpawnable(Id)) return Spawnable->GetName();
+                if (const auto* Possessable = Scene->FindPossessable(Id)) return Possessable->GetName();
+                return FString();
+            };
+            const auto* RuntimeBinding = static_cast<const UMovieScene*>(RuntimeScene)->GetBindings().FindByPredicate([&](const FMovieSceneBinding& B)
+            {
+                return BindingName(RuntimeScene, B.GetObjectGuid()) == BindingName(SourceScene, SourceBinding.GetObjectGuid());
+            });
+            if (!RuntimeBinding) continue; // Animation-only bindings are intentionally not camera bindings.
+            auto FindTransform = [](const FMovieSceneBinding& Binding) -> UMovieSceneSection*
+            {
+                for (auto* Track : Binding.GetTracks())
+                    if (Track->GetClass()->GetFName() == TEXT("MovieScene3DTransformTrack") && Track->GetAllSections().Num()) return Track->GetAllSections()[0];
+                return nullptr;
+            };
+            auto* S = FindTransform(SourceBinding); auto* D = FindTransform(*RuntimeBinding);
+            if (!S || !D) continue;
+            auto SC = S->GetChannelProxy().GetChannels<FMovieSceneDoubleChannel>();
+            auto DC = D->GetChannelProxy().GetChannels<FMovieSceneDoubleChannel>();
+            const int32 Map[] = {1,0,2,3,4,5,6,7,8};
+            if (!TestEqual(TEXT("All transform channels retained"), DC.Num(), 9)) return false;
+            for (int32 Index = 0; Index < 9; ++Index)
+            {
+                const auto A = SC[Map[Index]]->GetData().GetTimes();
+                const auto B = DC[Index]->GetData().GetTimes();
+                if (!TestEqual(TEXT("Mapped channel keeps every source key"), B.Num(), A.Num())) return false;
+                for (int32 Key = 0; Key < A.Num(); ++Key)
+                    if (!TestEqual(TEXT("Mapped key keeps exact tick time"), B[Key].Value, A[Key].Value)) return false;
+            }
+        }
+        const int32 EndFrame = FFrameRate::TransformTime(SourceScene->GetPlaybackRange().GetUpperBoundValue(), SourceScene->GetTickResolution(), SourceScene->GetDisplayRate()).FloorToFrame().Value;
+        for (const float Heading : {0.f, 90.f, 180.f, 270.f})
+        {
+            Subject->SetActorLocation(FVector(1700 - Heading, -930 + Heading, 80));
+            Boss->SetActorLocation(Subject->GetActorLocation() + FRotator(0, Heading, 0).Vector() * 1200);
+            if (!TestTrue(TEXT("Authored camera starts"), Applier->ApplyCutSceneForUser(TEXT("camera-path-user"), FName(Spec.Id)))) return false;
+            ULevelSequencePlayer* Player = nullptr;
+            for (TActorIterator<ALevelSequenceActor> It(Context.World); It; ++It) if (IsValid(*It)) Player = It->GetSequencePlayer();
+            if (!TestNotNull(TEXT("Runtime player exists"), Player)) return false;
+            Player->Update(0.001f);
+            if (auto Runner = Player->GetTickManager()->GetRunner(FMovieSceneSequenceTickInterval())) Runner->Flush();
+            Player->GetTickManager()->RunLatentActions();
+            double MaxPositionError = 0, MaxAngleError = 0;
+            const FTransform Origin = ACutSceneApplier::MakeOrigin(*Subject, *Boss);
+            for (int32 Frame = 0; Frame < EndFrame; ++Frame)
+            {
+                const FFrameTime Time = FFrameRate::TransformTime(FFrameTime(Frame), SourceScene->GetDisplayRate(), SourceScene->GetTickResolution());
+                const UMovieSceneCameraCutSection* SourceCut = nullptr;
+                for (auto* Section : SourceScene->GetCameraCutTrack()->GetAllSections())
+                    if (Section->GetRange().Contains(Time.FloorToFrame())) SourceCut = static_cast<const UMovieSceneCameraCutSection*>(Section);
+                if (!SourceCut) continue; // Original Gladius assets leave their final frame outside camera cuts.
+                const auto* Binding = SourceScene->FindBinding(SourceCut->GetCameraBindingID().GetGuid());
+                if (!TestNotNull(TEXT("Original cut resolves"), Binding)) return false;
+                UMovieSceneSection* TransformSection = nullptr;
+                for (auto* Track : Binding->GetTracks())
+                    if (Track->GetClass()->GetFName() == TEXT("MovieScene3DTransformTrack")) TransformSection = Track->GetAllSections()[0];
+                if (!TestNotNull(TEXT("Original camera transform exists"), TransformSection)) return false;
+                auto Channels = TransformSection->GetChannelProxy().GetChannels<FMovieSceneDoubleChannel>();
+                double Values[9] = {};
+                for (int32 Index = 0; Index < 9; ++Index) Channels[Index]->Evaluate(Time, Values[Index]);
+                const FVector ExpectedLocal((Values[1]-Spec.ArtOrigin.Y)*Scale, (Spec.ArtOrigin.X-Values[0])*Scale, (Values[2]-Spec.ArtOrigin.Z)*Scale);
+                const FVector Expected = Origin.TransformPosition(ExpectedLocal + MeshTransform.GetLocation());
+                const FQuat ExpectedRotation = Origin.GetRotation() * FRotator(Values[4], Values[5]-90, Values[3]).Quaternion();
+                Player->SetPlaybackPosition(FMovieSceneSequencePlaybackParams(FFrameTime(Frame), EUpdatePositionMethod::Jump));
+                if (auto Runner = Player->GetTickManager()->GetRunner(FMovieSceneSequenceTickInterval())) Runner->Flush();
+                auto* Camera = Player->GetActiveCameraComponent();
+                if (!TestNotNull(TEXT("Camera resolves at every active frame"), Camera)) return false;
+                MaxPositionError = FMath::Max(MaxPositionError, FVector::Distance(Camera->GetComponentLocation(), Expected));
+                MaxAngleError = FMath::Max(MaxAngleError, FMath::RadiansToDegrees(Camera->GetComponentQuat().AngularDistance(ExpectedRotation)));
+            }
+            const FString Label = FString::Printf(TEXT("%s toward %.0f degrees"), Spec.Id, Heading);
+            TestTrue(*(Label + TEXT(" position matches original at every active frame")), MaxPositionError < 0.01);
+            TestTrue(*(Label + TEXT(" rotation matches original at every active frame")), MaxAngleError < 0.001);
+            AddInfo(FString::Printf(TEXT("%s: max position %.8f cm, rotation %.8f degrees"), *Label, MaxPositionError, MaxAngleError));
+            Applier->CancelCutScene();
+            TestEqual(TEXT("Original view restored"), Controller->GetViewTarget(), PreviousCamera);
         }
     }
     return true;

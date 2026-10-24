@@ -118,7 +118,11 @@ enum class EBossTargetMode : uint8
 	//예고 문구도 '무작위 구역'이라고 알린다 (Fury)
 	RandomOne,
 	//비공격. 기 모으기·무방비가 여기 해당한다
-	None
+	None,
+	//입력 종료 시점의 생존 인원 / 피버 합계로 한 구역을 확정한다
+	MostPlayer,
+	LeastPlayer,
+	MostDamage
 };
 
 //보스의 한 가지 행동 = 한 턴. 패턴은 이 행동들을 순서대로 묶은 것이다.
@@ -146,7 +150,7 @@ struct FBossAction
 	UPROPERTY(EditAnywhere) int32 DamageByZone[3] = { 0, 0, 0 };
 
 	//보스 공격의 구역별 속성. 플레이어 쪽 속성 저항이 생기면 그때 쓰인다
-	UPROPERTY(EditAnywhere) EDamageType AttributeByZone[3];
+	UPROPERTY(EditAnywhere) EDamageType AttributeByZone[3] = { EDamageType::Physical, EDamageType::Physical, EDamageType::Physical };
 
 	//플레이어가 선 구역에 따라 달라지는 보스 내성.
 	//'오른쪽을 치는 동안 왼쪽에서 물리로 때리면 잘 들어간다'를 이걸로 표현한다
@@ -154,8 +158,17 @@ struct FBossAction
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString TelegraphText;
 
-	//**v2에서 motionId 두 개가 사라졌다.** 대신 상태 `Id`가 그대로 모션 키다 —
-	//`SingleStrikeLeft`처럼 의미를 담고 있어 블루프린트가 바로 분기할 수 있다
+	//비어 있으면 행동 ID를 사용한다. 여러 행동이 같은 모션을 공유할 수 있다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString TelegraphMotionId;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite) FString AttackMotionId;
+
+	FString TelegraphMotion() const { return TelegraphMotionId.IsEmpty() ? Id : TelegraphMotionId; }
+	FString AttackMotion() const { return AttackMotionId.IsEmpty() ? Id : AttackMotionId; }
+	bool NeedsBattleStartTarget() const
+	{
+		return TargetMode == EBossTargetMode::MostPlayer || TargetMode == EBossTargetMode::LeastPlayer
+			|| TargetMode == EBossTargetMode::MostDamage;
+	}
 };
 
 //상태 ID를 순서대로 묶은 1~4턴 패턴.

@@ -1,4 +1,4 @@
-﻿#include "Scripts/Battle/BattleBalance.h"
+#include "Scripts/Battle/BattleBalance.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -574,10 +574,13 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 			if (ModeText == TEXT("fixed"))          { Action.TargetMode = EBossTargetMode::Fixed; }
 			else if (ModeText == TEXT("randomOne")) { Action.TargetMode = EBossTargetMode::RandomOne; }
 			else if (ModeText == TEXT("none"))      { Action.TargetMode = EBossTargetMode::None; }
+			else if (ModeText == TEXT("mostPlayer")) { Action.TargetMode = EBossTargetMode::MostPlayer; }
+			else if (ModeText == TEXT("leastPlayer")) { Action.TargetMode = EBossTargetMode::LeastPlayer; }
+			else if (ModeText == TEXT("mostDamage")) { Action.TargetMode = EBossTargetMode::MostDamage; }
 			else
 			{
 				Fail(BossesPath, FString::Printf(
-					TEXT("'%s' 의 target.mode 가 '%s' 입니다 — fixed / randomOne / none 중 하나여야 합니다"),
+					TEXT("'%s' 의 target.mode 가 '%s' 입니다 — fixed / randomOne / none / mostPlayer / leastPlayer / mostDamage 중 하나여야 합니다"),
 					*Action.Id, *ModeText));
 				return false;
 			}
@@ -631,10 +634,11 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		if (Obj->TryGetObjectField(TEXT("telegraph"), TelegraphPtr))
 		{
 			(*TelegraphPtr)->TryGetStringField(TEXT("text"), Action.TelegraphText);
+			(*TelegraphPtr)->TryGetStringField(TEXT("motionId"), Action.TelegraphMotionId);
 		}
 
-		//telegraph.motionId / attackMotionId 는 읽지 않는다. 파일에서 둘 다 비어 있고,
-		//블루프린트는 행동 id(SingleStrikeLeft 같은 값)로 모션을 고른다
+		//빈 모션 키는 기존처럼 행동 ID를 사용한다.
+		Obj->TryGetStringField(TEXT("attackMotionId"), Action.AttackMotionId);
 
 		Actions.Add(MoveTemp(Action));
 	}
