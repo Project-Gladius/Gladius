@@ -14,6 +14,7 @@ class UChatLogWidget;
 class ULeaderboardRotatorWidget;
 class UBossTelegraphWidget;
 class UBattleDataResetWidget;
+class UBattleTopHudWidget;
 
 //보스가 다음 공격을 예고할 때. MotionId: 보스 행동 id(모션 키), TelegraphText: 암시 문구
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBossTelegraphSignature, const FString&, MotionId, const FString&, TelegraphText);
@@ -470,6 +471,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Battle|State")
 	bool IsAcceptingInput() const;
 
+	//입력 단계(Prepare: 선택 마감까지, Collect: 수집 마감까지)의 남은 시간과 전체 길이(초). 상단 UI 게이지용
+	UFUNCTION(BlueprintPure, Category = "Battle|State")
+	float GetInputPhaseRemainingSeconds() const;
+
+	UFUNCTION(BlueprintPure, Category = "Battle|State")
+	float GetInputPhaseDuration() const { return InputPhaseDuration; }
+
+	//이번 턴 컷신이 재생 중인지
+	UFUNCTION(BlueprintPure, Category = "Battle|State")
+	bool IsTurnCutScenePlaying() const;
+
 	// 컷신 등 표시 계층은 전투 상태를 읽기만 한다.
 	const TMap<FString, FBattlePlayer>& GetBattlePlayers() const { return Players; }
 	ABattleUnit* GetBossUnit() const { return BossUnit.Get(); }
@@ -494,6 +506,10 @@ public:
  //상단 중앙 보스 행동 암시 텍스트
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UBossTelegraphWidget> BossTelegraphWidgetClass;
+
+ //최상단 중앙 상단 UI (턴, 안내 문구, 게이지, 남은 시간)
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<UBattleTopHudWidget> TopHudWidgetClass;
 
  //매 턴 Prepare 시작 시 보스 행동이 정해지면 브로드캐스트. 암시 텍스트 UI 등이 구독
  UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
@@ -659,6 +675,11 @@ private:
  TObjectPtr<ULeaderboardRotatorWidget> LeaderboardWidget;
  UPROPERTY(Transient)
  TObjectPtr<UBossTelegraphWidget> BossTelegraphWidget;
+ UPROPERTY(Transient)
+ TObjectPtr<UBattleTopHudWidget> TopHudWidget;
+ //현재 입력 단계가 끝나는 월드 시각과 그 단계의 전체 길이
+ float InputPhaseEndTime = 0.f;
+ float InputPhaseDuration = 0.f;
  //전투씬 진입(BeginPlay)부터 나갈 때(EndPlay)까지의 유저별 누적. 판이 새로 시작돼도 유지
  FBattleSessionStats SessionStats;
  UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;

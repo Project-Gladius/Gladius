@@ -10,6 +10,8 @@
 #include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "GameFramework/PlayerController.h"
 
 void UBossTelegraphWidget::NativeOnInitialized()
 {
@@ -58,6 +60,7 @@ void UBossTelegraphWidget::ShowTelegraph(const FString& TelegraphText)
 	MessageText->SetText(FText::FromString(CleanText));
 	bShowing = true;
 	ElapsedSeconds = 0.0f;
+	UpdateBoxPosition();
 	Box->SetRenderOpacity(FadeSeconds > 0.0f ? 0.0f : 1.0f);
 	Box->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
@@ -69,6 +72,40 @@ void UBossTelegraphWidget::HideTelegraph()
 	{
 		Box->SetVisibility(ESlateVisibility::Collapsed);
 	}
+}
+
+void UBossTelegraphWidget::UpdateBoxPosition()
+{
+	if (!BoxSlot)
+	{
+		return;
+	}
+
+	//화면 크기(위젯 좌표계, DPI 배율 적용 후)
+	const float ViewportScale = FMath::Max(UWidgetLayoutLibrary::GetViewportScale(this), KINDA_SMALL_NUMBER);
+	const FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(this) / ViewportScale;
+
+	FVector2D Position(ViewportSize.X * 0.5f + FallbackScreenOffset.X, FallbackScreenOffset.Y);
+
+	const ABattleManager* Manager = BattleManager.Get();
+	const AActor* Boss = Manager ? Manager->GetBossUnit() : nullptr;
+	APlayerController* PC = GetOwningPlayer();
+	FVector2D BossScreen;
+	if (Boss && PC
+		&& UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(PC, Boss->GetActorLocation() + BossWorldOffset, BossScreen, false))
+	{
+		Position = BossScreen + BelowBossScreenOffset;
+	}
+
+	//상자가 화면 밖으로 나가지 않게 보정 (기준점은 상자 위쪽 가운데)
+	const float HalfWidth = Style.BoxSize.X * 0.5f;
+	const float MinX = HalfWidth + ScreenEdgeMargin;
+	const float MaxX = FMath::Max(MinX, ViewportSize.X - HalfWidth - ScreenEdgeMargin);
+	const float MaxY = FMath::Max(ScreenEdgeMargin, ViewportSize.Y - Style.BoxSize.Y - ScreenEdgeMargin);
+	Position.X = FMath::Clamp(Position.X, MinX, MaxX);
+	Position.Y = FMath::Clamp(Position.Y, ScreenEdgeMargin, MaxY);
+
+	BoxSlot->SetPosition(Position);
 }
 
 bool UBossTelegraphWidget::IsPreparePhase() const
@@ -100,6 +137,9 @@ void UBossTelegraphWidget::NativeTick(const FGeometry& MyGeometry, float InDelta
 		return;
 	}
 
+	//카메라가 움직여도 보스 아래에 붙어 있도록 매 프레임 갱신
+	UpdateBoxPosition();
+
 	float Opacity = 1.0f;
 	if (FadeSeconds > 0.0f)
 	{
@@ -125,11 +165,10 @@ void UBossTelegraphWidget::BuildWidgetTree()
 	SizeBox->SetHeightOverride(Style.BoxSize.Y);
 	Box = SizeBox;
 
-	//화면 상단 중앙
-	UCanvasPanelSlot* BoxSlot = Canvas->AddChildToCanvas(SizeBox);
-	BoxSlot->SetAnchors(FAnchors(0.5f, 0.0f));
+	//좌상단 기준 화면 좌표로 배치하고 상자의 위쪽 가운데를 기준점으로 맞춤. 위치는 매 프레임 보스 아래로 옮긴다
+	BoxSlot = Canvas->AddChildToCanvas(SizeBox);
+	BoxSlot->SetAnchors(FAnchors(0.0f, 0.0f));
 	BoxSlot->SetAlignment(FVector2D(0.5f, 0.0f));
-	BoxSlot->SetPosition(ScreenOffset);
 	BoxSlot->SetAutoSize(true);
 
 	UOverlay* Overlay = WidgetTree->ConstructWidget<UOverlay>();

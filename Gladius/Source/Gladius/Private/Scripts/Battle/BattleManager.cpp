@@ -12,6 +12,7 @@
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
+#include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -36,6 +37,7 @@ ABattleManager::ABattleManager()
 	ChatLogWidgetClass = UChatLogWidget::StaticClass();
 	LeaderboardWidgetClass = ULeaderboardRotatorWidget::StaticClass();
 	BossTelegraphWidgetClass = UBossTelegraphWidget::StaticClass();
+	TopHudWidgetClass = UBattleTopHudWidget::StaticClass();
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
@@ -137,6 +139,15 @@ void ABattleManager::BeginPlay()
    BossTelegraphWidget->BindToBattleManager(this);
   }
  }
+ if (TopHudWidgetClass)
+ {
+  TopHudWidget = CreateWidget<UBattleTopHudWidget>(GetWorld(), TopHudWidgetClass);
+  if (TopHudWidget)
+  {
+   TopHudWidget->AddToViewport(1);
+   TopHudWidget->BindToBattleManager(this);
+  }
+ }
  if (bShowTemporaryDataResetButtons && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("MainBattle"))
  {
   if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
@@ -185,6 +196,7 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
  if (LeaderboardWidget) LeaderboardWidget->RemoveFromParent();
  if (BossTelegraphWidget) BossTelegraphWidget->RemoveFromParent();
+ if (TopHudWidget) TopHudWidget->RemoveFromParent();
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->GetCommandDispatcher()->UnbindBattleManager(this);
  StopBattle();
@@ -255,6 +267,20 @@ bool ABattleManager::IsAcceptingInput() const
 	//예고 시간의 선택도 유효하다. 이동이 시작되면 이번 턴 행동은 확정된다
 	return bBattleRunning && (Phase == EBattlePhase::Prepare
 		|| Phase == EBattlePhase::Collect);
+}
+
+float ABattleManager::GetInputPhaseRemainingSeconds() const
+{
+	if (!IsAcceptingInput() || !GetWorld())
+	{
+		return 0.f;
+	}
+	return FMath::Max(0.f, InputPhaseEndTime - GetWorld()->GetTimeSeconds());
+}
+
+bool ABattleManager::IsTurnCutScenePlaying() const
+{
+	return IsValid(CutSceneApplier) && CutSceneApplier->IsPlaying();
 }
 
 // ---------------- 좌표 ----------------
@@ -978,6 +1004,9 @@ void ABattleManager::StartTurn()
  StopTurnCutScenes();
  ++TurnIndex;
  Phase = EBattlePhase::Prepare;
+ //상단 UI: Prepare는 예고 + 선택 시간이 끝날 때(Collect 시작)까지
+ InputPhaseDuration = FMath::Max(0.f, TelegraphSeconds) + FMath::Max(0.f, PlayerSelectCountdown);
+ InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->SetCombatAutoPollingEnabled(true);
 
@@ -1059,6 +1088,9 @@ void ABattleManager::BeginCollect()
 {
 	//시청자 화면에서는 아직 입력 시간이다. 늦게 도착하는 채팅을 계속 받는다
 	Phase = EBattlePhase::Collect;
+	//상단 UI: Collect는 수집 시간이 끝날 때(Move 시작)까지 다시 가득 찬 상태에서 시작
+	InputPhaseDuration = FMath::Max(0.f, CollectSeconds);
+	InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 수집 — %.1f초"), TurnIndex, CollectSeconds);
 
