@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Scripts/Battle/BattleBalance.h"
+#include "Scripts/Battle/BattleSessionStats.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "BattleManager.generated.h"
 
@@ -10,7 +11,12 @@ class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
 class UChatLogWidget;
+class ULeaderboardRotatorWidget;
+class UBossTelegraphWidget;
 class UBattleDataResetWidget;
+
+//보스가 다음 공격을 예고할 때. MotionId: 보스 행동 id(모션 키), TelegraphText: 암시 문구
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBossTelegraphSignature, const FString&, MotionId, const FString&, TelegraphText);
 
 //BattleStart -> Prepare -> Collect -> Move -> BossAction -> Resolve.
 UENUM(BlueprintType)
@@ -468,11 +474,30 @@ public:
 	const TMap<FString, FBattlePlayer>& GetBattlePlayers() const { return Players; }
 	ABattleUnit* GetBossUnit() const { return BossUnit.Get(); }
 
+	// 리더보드 등 표시 계층이 읽는 데이터
+	//방송 전체 누적 기록 (Saved/PlayerData.json에 저장되는 내용)
+	const TMap<FString, FPlayerRecord>& GetPlayerRecords() const { return Records; }
+	//이번 전투씬 진입부터의 유저별 누적 기록
+	const FBattleSessionStats& GetSessionStats() const { return SessionStats; }
+	const TArray<FCharacterDef>& GetCharacterClasses() const { return Classes; }
+
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
  bool bAutoStartBattle = true;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
+
+ //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대)
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<ULeaderboardRotatorWidget> LeaderboardWidgetClass;
+
+ //상단 중앙 보스 행동 암시 텍스트
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
+ TSubclassOf<UBossTelegraphWidget> BossTelegraphWidgetClass;
+
+ //매 턴 Prepare 시작 시 보스 행동이 정해지면 브로드캐스트. 암시 텍스트 UI 등이 구독
+ UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
+ FOnBossTelegraphSignature OnBossTelegraph;
 
  // HPGen for the temple recovery blessing; adjustable until design fixes the value.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Temple", meta = (ClampMin = "0"))
@@ -630,6 +655,12 @@ public:
 private:
  UPROPERTY(Transient)
  TObjectPtr<UChatLogWidget> ChatLogWidget;
+ UPROPERTY(Transient)
+ TObjectPtr<ULeaderboardRotatorWidget> LeaderboardWidget;
+ UPROPERTY(Transient)
+ TObjectPtr<UBossTelegraphWidget> BossTelegraphWidget;
+ //전투씬 진입(BeginPlay)부터 나갈 때(EndPlay)까지의 유저별 누적. 판이 새로 시작돼도 유지
+ FBattleSessionStats SessionStats;
  UPROPERTY(Transient) TObjectPtr<UBattleDataResetWidget> DataResetWidget;
  TWeakObjectPtr<APlayerController> DataResetController;
  bool bMouseCursorBeforeDataReset = false;
