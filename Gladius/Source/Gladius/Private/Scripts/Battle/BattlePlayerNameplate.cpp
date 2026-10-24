@@ -90,6 +90,7 @@ void UBattlePlayerNameplate::SetDisplayData(const FBattlePlayerUIData& InData)
 
 void UBattlePlayerNameplate::SetPanelDimensions(FVector2D InSize)
 {
+	SetRenderTransformPivot(FVector2D(0.5f, 1.f));
 	PanelSize = InSize;
 	ResolveDesignerWidgets();
 	if (PanelSizeBox)

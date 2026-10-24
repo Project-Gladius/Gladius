@@ -34,6 +34,7 @@ ABattleUnit::ABattleUnit()
 	//화면 공간이라 항상 카메라를 향하고 거리와 무관하게 같은 크기로 그려진다
 	Nameplate->SetWidgetSpace(EWidgetSpace::Screen);
 	Nameplate->SetDrawAtDesiredSize(true);
+	Nameplate->SetPivot(FVector2D(0.5f, 1.f));
 	Nameplate->SetUsingAbsoluteScale(true);
 
 	//블루프린트에서 Widget Class를 바꾸면 그쪽이 우선한다
@@ -42,9 +43,17 @@ ABattleUnit::ABattleUnit()
 	PlayerUIClass = DesignerUI.Class;
 }
 
+void ABattleUnit::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	// Saved Blueprint overrides must use the same bottom-center attachment point.
+	Nameplate->SetPivot(FVector2D(0.5f, 1.f));
+}
+
 void ABattleUnit::BeginPlay()
 {
 	Super::BeginPlay();
+	Nameplate->SetPivot(FVector2D(0.5f, 1.f));
 	ApplyLabel();
 }
 
@@ -321,6 +330,7 @@ void ABattleUnit::SetLabelText(const FString& Text)
 
 void ABattleUnit::SetPlayerUI(const FBattlePlayerUIData& Data)
 {
+	Nameplate->SetPivot(FVector2D(0.5f, 1.f));
 	UClass* DesiredClass = PlayerUIClass.Get();
 	// Old unit BPs may still explicitly reference the former native-only widget.
 	if (!DesiredClass || DesiredClass == UBattlePlayerNameplate::StaticClass())
@@ -329,7 +339,6 @@ void ABattleUnit::SetPlayerUI(const FBattlePlayerUIData& Data)
 	if (Nameplate->GetWidgetClass() != DesiredClass)
 	{
 		Nameplate->SetWidgetClass(DesiredClass);
-		Nameplate->SetPivot(FVector2D(0.5f, 1.f));
 		Nameplate->InitWidget();
 	}
 	if (UBattlePlayerNameplate* Widget = Cast<UBattlePlayerNameplate>(Nameplate->GetUserWidgetObject()))
@@ -345,6 +354,7 @@ void ABattleUnit::SetPlayerUIVisible(bool bVisible)
 
 void ABattleUnit::UpdatePlayerUIScale(const FVector& CameraLocation)
 {
+	Nameplate->SetPivot(FVector2D(0.5f, 1.f));
 	if (UBattlePlayerNameplate* Widget = Cast<UBattlePlayerNameplate>(Nameplate->GetUserWidgetObject()))
 	{
 		const float Distance = FVector::Dist(CameraLocation, Nameplate->GetComponentLocation());
