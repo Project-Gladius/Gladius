@@ -8,9 +8,13 @@
 #include "LevelSequencePlayer.h"
 #include "LevelSequence.h"
 #include "TimerManager.h"
+#include "Engine/Texture2D.h"
 
 struct FLevelTransitionTestAccess
 {
+ static void PlayNow(ULevelTransitionCinematics* C, bool Battle) { C->Play(Battle, true); }
+ static float LogoAlpha(ULevelTransitionCinematics* C) { return C->GetIntroLogoOpacity(); }
+ static bool HasLogo(ULevelTransitionCinematics* C) { return C->IntroLogoOverlay.IsValid(); }
  static void DelayElapsed(ABattleManager* B) { B->HandleBattleStartDelayElapsed(); }
  static ULevelSequencePlayer* Player(ULevelTransitionCinematics* C) { return C->SequencePlayer; }
  static void Finish(ULevelTransitionCinematics* C) { C->HandleFinished(); }
@@ -43,6 +47,40 @@ struct FTransitionTestWorld
  }
 };
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIntroLogoFadeTest,"Gladius.Transitions.IntroLogoFade",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FIntroLogoFadeTest::RunTest(const FString& Parameters)
+{
+ FTransitionTestWorld T;
+ auto* C=T.World->GetSubsystem<ULevelTransitionCinematics>();
+ TestNotNull(TEXT("Imported logo is available"),LoadObject<UTexture2D>(nullptr,TEXT("/Game/UI/Cinematics/T_GladiusIntroLogo.T_GladiusIntroLogo")));
+ for (bool Battle : {false,true})
+ {
+  FLevelTransitionTestAccess::PlayNow(C,Battle);
+  auto* Player=FLevelTransitionTestAccess::Player(C);
+  if (!TestNotNull(TEXT("Intro player created"),Player)) return false;
+  auto Seek=[&](double Fraction)
+  {
+   FMovieSceneSequencePlaybackParams Params;
+   Params.PositionType=EMovieScenePositionType::Time;
+   Params.UpdateMethod=EUpdatePositionMethod::Jump;
+   Params.Time=Player->GetStartTime().AsSeconds()+Player->GetDuration().AsSeconds()*Fraction;
+   Player->SetPlaybackPosition(Params);
+   return FLevelTransitionTestAccess::LogoAlpha(C);
+  };
+  TestEqual(TEXT("Initially transparent"),Seek(0.),0.f);
+  const float Rising=Seek(0.1);
+  TestTrue(TEXT("Fade in is intermediate"),Rising>0.3f&&Rising<0.7f);
+  TestEqual(TEXT("Logo holds fully visible"),Seek(0.4),1.f);
+  const float Falling=Seek(0.7);
+  TestTrue(TEXT("Fade out is intermediate"),Falling>0.3f&&Falling<0.7f);
+  TestEqual(TEXT("Transparent before intro ends"),Seek(0.9),0.f);
+  FLevelTransitionTestAccess::Cancel(C);
+  TestFalse(TEXT("Cleanup removes overlay"),FLevelTransitionTestAccess::HasLogo(C));
+  TestEqual(TEXT("Cleanup resets alpha"),FLevelTransitionTestAccess::LogoAlpha(C),0.f);
+ }
+ return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleLoginIntroTest,"Gladius.Transitions.LoginWindow",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FBattleLoginIntroTest::RunTest(const FString& Parameters)
 {

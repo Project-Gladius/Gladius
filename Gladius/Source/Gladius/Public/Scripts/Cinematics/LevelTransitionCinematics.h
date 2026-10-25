@@ -2,10 +2,14 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "Styling/SlateBrush.h"
 #include "LevelTransitionCinematics.generated.h"
 
 class ALevelSequenceActor;
 class ULevelSequencePlayer;
+class UTexture2D;
+class SWidget;
+class UGameViewportClient;
 
 // Per-world ownership prevents duplicate intros and overlapping level travel requests.
 UCLASS()
@@ -24,6 +28,13 @@ private:
     friend struct FLevelTransitionTestAccess;
     UPROPERTY(Transient) TObjectPtr<ALevelSequenceActor> SequenceActor;
     UPROPERTY(Transient) TObjectPtr<ULevelSequencePlayer> SequencePlayer;
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> IntroLogoTexture;
+    FSlateBrush IntroLogoBrush;
+    TSharedPtr<SWidget> IntroLogoOverlay;
+    TWeakObjectPtr<UGameViewportClient> IntroLogoViewport;
+    void ShowIntroLogo();
+    void RemoveIntroLogo();
+    float GetIntroLogoOpacity() const;
     TWeakObjectPtr<AActor> PreviousViewTarget;
     FSimpleDelegate Completion;
     FTimerHandle PlaybackTimer;
