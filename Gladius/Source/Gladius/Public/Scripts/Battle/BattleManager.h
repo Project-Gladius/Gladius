@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -86,6 +86,16 @@ struct FPendingHit
 {
 	int32 Damage = 0;
 	bool bCrit = false;
+
+	//아래 셋은 계산에 쓰이지 않는다 — 숫자 팝업의 색·글자를 가르기 위한 것이다.
+	//스킬과 평타는 색이 다르고, 직업군마다 또 다르다 (기획서 "대미지의 표시")
+	bool bSkill = true;
+
+	//Classes의 인덱스. 음수면 보스 타격이 아니다 (플레이어가 맞은 쪽)
+	int32 ClassIndex = INDEX_NONE;
+
+	//맞은 구역의 내성. 팝업 위에 '취약'/'견딤'으로 뜨고 '보통'은 생략한다
+	EResistance Resist = EResistance::Normal;
 };
 
 USTRUCT()
@@ -478,10 +488,13 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	int32 BossDamageTaken = 0;
 
-	//그중 화면에 띄운 만큼. 계산은 ResolveTurn에서 한 번에 들어가지만 이름표는
-	//칼이 닿는 순간마다 오른다. EndTurn에서 BossDamageTaken과 맞춘다
+	//그중 화면에 띄운 만큼. 계산은 ResolveTurn에서 한 번에 들어가지만
+	//숫자는 칼이 닿는 순간마다 오른다. EndTurn에서 BossDamageTaken과 맞춘다.
+	//보스 이름표는 없어졌지만 '표시된 양'이라는 계약은 남아 있다 —
+	//Gladius.BattleUnified 테스트가 이 값으로 표시 지연을 검증한다
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	int32 BossDamageShown = 0;
+
 
 	UPROPERTY(BlueprintReadOnly, Category = "Battle|State")
 	int32 TurnIndex = 0;
@@ -660,6 +673,7 @@ public:
 	UFUNCTION(CallInEditor, BlueprintCallable, Category = "Battle|Debug")
 	void RunSelfTest();
 
+
 	//현재 격자 좌표에 BattleSpot을 만들어 준다. 백지에서 시작하지 않도록 하는 용도라
 	//이미 스팟이 있으면 아무것도 하지 않는다
 	UFUNCTION(CallInEditor, Category = "Battle|Arena")
@@ -707,6 +721,10 @@ public:
 	float ResistanceMultiplier(EResistance Resistance) const;
 
 	//이동 후 플레이어 구역과 공격 속성으로 내성 배율을 구한다 (기획서 2절)
+	//구역의 내성 단계. 배율만 필요하면 아래를 쓰고, 숫자 팝업처럼 '취약'/'견딤'을
+	//글자로 띄워야 하면 단계가 필요하다
+	static EResistance ZoneResistance(const FBossAction& Action, EBattleLane Lane, EDamageType Type);
+
 	float ZoneResistMultiplier(const FBossAction& Action, EBattleLane Lane, EDamageType Type) const;
 
 	//로그와 표시판에 쓸 피격 구역 문자열

@@ -1,5 +1,6 @@
 ﻿#include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/UnitNameplate.h"
+#include "Scripts/Battle/DamagePopupStack.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimInstance.h"
@@ -27,6 +28,9 @@ ABattleUnit::ABattleUnit()
 	Mesh->SetupAttachment(Root);
 
 	Nameplate = CreateDefaultSubobject<UWidgetComponent>(TEXT("Nameplate"));
+
+	DamagePopups = CreateDefaultSubobject<UDamagePopupStack>(TEXT("DamagePopups"));
+	DamagePopups->SetupAttachment(Root);
 	Nameplate->SetupAttachment(Root);
 
 	//Root는 항상 스케일 1이므로 이 값이 곧 머리 위 높이(cm)다
@@ -92,29 +96,14 @@ void ABattleUnit::ReportHit(float Delay)
 		FTimerDelegate::CreateWeakLambda(this, [this]() { OnHitLanded.Broadcast(); }), Delay, false);
 }
 
-void ABattleUnit::OnDamageShown_Implementation(int32 Damage, bool bCrit)
+void ABattleUnit::OnDamageShown_Implementation(int32 Damage, bool bCrit, bool bSkill,
+	int32 ClassIndex, EResistance Resist)
 {
-	// ponytail: 임시 팝업 — 제자리에 잠깐 떴다 사라진다. 떠오르기·색 구분은 WBP로 바꿀 때 넣는다
-	UWidgetComponent* Popup = NewObject<UWidgetComponent>(this);
-	Popup->SetupAttachment(Root);
-	Popup->SetWidgetSpace(EWidgetSpace::Screen);
-	Popup->SetDrawAtDesiredSize(true);
-	Popup->SetWidgetClass(UUnitNameplate::StaticClass());
-
-	//이름표 조금 위. 피버 연타가 한 점에 겹치지 않게 조금씩 흩는다
-	Popup->SetRelativeLocation(Nameplate->GetRelativeLocation() + FVector(
-		FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(-40.f, 40.f), FMath::FRandRange(40.f, 100.f)));
-	Popup->RegisterComponent();
-	Popup->InitWidget();
-
-	if (UUnitNameplate* Text = Cast<UUnitNameplate>(Popup->GetUserWidgetObject()))
+	//배치·수명은 컴포넌트가 맡는다. 블루프린트가 이 이벤트를 덮어쓰면 그쪽이 전부 가져간다
+	if (DamagePopups)
 	{
-		Text->SetText(bCrit ? FString::Printf(TEXT("%d!"), Damage) : FString::FromInt(Damage));
+		DamagePopups->Push(Damage, bCrit, bSkill, ClassIndex, Resist);
 	}
-
-	FTimerHandle Handle;
-	GetWorldTimerManager().SetTimer(Handle,
-		FTimerDelegate::CreateWeakLambda(Popup, [Popup]() { Popup->DestroyComponent(); }), 1.f, false);
 }
 
 void ABattleUnit::NotifyDied()

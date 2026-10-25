@@ -1687,8 +1687,10 @@ void ABattleManager::ResolveTurn()
 		if (bAttack1 || bAttack2)
 		{
 			const FAttackDef& Attack = Classes[P.ClassIndex].Attacks[bAttack1 ? 0 : 1];
-			//내성은 이동 후 구역 기준 (기획서 2절)
-			const float Resist = ZoneResistMultiplier(Boss, P.Lane, Attack.Type);
+			//내성은 이동 후 구역 기준 (기획서 2절).
+			//단계는 숫자 팝업 위의 '취약'/'견딤' 글자로 그대로 나간다
+			const EResistance ResistLevel = ZoneResistance(Boss, P.Lane, Attack.Type);
+			const float Resist = ResistanceMultiplier(ResistLevel);
 
 			//치명타는 플레이어마다 따로 굴린다. 공격의 기본 치명타 + 신전 강화분 (상한 적용)
 			const float Chance = FMath::Min(Attack.CritChance + P.CritChanceBonus, CritChanceCap);
@@ -1701,7 +1703,7 @@ void ABattleManager::ResolveTurn()
 
 			//화면에는 블루프린트가 타격을 알릴 때 한 대씩 나간다. 스킬이 먼저, 평타가 그 뒤다
 			P.HitsToShow.Reset();
-			P.HitsToShow.Add({ Dealt, bCrit });
+			P.HitsToShow.Add({ Dealt, bCrit, true, P.ClassIndex, ResistLevel });
 
 			Crits += bCrit ? 1 : 0;
 
@@ -1719,7 +1721,7 @@ void ABattleManager::ResolveTurn()
 				//강화 공격력은 스킬에만 붙는다 — 평타는 고정값이다
 				const int32 FeverDealt = DamageToBoss(FeverAttackDamage, 0, Resist, bFeverCrit, CritDamage);
 				Dealt += FeverDealt;
-				P.HitsToShow.Add({ FeverDealt, bFeverCrit });
+				P.HitsToShow.Add({ FeverDealt, bFeverCrit, false, P.ClassIndex, ResistLevel });
 				Crits += bFeverCrit ? 1 : 0;
 			}
 
@@ -2210,7 +2212,6 @@ void ABattleManager::LandBossStrike(EBattleLane Lane)
 				//쓰러질 타격인지 지금 알려준다. OnDied는 뒤에 오므로
 				//블루프린트가 그걸 기다리면 이미 일어나는 모션이 섞인 뒤다
 				P.Unit->OnHit(P.DamageTakenThisTurn, P.bDiedThisTurn);
-				P.Unit->OnDamageShown(P.DamageTakenThisTurn, false);
 
 				//막는 모션이 나갔으니 버티는 자세는 여기서 끝난다.
 				//막기가 끝나면 그 밑은 평소 자세여야지 다시 막고 서 있으면 안 된다
@@ -2256,8 +2257,7 @@ void ABattleManager::ShowBossHit(const FString& UserId, const FPendingHit& Hit)
 
 	if (BossUnit)
 	{
-		BossUnit->SetLabelText(FString::Printf(TEXT("BOSS\n%d"), BossDamageShown));
-		BossUnit->OnDamageShown(Hit.Damage, Hit.bCrit);
+		BossUnit->OnDamageShown(Hit.Damage, Hit.bCrit, Hit.bSkill, Hit.ClassIndex, Hit.Resist);
 	}
 }
 
@@ -2634,13 +2634,6 @@ void ABattleManager::SpawnBoss()
 
 void ABattleManager::UpdateVisuals()
 {
-	if (BossUnit)
-	{
-		//체력이 없으니 남은 양이 아니라 쌓인 피해를 보여준다.
-		//때려도 아무 반응이 없으면 공격이 들어가는지 알 수 없다
-		BossUnit->SetLabelText(FString::Printf(TEXT("BOSS\n%d"), BossDamageShown));
-	}
-
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		const FBattlePlayer& P = Pair.Value;
@@ -2755,10 +2748,15 @@ float ABattleManager::ResistanceMultiplier(EResistance Resistance) const
 	return Balance.ResistanceMultipliers[(int32)Resistance];
 }
 
-float ABattleManager::ZoneResistMultiplier(const FBossAction& Action, EBattleLane Lane, EDamageType Type) const
+EResistance ABattleManager::ZoneResistance(const FBossAction& Action, EBattleLane Lane, EDamageType Type)
 {
 	const FZoneResistance& Zone = Action.ResistanceByZone[(int32)Lane];
-	return ResistanceMultiplier(Type == EDamageType::Physical ? Zone.Physical : Zone.Magical);
+	return Type == EDamageType::Physical ? Zone.Physical : Zone.Magical;
+}
+
+float ABattleManager::ZoneResistMultiplier(const FBossAction& Action, EBattleLane Lane, EDamageType Type) const
+{
+	return ResistanceMultiplier(ZoneResistance(Action, Lane, Type));
 }
 
 FString ABattleManager::ZonesLabel(const FBossAction& Action)

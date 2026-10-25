@@ -7,6 +7,7 @@
 
 class USkeletalMeshComponent;
 class UAnimMontage;
+class UDamagePopupStack;
 class UWidgetComponent;
 class UCurveFloat;
 class UBattlePlayerNameplate;
@@ -238,9 +239,14 @@ public:
 	void OnHit(int32 Damage, bool bLethal);
 
 	//이 유닛이 맞은 피해를 화면에 띄우는 순간. 보스는 플레이어 타격마다, 플레이어는
-	//칼이 닿을 때 온다. 기본 구현은 머리 위에 숫자를 잠깐 띄우고, 블루프린트가 덮어쓸 수 있다
+	//칼이 닿을 때 온다. 기본 구현은 머리 위에 숫자를 잠깐 띄우고, 블루프린트가 덮어쓸 수 있다.
+	//
+	//뒤의 셋은 숫자의 생김새만 가른다 — 피해는 ResolveTurn에서 이미 확정돼 있다.
+	//bSkill이 거짓이면 피버 평타, ClassIndex는 색을 고를 직업군(음수면 플레이어가
+	//맞은 쪽이라 보스 타격 규칙이 적용되지 않는다), Resist는 숫자 위에 띄울 상성이다
 	UFUNCTION(BlueprintNativeEvent, Category = "Battle|Motion")
-	void OnDamageShown(int32 Damage, bool bCrit);
+	void OnDamageShown(int32 Damage, bool bCrit, bool bSkill, int32 ClassIndex,
+		EResistance Resist);
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle|Motion")
 	void OnDied();
@@ -294,6 +300,11 @@ public:
 	//Mesh가 아니라 Root에 붙는다. 메시 크기와 무관하게 높이를 직접 정할 수 있다
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
 	TObjectPtr<UWidgetComponent> Nameplate;
+
+	//머리 위 피해 숫자. 자기 Tick을 쓰므로 유닛의 이동 Tick과 얽히지 않는다.
+	//조절값(표시 시간·열 간격·각도 등)은 이 컴포넌트의 Details에 있다
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
+	TObjectPtr<UDamagePopupStack> DamagePopups;
 
 	// Temporary C++ widget by default; replace with a derived WBP when art is ready.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Battle|UI")
