@@ -12,6 +12,11 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#if WITH_EDITOR
+#include "WidgetBlueprint.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#endif
 
 void ULeaderboardBoardWidget::NativeOnInitialized()
 {
@@ -31,13 +36,16 @@ void ULeaderboardBoardWidget::NativePreConstruct()
 {
 	Super::NativePreConstruct();
 
-	//Designer 미리보기: 10줄을 예시 데이터로 채워 완성 모습을 보여줌
-	if (IsDesignTime())
-	{
-		ResolveWidgets();
-		CreateRows();
-		SetPage(MakePreviewPage());
-	}
+	RefreshDesignerPreview();
+}
+
+void ULeaderboardBoardWidget::RefreshDesignerPreview()
+{
+ if (!IsDesignTime()) return;
+ ResolveWidgets();
+ // Reuse preview rows on repeated refreshes; never rebuild authored board/row layouts.
+ if (Rows.IsEmpty()) CreateRows();
+ SetPage(MakePreviewPage());
 }
 
 void ULeaderboardBoardWidget::ResolveWidgets()
@@ -55,9 +63,13 @@ void ULeaderboardBoardWidget::ResolveWidgets()
 		}
 	};
 	Find(TitleText, TEXT("TitleText"));
+	Find(TitleText, TEXT("LB_TitleText"));
 	Find(HealthHeaderCell, TEXT("HealthHeaderCell"));
+	Find(HealthHeaderCell, TEXT("LB_HealthHeaderCell"));
 	Find(DamageHeaderText, TEXT("DamageHeaderText"));
+	Find(DamageHeaderText, TEXT("LB_DamageHeaderText"));
 	Find(RowContainer, TEXT("RowContainer"));
+	Find(RowContainer, TEXT("LB_RowContainer"));
 }
 
 void ULeaderboardBoardWidget::CreateRows()
@@ -67,8 +79,11 @@ void ULeaderboardBoardWidget::CreateRows()
 		return;
 	}
 
-	//Designer에 미리 넣어 둔 자리표시용 줄은 지우고 같은 디자인의 줄 10개로 채움
-	RowContainer->ClearChildren();
+	// Remove only rows created by this instance. Never delete designer-authored children.
+	for (ULeaderboardRowWidget* Row : Rows)
+	{
+		if (Row) RowContainer->RemoveChild(Row);
+	}
 	Rows.Reset();
 
 	const TSubclassOf<ULeaderboardRowWidget> RowClass = GladiusUI::ResolveWidgetClass<ULeaderboardRowWidget>(RowWidgetClass, GladiusUI::AssetPaths::LeaderboardRow);
@@ -90,6 +105,10 @@ void ULeaderboardBoardWidget::CreateRows()
 
 void ULeaderboardBoardWidget::SetPage(const FLeaderboardPage& Page)
 {
+ // A nested board can receive data before NativeOnInitialized has a player context.
+ // Resolve existing designer widgets lazily; only generated data rows are created here.
+ ResolveWidgets();
+ if (Rows.IsEmpty()) CreateRows();
 	if (TitleText)
 	{
 		TitleText->SetText(FText::FromString(Page.Title));
@@ -114,10 +133,10 @@ void ULeaderboardBoardWidget::SetPage(const FLeaderboardPage& Page)
 	OnPageChanged(Page, bTitleChanged);
 }
 
-FLeaderboardPage ULeaderboardBoardWidget::MakePreviewPage()
+FLeaderboardPage ULeaderboardBoardWidget::MakePreviewPage() const
 {
 	TArray<FLeaderboardRow> Ranked;
-	for (int32 Index = 0; Index < FLeaderboardBuilder::RowsPerPage; ++Index)
+	for (int32 Index = 0; Index < 15; ++Index)
 	{
 		FLeaderboardRow Row;
 		Row.Rank = Index + 1;
@@ -129,7 +148,12 @@ FLeaderboardPage ULeaderboardBoardWidget::MakePreviewPage()
 		Row.bEmpty = false;
 		Ranked.Add(Row);
 	}
-	return FLeaderboardBuilder::MakeBattleTopPage(Ranked);
+	switch (PreviewPage)
+	{
+	case ELeaderboardPreviewPage::Total: return FLeaderboardBuilder::MakeTotalPage(Ranked);
+	case ELeaderboardPreviewPage::BattleLower: return FLeaderboardBuilder::MakeBattleLowerPage(Ranked);
+	default: return FLeaderboardBuilder::MakeBattleTopPage(Ranked);
+	}
 }
 
 void ULeaderboardBoardWidget::BuildDefaultLayout(UWidgetTree* Tree) const
@@ -200,4 +224,41 @@ void ULeaderboardBoardWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 	// ===== 줄 10개가 들어갈 자리 =====
 	UVerticalBox* Container = ConstructNamed<UVerticalBox>(Tree, TEXT("RowContainer"));
 	Layout->AddChildToVerticalBox(Container);
+}
+
+bool ULeaderboardBoardWidget::EnsureStateBindings(UObject* Asset)
+{
+#if WITH_EDITOR
+ UWidgetBlueprint* BP = Cast<UWidgetBlueprint>(Asset);
+ if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(StaticClass()) || !BP->WidgetTree) return false;
+ UWidgetTree* Tree = BP->WidgetTree;
+ // Repair missing data destinations only; never regenerate or rename authored widgets.
+ if (!Tree->FindWidget(TEXT("RowContainer")) && !Tree->FindWidget(TEXT("LB_RowContainer")))
+ {
+  UPanelWidget* Layout = Cast<UPanelWidget>(Tree->FindWidget(TEXT("BoardLayout")));
+  if (!Layout) return false;
+  auto* Container = GladiusUI::ConstructNamed<UVerticalBox>(Tree,TEXT("RowContainer"));
+  Layout->AddChild(Container);
+  BP->OnVariableAdded(Container->GetFName());
+ }
+ if (!Tree->FindWidget(TEXT("DamageHeaderText")) && !Tree->FindWidget(TEXT("LB_DamageHeaderText")))
+ {
+  UPanelWidget* Cell = Cast<UPanelWidget>(Tree->FindWidget(TEXT("DamageHeaderCell")));
+  if (Cell && Cell->GetChildrenCount() == 0)
+  {
+   UTextBlock* Sibling = Cast<UTextBlock>(Tree->FindWidget(TEXT("CharacterHeaderText")));
+   UTextBlock* Text = Sibling ? DuplicateObject<UTextBlock>(Sibling,Tree,TEXT("DamageHeaderText"))
+    : GladiusUI::ConstructNamed<UTextBlock>(Tree,TEXT("DamageHeaderText"));
+   Text->Slot = nullptr; Text->bIsVariable = true;
+   Text->SetText(FText::FromString(TEXT("데미지")));
+   Cell->AddChild(Text); BP->OnVariableAdded(Text->GetFName());
+  }
+ }
+ FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+ FKismetEditorUtilities::CompileBlueprint(BP);
+ BP->MarkPackageDirty();
+ return BP->Status != BS_Error;
+#else
+ return false;
+#endif
 }

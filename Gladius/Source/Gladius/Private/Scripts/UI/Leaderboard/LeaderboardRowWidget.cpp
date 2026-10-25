@@ -89,7 +89,7 @@ void ULeaderboardRowWidget::NativePreConstruct()
 		Preview.Damage = 98540;
 		Preview.Health = 5;
 		Preview.bEmpty = false;
-		SetRow(Preview, true);
+		SetRow(Preview, bPreviewShowHealth);
 	}
 }
 
@@ -130,6 +130,7 @@ void ULeaderboardRowWidget::CaptureDesignerLook()
 
 void ULeaderboardRowWidget::SetRow(const FLeaderboardRow& Row, bool bShowHealth)
 {
+	ResolveWidgets();
 	CaptureDesignerLook();
 
 	if (HealthCell)

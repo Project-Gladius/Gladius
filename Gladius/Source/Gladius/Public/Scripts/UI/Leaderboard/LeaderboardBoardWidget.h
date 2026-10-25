@@ -21,6 +21,13 @@ class GLADIUS_API ULeaderboardBoardWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+	static bool EnsureStateBindings(UObject* Asset);
+	void RefreshDesignerPreview();
+	// Preview data only; never changes authored geometry, fonts or images.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Leaderboard|Preview")
+	ELeaderboardPreviewPage PreviewPage = ELeaderboardPreviewPage::BattleTop;
+
 	UFUNCTION(BlueprintCallable, Category = "Leaderboard")
 	void SetPage(const FLeaderboardPage& Page);
 
@@ -57,7 +64,7 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Leaderboard|Widgets", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> DamageHeaderText;
 
-	//줄 10개가 들어갈 자리 (Vertical Box 권장). 안의 기존 자식은 실행 시 지워진다
+	//줄 10개가 들어갈 자리 (Vertical Box 권장). 디자이너가 배치한 자식은 보존한다
 	UPROPERTY(BlueprintReadOnly, Category = "Leaderboard|Widgets", meta = (BindWidgetOptional))
 	TObjectPtr<UPanelWidget> RowContainer;
 
@@ -69,5 +76,5 @@ private:
 
 	void ResolveWidgets();
 	void CreateRows();
-	static FLeaderboardPage MakePreviewPage();
+	FLeaderboardPage MakePreviewPage() const;
 };

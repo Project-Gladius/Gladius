@@ -1,5 +1,38 @@
 # 전투 화면 UI 디자인 가이드 (디자이너용)
 
+## 순위표의 독립 상태 편집 (2026-10-26)
+
+누적 순위와 이번 전투 순위는 별도 Board/Row BP를 사용합니다. 기존 디자인을 복제해 시작하며, 한쪽을 편집해도 다른 쪽은 바뀌지 않습니다.
+
+| 상태 | 틀·열 제목·배경 | 한 줄의 배치·이미지·텍스트 |
+|---|---|---|
+| 전체 누적 | `WBP_LeaderboardBoard` | `WBP_LeaderboardRow` |
+| 이번 전투 (1~10위 및 하위 페이지) | `WBP_LeaderboardBoard_Battle` | `WBP_LeaderboardRow_Battle` |
+
+모두 `Content/Blueprints/UI`에 있습니다. 각 Board의 Class Defaults → Row Widget Class가 해당 Row BP를 가리킵니다.
+
+### 편집 순서
+
+1. 편집할 상태의 Board BP를 열어 열 제목, 배경, 장식과 `RowContainer`의 위치를 조정합니다.
+2. 같은 상태의 Row BP를 열어 이름·데미지·이미지 등의 위치, 크기, 폰트와 색을 편집합니다. Board 미리보기에서 자동으로 생성된 개별 행 대신 **Row BP 원본**을 편집하세요.
+3. Board의 Class Defaults → Leaderboard → Preview → **Preview Page**로 Total / Battle Top / Battle Lower 예시 데이터를 선택할 수 있습니다. Row에는 **Preview Show Health**가 있습니다.
+4. `WBP_LeaderboardRotator`의 같은 **Preview Page** 설정으로 전체 화면에서 상태를 확인합니다. 계층은 `PageSwitcher` 아래 `Board`(누적), `BattleBoard`(전투)입니다.
+5. 전체 위치·앵커·크기는 Rotator의 **PageSwitcher의 Canvas Slot**에서 조정합니다. 기존 Board의 Canvas Slot 값을 그대로 옮겨 보존했습니다. 각 상태의 Render Transform도 독립적으로 편집할 수 있습니다.
+6. 컴파일·저장 후 전투에서 확인합니다. 실제 게임에서는 기존 Switch Seconds 간격으로 자동 전환합니다. Preview Page는 게임 시작 상태를 바꾸지 않습니다.
+
+### 디자인 보존 규칙
+
+- 상태 전환은 기존 위젯 인스턴스를 선택할 뿐 레이아웃을 다시 생성하지 않습니다. 이동한 위치·앵커·크기·폰트·장식 이미지는 데이터 갱신으로 초기화하지 않습니다.
+- `TitleText`, `DamageHeaderText`, `RankText`, `NameText`, `CharacterText`, `HealthText`, `DamageText`의 **표시 문자열**은 순위 데이터에 맞춰 갱신됩니다. 고정 문구는 별도 Text 위젯으로 만드세요.
+- 체력 칸의 표시 여부, 메달, 1위 강조, 사망 시 흐림은 기존 동적 연출입니다. 1위 배경을 직접 디자인한 것으로 유지하려면 Row의 **Highlight First Row**를 끄세요. 메달은 Row의 Style → Medal Brushes에서 지정합니다.
+- `RowContainer`는 자동 생성 행이 들어갈 빈 패널로 두고, 고정 장식은 바깥에 배치하는 것이 좋습니다. 코드가 임의로 디자이너 자식을 삭제하지는 않습니다.
+- 기존 `LB_TitleText`, `LB_HealthHeaderCell` 이름도 지원합니다. 이름을 바꾸지 않고 연결만 보완했습니다.
+- `Board`, `BattleBoard`, `PageSwitcher` 및 데이터용 위젯 이름은 유지하세요. 기본 레이아웃 재생성이나 BP 삭제는 이 작업에 필요하지 않습니다.
+- 친구 컴퓨터에는 새 `_Battle` BP 두 개, 변경된 기존 BP 세 개와 C++ 소스를 함께 전달하고 에디터 종료 후 Development Editor 빌드를 실행해야 합니다.
+
+---
+
+
 캐릭터 머리 위 NamePlate의 공격력·방어율과 하단 피벗 편집은 [NamePlate 상태 수치 기획 및 가이드](Nameplate-status-spec.md)를 참고하세요.
 
 전투 화면의 UI 3가지를 언리얼 에디터에서 직접 꾸미는 방법입니다.
@@ -96,7 +129,7 @@
 | `TitleText` | 글자 | 제목 "LEADERBOARD" / "BATTLE ANALYSIS" |
 | `HealthHeaderCell` | 아무 위젯 | "체력" 열 제목. LEADERBOARD에서는 숨겨집니다 |
 | `DamageHeaderText` | 글자 | "누적 데미지" / "데미지" |
-| `RowContainer` | 세로 상자 (Vertical Box) | 순위 10줄이 자동으로 채워지는 자리. 안에 넣어 둔 것은 게임 실행 시 지워집니다 |
+| `RowContainer` | 세로 상자 (Vertical Box) | 순위 10줄이 자동으로 채워지는 자리. 행 자체의 디자인은 해당 상태의 Row BP에서 편집합니다 |
 
 > 편집 화면에는 예시 순위 10줄이 미리 보입니다. 실제 게임에서는 진짜 순위로 바뀝니다.
 
