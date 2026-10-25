@@ -39,6 +39,13 @@ FBattleTopHudState FBattleTopHudPresenter::Build(EBattlePhase Phase, bool bCutSc
 
 	switch (Phase)
 	{
+	case EBattlePhase::BattleStart:
+		State.bVisible = true;
+		State.GuideText = TEXT("로그인해 주세요!");
+		State.bShowTimer = true;
+		State.bShowGauge = true;
+		break;
+
 	case EBattlePhase::Prepare:
 		State.bVisible = true;
 		State.GuideText = TEXT("행동을 선택하세요...");
@@ -61,7 +68,7 @@ FBattleTopHudState FBattleTopHudPresenter::Build(EBattlePhase Phase, bool bCutSc
 		State.GuideText = TEXT("전투 중!");
 		break;
 
-	default: //BattleStart, BattleEnd
+	default: //BattleEnd
 		break;
 	}
 	return State;

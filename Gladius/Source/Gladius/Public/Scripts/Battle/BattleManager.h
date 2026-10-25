@@ -607,7 +607,7 @@ public:
  void LogoutPlayer(const FString& UserId);
 
  //!로그인 <캐릭터>: 고른 캐릭터로 전투에 참가. CharacterName은 "글라디우스"/"세라" 또는 직업 id
- //입력 단계(Prepare/Collect)에만 받으며, 이미 참가 중이거나 정원이 차면 false
+ //BattleStart 및 입력 단계(Prepare/Collect)에 로그인 가능. 이미 참가 중이거나 정원이 차면 false
  UFUNCTION(BlueprintCallable, Category = "Battle")
  bool LoginPlayer(const FString& UserId, const FString& DisplayName, const FString& CharacterName);
 
@@ -628,7 +628,7 @@ public:
  FOnBattlePlayerLoggedOut OnPlayerLoggedOut;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
- float BattleStartSeconds = 0.1f;
+ float BattleStartSeconds = 20.f;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|CutScenes")
  bool bEnableTurnCutScenes = true;
@@ -774,6 +774,7 @@ private:
  bool bMouseCursorBeforeDataReset = false;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
+ friend struct FLevelTransitionTestAccess;
  bool bRecordLoadFailed = false;
  bool bRecordsInitialized = false;
  FPlayerRecord& GetOrCreateRecord(const FString& UserId, const FString& DisplayName, const FString& CharacterId = TEXT(""));
@@ -873,6 +874,10 @@ private:
 	void EndTurn();
 	// Complete the final results, save records, and return to the configured temple.
 	void FinishBattle();
+ void TravelToTemple();
+ void HandleBattleStartDelayElapsed();
+ void TryStartFirstTurn();
+ bool bBattleStartDelayElapsed = false;
 
 	//구역별 인원에 맞춰 설 자리를 다시 배분한다
 	void AssignSlots();

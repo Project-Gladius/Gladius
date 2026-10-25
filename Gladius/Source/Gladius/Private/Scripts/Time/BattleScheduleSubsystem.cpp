@@ -150,7 +150,14 @@ void UBattleScheduleSubsystem::HandleTime(const FDateTime& Now)
         if (!Manager->CombatLevel.IsNull()) Manager->TravelToCombat();
     }
     else if (!Settings->BattleMap.IsNull())
-        UGameplayStatics::OpenLevelBySoftObjectPtr(World, Settings->BattleMap);
+    {
+        Manager = World->SpawnActor<AGameManager>();
+        if (Manager)
+        {
+            Manager->CombatLevel = Settings->BattleMap;
+            Manager->TravelToCombat();
+        }
+    }
     else
         UE_LOG(LogTemp, Warning, TEXT("BattleSchedule: no combat map configured."));
 }

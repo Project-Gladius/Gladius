@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Engine/Light.h"
 
 bool URealTimeSunSubsystem::DoesSupportWorldType(EWorldType::Type Type) const
 {
@@ -108,5 +109,45 @@ void URealTimeSunSubsystem::UpdateSun(const FDateTime& Now)
             TemporaryMoon = GetWorld()->SpawnActor<ATemporaryMoonLight>(ATemporaryMoonLight::StaticClass(), FTransform::Identity, Params);
         }
         if (TemporaryMoon.IsValid()) TemporaryMoon->UpdateFromSun(SunDirection, Sun->Intensity, *Settings);
+    }
+    if (URealTimeSettings::MatchesMap(GetWorld(), Settings->TempleMap))
+        UpdateTempleLightColors(SunDirection);
+}
+
+void URealTimeSunSubsystem::UpdateTempleLightColors(const FVector& SunDirection)
+{
+    ULightComponent* Source = Sun.Get();
+    if (!Source) return;
+    if (SunDirection.Z <= 0.0)
+    {
+        // Prefer the moon managed by this subsystem; also support an authored atmosphere moon.
+        UDirectionalLightComponent* Moon = TemporaryMoon.IsValid()
+            ? TemporaryMoon->FindComponentByClass<UDirectionalLightComponent>() : nullptr;
+        if (!Moon)
+        {
+            for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+            {
+                TInlineComponentArray<UDirectionalLightComponent*> Lights;
+                It->GetComponents(Lights);
+                for (UDirectionalLightComponent* Light : Lights)
+                    if (Light != Sun.Get() && Light->IsUsedAsAtmosphereSunLight()
+                        && Light->GetAtmosphereSunLightIndex() == 1 && Light->IsVisible() && Light->Intensity > 0.f)
+                        Moon = Light;
+            }
+        }
+        if (Moon && Moon->IsVisible() && Moon->Intensity > 0.f) Source = Moon;
+    }
+
+    // Standalone light actors provide temple illumination. Candle/firefly Blueprint components
+    // are intentionally excluded. Resolve each sample to support streamed/reloaded lights.
+    for (TActorIterator<ALight> It(GetWorld()); It; ++It)
+    {
+        ULightComponent* Light = It->GetLightComponent();
+        if (!Light || Light == Source || Light->IsA<UDirectionalLightComponent>()) continue;
+        if (Light->Mobility != EComponentMobility::Movable)
+            Light->SetMobility(EComponentMobility::Movable);
+        Light->SetLightColor(Source->GetLightColor());
+        Light->SetTemperature(Source->Temperature);
+        Light->SetUseTemperature(Source->bUseTemperature);
     }
 }

@@ -54,6 +54,8 @@ void ATemporaryMoonLight::UpdateFromSun(const FVector& SunDirection, float SunIn
     }
     MoonLight->SetWorldRotation((-MoonDirection).Rotation());
     MoonLight->SetLightColor(Settings.TemporaryMoonColor);
+    MoonLight->SetUseTemperature(true);
+    MoonLight->SetTemperature(FMath::Clamp(Settings.TemporaryMoonTemperature, 1700.f, 12000.f));
     // Fade near the horizon and provide directional illumination across the whole map.
     const float Night = FMath::Clamp(float(-NormalizedSun.Z) * 5.f, 0.f, 1.f);
     MoonLight->SetIntensity(FMath::Max(SunIntensity, 0.f) * FMath::Max(Settings.TemporaryMoonLightScale, 0.f) * Night);

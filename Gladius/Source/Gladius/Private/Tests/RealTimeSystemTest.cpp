@@ -3,6 +3,10 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Scripts/Time/RealTimeSettings.h"
+#include "Scripts/Cinematics/LevelTransitionCinematics.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
+#include "EngineUtils.h"
 #include "Scripts/Time/RealTimeSunSubsystem.h"
 #include "Scripts/Time/BattleScheduleSubsystem.h"
 #include "Scripts/Time/RealTimeClockSubsystem.h"
@@ -168,32 +172,47 @@ bool FRealTimeSunWorldTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRealTimeFallbackTest,"Gladius.RealTime.TempleWithoutController",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FRealTimeFallbackTest::RunTest(const FString& Parameters)
 {
-    UGameInstance* GI=NewObject<UGameInstance>(GEngine);
-    GI->AddToRoot(); GI->InitializeStandalone();
-    UWorld* W=GI->GetWorld();
+    // Each completed transition leaves its world; test both fallback routes in separate worlds.
+    for (const bool bExistingManager : {false, true})
+    {
+        UGameInstance* GI=NewObject<UGameInstance>(GEngine);
+        GI->AddToRoot(); GI->InitializeStandalone();
+        UWorld* W=GI->GetWorld();
 #if UE_SUPPORT_FOR_ACTOR_TICK_DISABLE
-    W->EnableActorTickAndUserCallbacks(true);
+        W->EnableActorTickAndUserCallbacks(true);
 #endif
-    FRealTimeTestAccess::Prepare(W);
-    URealTimeSettings* Settings=GetMutableDefault<URealTimeSettings>();
-    TGuardValue<TSoftObjectPtr<UWorld>> MapGuard(Settings->TempleMap,TSoftObjectPtr<UWorld>(W));
-    TGuardValue<bool> EnabledGuard(Settings->bEnableBattleSchedule,true);
-    TGuardValue<bool> SunGuard(Settings->bEnableSun,false);
-    W->BeginPlay();
-    UBattleScheduleSubsystem* S=GI->GetSubsystem<UBattleScheduleSubsystem>();
-    FRealTimeTestAccess::Sample(S,W,FDateTime(2026,10,24,9,49,59),FDateTime(2026,10,24,9,50,0));
-    FWorldContext& Context=GEngine->GetWorldContextFromWorldChecked(W);
-    TestTrue(TEXT("Bare temple requests battle map"),Context.TravelURL.Contains(TEXT("/Game/Levels/Main/MainBattle")));
-    Context.TravelURL.Reset();
-    AGameManager* Manager=W->SpawnActor<AGameManager>();
-    FRealTimeTestAccess::Sample(S,W,FDateTime(2026,10,25,9,49,59),FDateTime(2026,10,25,9,50,0));
-    TestEqual(TEXT("Unconfigured manager receives shared battle map"),Manager->CombatLevel.ToSoftObjectPath(),Settings->BattleMap.ToSoftObjectPath());
-    TestEqual(TEXT("Manager enters combat state"),Manager->GetGameState(),EGameState::Combat);
-    TestTrue(TEXT("Manager requests battle map"),Context.TravelURL.Contains(TEXT("/Game/Levels/Main/MainBattle")));
-    Context.TravelURL.Reset();
-    Manager->Destroy();
-    W->EndPlay(EEndPlayReason::Quit);
-    GI->Shutdown(); GEngine->DestroyWorldContext(W); W->DestroyWorld(false); GI->RemoveFromRoot();
+        FRealTimeTestAccess::Prepare(W);
+        URealTimeSettings* Settings=GetMutableDefault<URealTimeSettings>();
+        TGuardValue<TSoftObjectPtr<UWorld>> MapGuard(Settings->TempleMap,TSoftObjectPtr<UWorld>(W));
+        TGuardValue<bool> EnabledGuard(Settings->bEnableBattleSchedule,true);
+        TGuardValue<bool> SunGuard(Settings->bEnableSun,false);
+        AGameManager* Manager=bExistingManager ? W->SpawnActor<AGameManager>() : nullptr;
+        W->BeginPlay();
+        UBattleScheduleSubsystem* S=GI->GetSubsystem<UBattleScheduleSubsystem>();
+        FRealTimeTestAccess::Sample(S,W,FDateTime(2026,10,24,9,49,59),FDateTime(2026,10,24,9,50,0));
+        FWorldContext& Context=GEngine->GetWorldContextFromWorldChecked(W);
+        if (!Manager) for (TActorIterator<AGameManager> It(W);It;++It) { Manager=*It;break; }
+        TestNotNull(TEXT("Bare temple obtains a routing manager"),Manager);
+        TestTrue(TEXT("Travel waits while temple outro plays"),Context.TravelURL.IsEmpty());
+        if (Manager)
+        {
+            TestEqual(TEXT("Manager receives shared battle map"),Manager->CombatLevel.ToSoftObjectPath(),Settings->BattleMap.ToSoftObjectPath());
+            TestEqual(TEXT("Temple state retained during outro"),Manager->GetGameState(),EGameState::Temple);
+        }
+        ULevelSequencePlayer* Player=nullptr;
+        for (TActorIterator<ALevelSequenceActor> It(W);It;++It) if (It->GetSequencePlayer()) { Player=It->GetSequencePlayer();break; }
+        if (TestNotNull(TEXT("Temple outro player created"),Player))
+        {
+            // Advance the real sequence to its natural end, then run deferred travel.
+            for (int32 I=0;I<3;++I) Player->Update(10.f);
+            W->GetTimerManager().Tick(0.1f);
+            TestTrue(TEXT("Completed outro requests battle map"),Context.TravelURL.Contains(TEXT("/Game/Levels/Main/MainBattle")));
+            if (Manager) TestEqual(TEXT("Manager enters combat after outro"),Manager->GetGameState(),EGameState::Combat);
+        }
+        Context.TravelURL.Reset();
+        W->EndPlay(EEndPlayReason::Quit);
+        GI->Shutdown(); GEngine->DestroyWorldContext(W); W->DestroyWorld(false); GI->RemoveFromRoot();
+    }
     return true;
 }
 
@@ -249,3 +268,5 @@ bool FRealTimeTravelTest::RunTest(const FString& Parameters)
     return true;
 }
 #endif
+
+#include "TempleLightColorTest.inl"

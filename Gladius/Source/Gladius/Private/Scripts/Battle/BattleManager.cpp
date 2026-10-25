@@ -1,4 +1,5 @@
-﻿#include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Cinematics/LevelTransitionCinematics.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
 #include "Scripts/Battle/BattleSpot.h"
@@ -196,6 +197,7 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ABattleManager::StartBattle()
 {
  StopBattle();
+ bBattleStartDelayElapsed = false;
  bBattleRunning = true;
  Phase = EBattlePhase::BattleStart;
  PreviousCutSceneClassId.Reset();
@@ -210,7 +212,7 @@ void ABattleManager::StartBattle()
  if (AGameManager* Game = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(this, AGameManager::StaticClass())))
   Game->SetGameState(EGameState::Combat);
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
-  Chat->SetCombatAutoPollingEnabled(false);
+  Chat->SetCombatAutoPollingEnabled(true);
  BossDamageTaken = 0;
 	BossDamageShown = 0;
 	TurnIndex = 0;
@@ -223,7 +225,11 @@ void ABattleManager::StartBattle()
 	// A new battle starts with a fresh participant list; persistent Records are retained.
 	SpawnBoss();
 	UpdateVisuals();
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::StartTurn, FMath::Max(0.001f, BattleStartSeconds), false);
+	InputPhaseDuration = FMath::Max(0.f, BattleStartSeconds);
+ InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
+ GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::HandleBattleStartDelayElapsed, FMath::Max(0.001f, BattleStartSeconds), false);
+ if (URealTimeSettings::MatchesMap(GetWorld(), GetDefault<URealTimeSettings>()->BattleMap))
+  GetWorld()->GetSubsystem<ULevelTransitionCinematics>()->PlayIntro(true, FSimpleDelegate::CreateUObject(this, &ABattleManager::TryStartFirstTurn));
 }
 
 void ABattleManager::FinishBattle()
@@ -232,6 +238,24 @@ void ABattleManager::FinishBattle()
  //신전으로 가기 전에 이번 전투 참가자에게 축복 횟수 지급 (StopBattle이 저장)
  GrantBlessingsToParticipants();
  StopBattle();
+ GetWorld()->GetSubsystem<ULevelTransitionCinematics>()->PlayOutro(true, FSimpleDelegate::CreateUObject(this, &ABattleManager::TravelToTemple));
+}
+
+void ABattleManager::HandleBattleStartDelayElapsed()
+{
+ bBattleStartDelayElapsed = true;
+ TryStartFirstTurn();
+}
+
+void ABattleManager::TryStartFirstTurn()
+{
+ if (!bBattleRunning || Phase != EBattlePhase::BattleStart || !bBattleStartDelayElapsed) return;
+ if (GetWorld()->GetSubsystem<ULevelTransitionCinematics>()->IsPlaying()) return;
+ StartTurn();
+}
+
+void ABattleManager::TravelToTemple()
+{
  const TSoftObjectPtr<UWorld>& TempleMap = GetDefault<URealTimeSettings>()->TempleMap;
  if (TempleMap.IsNull())
  {
@@ -279,7 +303,7 @@ bool ABattleManager::IsAcceptingInput() const
 
 float ABattleManager::GetInputPhaseRemainingSeconds() const
 {
-	if (!IsAcceptingInput() || !GetWorld())
+	if ((!IsAcceptingInput() && Phase != EBattlePhase::BattleStart) || !bBattleRunning || !GetWorld())
 	{
 		return 0.f;
 	}
@@ -897,7 +921,9 @@ bool ABattleManager::SubmitChat(const FString& UserId, const FString& DisplayNam
 bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayName, EBattleAction Action,
 	const FString& CharacterId)
 {
-	if (UserId.TrimStartAndEnd().IsEmpty() || !IsAcceptingInput())
+	// Registration during BattleStart uses Idle; combat actions still wait for Prepare.
+ const bool bStartRegistration = bBattleRunning && Phase == EBattlePhase::BattleStart && Action == EBattleAction::Idle;
+ if (UserId.TrimStartAndEnd().IsEmpty() || (!IsAcceptingInput() && !bStartRegistration))
 	{
 		return false;
 	}
@@ -1387,7 +1413,7 @@ bool ABattleManager::LoginPlayer(const FString& UserId, const FString& DisplayNa
  {
   return false;
  }
- if (!IsAcceptingInput())
+ if (!IsAcceptingInput() && Phase != EBattlePhase::BattleStart)
  {
   UE_LOG(LogTemp, Log, TEXT("[Battle] 입력 시간이 아니라 로그인 무시: %s"), *UserId);
   return false;

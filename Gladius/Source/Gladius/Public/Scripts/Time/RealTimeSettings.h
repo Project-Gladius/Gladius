@@ -45,6 +45,9 @@ public:
     UPROPERTY(Config, EditAnywhere, Category="Temporary Moon")
     FLinearColor TemporaryMoonColor = FLinearColor(1.f, 0.82f, 0.25f);
 
+    UPROPERTY(Config, EditAnywhere, Category="Temporary Moon", meta=(ClampMin="1700", ClampMax="12000", Units="K"))
+    float TemporaryMoonTemperature = 3700.f;
+
     // Relative to the map's existing sun intensity, so existing exposure is respected.
     UPROPERTY(Config, EditAnywhere, Category="Temporary Moon", meta=(ClampMin="0", ClampMax="2"))
     float TemporaryMoonLightScale = 0.35f;
