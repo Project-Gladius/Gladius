@@ -21,11 +21,13 @@ protected:
     virtual bool DoesSupportWorldType(EWorldType::Type Type) const override;
 private:
     friend struct FRealTimeTestAccess;
+    friend struct FTempleLightColorTestAccess;
     TWeakObjectPtr<URealTimeClockSubsystem> Clock;
     TWeakObjectPtr<UDirectionalLightComponent> Sun;
     TWeakObjectPtr<ATemporaryMoonLight> TemporaryMoon;
     FName BoundTag;
     bool bWarnedMissingSun = false;
     void UpdateSun(const FDateTime& Now);
+    void UpdateTempleLightColors(const FVector& SunDirection);
     UDirectionalLightComponent* FindSun(FName Tag) const;
 };

@@ -43,8 +43,12 @@ bool FBattleTopHudPresenterTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("전투 중 게이지 숨김"), S.bShowGauge);
 	}
 
-	//전투 시작 전/종료 후: 전체 숨김
-	TestFalse(TEXT("BattleStart 숨김"), FBattleTopHudPresenter::Build(EBattlePhase::BattleStart, false, 0.0f, 0.0f, 0, 10).bVisible);
+	//BattleStart: 로그인 안내는 인트로와 함께 표시한다.
+ const FBattleTopHudState Login = FBattleTopHudPresenter::Build(EBattlePhase::BattleStart, true, 10.f, 20.f, 0, 10);
+ TestTrue(TEXT("BattleStart visible during intro"), Login.bVisible);
+ TestEqual(TEXT("Login prompt"), Login.GuideText, FString(TEXT("로그인해 주세요!")));
+ TestTrue(TEXT("Login countdown"), Login.bShowTimer && Login.bShowGauge);
+ TestEqual(TEXT("Login countdown progress"), Login.GaugePercent, 0.5f, KINDA_SMALL_NUMBER);
 	TestFalse(TEXT("BattleEnd 숨김"), FBattleTopHudPresenter::Build(EBattlePhase::BattleEnd, false, 0.0f, 0.0f, 10, 10).bVisible);
 
 	//게이지 비율은 0~1로 제한, 남은 시간은 음수로 표시하지 않음

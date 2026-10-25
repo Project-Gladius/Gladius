@@ -36,4 +36,6 @@ public:
 	//전투상태로 전환하고 CombatLevel을 연다
 	UFUNCTION(BlueprintCallable, Category = "Game State")
 	void TravelToCombat();
+private:
+ void OpenCombatLevel();
 };

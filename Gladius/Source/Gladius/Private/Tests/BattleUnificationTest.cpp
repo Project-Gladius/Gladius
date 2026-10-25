@@ -12,6 +12,9 @@
 #include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/Battle/CutSceneApplier.h"
 #include "LevelSequence.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
+#include "Scripts/Cinematics/LevelTransitionCinematics.h"
 #include "MovieScene.h"
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
@@ -189,6 +192,14 @@ public:
  {
   State->World->GetTimerManager().Tick(0.1f);
   if (State->Battle->Phase == EBattlePhase::Resolve && ++Frames < 10) return false;
+  if (State->World->GetSubsystem<ULevelTransitionCinematics>()->IsPlaying())
+  {
+   Test->TestTrue(TEXT("Outro plays in BattleEnd"),State->Battle->Phase==EBattlePhase::BattleEnd);
+   Test->TestTrue(TEXT("Travel waits for battle outro"),GEngine->GetWorldContextFromWorldChecked(State->World).TravelURL.IsEmpty());
+   for (TActorIterator<ALevelSequenceActor> It(State->World);It;++It)
+    if (ULevelSequencePlayer* P=It->GetSequencePlayer()) for (int32 I=0;I<3;++I) P->Update(10.f);
+   return false;
+  }
   FWorldContext& Context = GEngine->GetWorldContextFromWorldChecked(State->World);
   Test->TestTrue(TEXT("Completed battle enters BattleEnd"), State->Battle->Phase == EBattlePhase::BattleEnd);
   Test->TestTrue(TEXT("Completion saves player records before travel"), IFileManager::Get().FileExists(*State->Path));
@@ -231,7 +242,9 @@ bool FUnifiedBattleRoutingTest::RunTest(const FString& Parameters)
  B->StartBattle();
  TestTrue(TEXT("Starts in BattleStart"), B->Phase == EBattlePhase::BattleStart);
  T.DispatchRaw(TEXT("A"), TEXT("!로그인 글라디우스"));
- TestEqual(TEXT("No login before preparation"), B->GetBattlePlayers().Num(), 0);
+ TestEqual(TEXT("Login accepted before first turn"), B->GetBattlePlayers().Num(), 1);
+ T.DispatchRaw(TEXT("A"), TEXT("!로그아웃"));
+ TestEqual(TEXT("Logout accepted in login window"), B->GetBattlePlayers().Num(), 0);
  FBattleUnificationTestAccess::Prepare(B);
  TestTrue(TEXT("Telegraph belongs to Prepare"), B->Phase == EBattlePhase::Prepare);
  T.DispatchRaw(TEXT("A"), TEXT("!공격 1"));
