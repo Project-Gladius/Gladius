@@ -714,9 +714,13 @@ public:
 	static void ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 Count,
 		const FVector& Anchor, TArray<int32>& OutIndices);
 
+    // Initial registration uses a random eligible lane; disabled uses balance initial.zone.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Placement")
+    bool bRandomInitialZone = true;
+
 	//직업군별 인원을 받아 자리를 앞뒤로 나눠 고른다.
-	//후보를 Anchor(보스)에서 가까운 순으로 정렬한 뒤 인원 비율로 구간을 쪼개고,
-	//앞 직업군은 자기 구간의 앞에서부터, 맨 뒤 직업군은 뒤에서부터 채운다.
+	//후보를 보스 거리순으로 정렬해 고정 절반으로 나눈다. 홀수의 남는 자리는 전방.
+	//CountsByClass[0]은 전방, [1]은 후방. 각 절반 안에서만 분산한다.
 	//결과는 Candidates의 인덱스이며 직업군끼리 자리가 섞이지 않는다
 	static void ChooseClassSpots(const TArray<FVector>& Candidates, const TArray<int32>& CountsByClass,
 		const FVector& Anchor, TArray<TArray<int32>>& OutIndicesByClass);
@@ -783,6 +787,7 @@ private:
  bool bMouseCursorBeforeDataReset = false;
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
+ friend struct FBattlePlacementTestAccess;
  friend struct FLevelTransitionTestAccess;
  bool bRecordLoadFailed = false;
  bool bRecordsInitialized = false;
@@ -890,6 +895,9 @@ private:
 
 	//구역별 인원에 맞춰 설 자리를 다시 배분한다
 	void AssignSlots();
+    int32 FormationGroup(int32 ClassIndex) const;
+    TArray<FVector> LaneCandidates(EBattleLane Lane) const;
+    bool PickInitialSlot(FBattlePlayer& Player);
 
 	//전장에서 빼되 기록은 남긴다
 	void RemovePlayer(const FString& UserId);

@@ -771,75 +771,26 @@ void ABattleManager::ChooseClassSpots(const TArray<FVector>& Candidates, const T
 		return;
 	}
 
-	//후보를 보스에서 가까운 순으로 늘어놓는다. 이 순서가 곧 앞뒤다
-	TArray<int32> Order;
-	for (int32 i = 0; i < Candidates.Num(); ++i)
-	{
-		Order.Add(i);
-	}
-	Order.Sort([&Candidates, &Anchor](const int32 A, const int32 B)
-	{
-		return FVector::DistSquared(Candidates[A], Anchor) < FVector::DistSquared(Candidates[B], Anchor);
-	});
-
-	//인원 비율로 구간을 쪼갠다. 자리가 인원보다 적으면 구간이 겹칠 수 있는데,
-	//그건 ChooseSpreadSpots가 '앞에서부터 다시 쓰기'로 처리한다
-	int32 Cursor = 0;
-	int32 Remaining = Total;
-
-	for (int32 ClassIdx = 0; ClassIdx < CountsByClass.Num(); ++ClassIdx)
-	{
-		const int32 Count = CountsByClass[ClassIdx];
-		if (Count <= 0)
-		{
-			continue;
-		}
-
-		//뒤에 아직 사람이 남은 직업군이 몇 개인지. 그만큼은 자리를 남겨 둬야
-		//뒤 직업군이 앞 직업군의 자리를 다시 쓰는 일이 없다
-		int32 ClassesAfter = 0;
-		for (int32 j = ClassIdx + 1; j < CountsByClass.Num(); ++j)
-		{
-			ClassesAfter += CountsByClass[j] > 0 ? 1 : 0;
-		}
-
-		//남은 자리를 남은 인원으로 나눠 이 직업군의 몫을 정한다
-		const int32 Left = Candidates.Num() - Cursor;
-		const int32 Share = ClassesAfter == 0
-			? FMath::Max(Left, 1)
-			: FMath::Clamp(FMath::RoundToInt((float)Left * Count / Remaining),
-				1, FMath::Max(Left - ClassesAfter, 1));
-
-		TArray<FVector> Slice;
-		TArray<int32> SliceToCandidate;
-		for (int32 i = 0; i < Share && Cursor + i < Order.Num(); ++i)
-		{
-			SliceToCandidate.Add(Order[Cursor + i]);
-			Slice.Add(Candidates[Order[Cursor + i]]);
-		}
-
-		if (Slice.Num() == 0)
-		{
-			//자리가 바닥났으면 맨 뒤 자리를 같이 쓴다
-			SliceToCandidate.Add(Order.Last());
-			Slice.Add(Candidates[Order.Last()]);
-		}
-
-		//맨 뒤 직업군은 자기 구간의 '뒤에서부터' 채운다.
-		//그래서 기준점을 보스에서 가장 먼 자리로 준다
-		const FVector SliceAnchor = ClassesAfter == 0 ? Slice.Last() : Anchor;
-
-		TArray<int32> Picked;
-		ChooseSpreadSpots(Slice, Count, SliceAnchor, Picked);
-
-		for (const int32 Index : Picked)
-		{
-			OutIndicesByClass[ClassIdx].Add(SliceToCandidate[Index]);
-		}
-
-		Cursor += Share;
-		Remaining -= Count;
-	}
+    TArray<int32> Order;
+    for (int32 i = 0; i < Candidates.Num(); ++i) Order.Add(i);
+    Order.Sort([&](int32 A, int32 B)
+    {
+        const float DA = FVector::DistSquared(Candidates[A], Anchor);
+        const float DB = FVector::DistSquared(Candidates[B], Anchor);
+        return DA == DB ? A < B : DA < DB;
+    });
+    const int32 FrontCount = (Order.Num() + 1) / 2;
+    for (int32 Group = 0; Group < FMath::Min(2, CountsByClass.Num()); ++Group)
+    {
+        const int32 Start = Group == 0 ? 0 : FrontCount;
+        const int32 End = Group == 0 ? FrontCount : Order.Num();
+        TArray<FVector> Slice;
+        for (int32 i = Start; i < End; ++i) Slice.Add(Candidates[Order[i]]);
+        if (Slice.IsEmpty()) continue; // Never borrow a spot from the other half.
+        TArray<int32> Picked;
+        ChooseSpreadSpots(Slice, CountsByClass[Group], Group == 0 ? Anchor : Slice.Last(), Picked);
+        for (int32 Index : Picked) OutIndicesByClass[Group].Add(Order[Start + Index]);
+    }
 }
 
 void ABattleManager::ChooseSpreadSpots(const TArray<FVector>& Candidates, int32 Count,
@@ -959,11 +910,13 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
   NewPlayer.HP = FMath::Clamp(Record.CurrentHealth, 0, NewPlayer.MaxHP);
   Record.CurrentHealth = NewPlayer.HP;
   if (NewPlayer.HP == 0) NewPlayer.ReviveCountdown = FMath::Max(1, ReviveTurns);
+        // Only the newcomer gets a random slot; existing targets and movement stay untouched.
+        if (!PickInitialSlot(NewPlayer)) return false;
 		//직업군에 지정된 블루프린트로 스폰한다
 		const TSubclassOf<ABattleUnit>* UnitClass = UnitClassByCharacter.Find(Record.CharacterId);
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
 			(UnitClass && *UnitClass) ? UnitClass->Get() : ABattleUnit::StaticClass(),
-			BossLocation(), FRotator::ZeroRotator);
+			NewPlayer.TargetLocation, FRotator::ZeroRotator);
 		if (!IsValid(NewPlayer.Unit)) return false;
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
@@ -980,27 +933,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
   SessionStats.RegisterPlayer(UserId, DisplayName, Record.CharacterId);
   SaveRecords();
 
-		//새 참가자가 낄 자리를 포함해 그 구역을 다시 배분한다.
-		//본인은 바로 세우고, 자리가 밀린 사람들은 그 즉시 비켜 준다 —
-		//다음 이동 단계까지 미루면 그 사이 두 명이 같은 자리에 겹쳐 보인다
-		AssignSlots();
-		for (const TPair<FString, FBattlePlayer>& Pair : Players)
-		{
-			const FBattlePlayer& Other = Pair.Value;
-			if (!Other.Unit)
-			{
-				continue;
-			}
-
-			if (Pair.Key == UserId)
-			{
-				Other.Unit->SetActorLocation(Other.TargetLocation);
-			}
-			else
-			{
-				Other.Unit->MoveTo(Other.TargetLocation, MoveSeconds);
-			}
-		}
+        // StartTurn redistributes everyone when the next turn starts.
 
 		UE_LOG(LogTemp, Log, TEXT("[Battle] 참가: %s [%s] (HP %d, 피해+%d, 치명+%.0f%%/+%.0f%%) — 현재 %d/%d명"),
 			*UserId, *Record.CharacterId, NewPlayer.MaxHP, NewPlayer.DamageBonus,
@@ -1048,6 +981,7 @@ void ABattleManager::StartTurn()
  if (!bBattleRunning) return;
  StopTurnCutScenes();
  ++TurnIndex;
+ AssignSlots(); // New registrations join the formation only when the next turn starts.
  Phase = EBattlePhase::Prepare;
  //상단 UI: Prepare는 예고 + 선택 시간이 끝날 때(Collect 시작)까지
  InputPhaseDuration = FMath::Max(0.f, TelegraphSeconds) + FMath::Max(0.f, PlayerSelectCountdown);
@@ -1486,7 +1420,7 @@ void ABattleManager::BeginMove()
 	//**회피자의 구역은 아직 바꾸지 않는다.** 실제로 넘어가는 것은 보스 공격 직전이고,
 	//여기서 미리 옮기면 아직 서 있는 자리를 같은 구역의 다른 사람이 배정받아 겹친다.
 	//구역 변경과 재배치는 ResolveTurn에서 한다 (turnOrder의 '회피 이동'도 거기다)
-	AssignSlots();
+	// Keep this turn's assigned slots, including random mid-turn registrations.
 
 	//기획서: 모든 공격 모션이 '보스 공격' 순간에 끝나도록 맞춘다.
 	//때릴 게 많은(피버가 높은) 사람일수록 일찍 출발하고 그만큼 빨리 움직인다
@@ -1550,6 +1484,54 @@ void ABattleManager::BeginMove()
  RefreshPlayerUI();
 }
 
+int32 ABattleManager::FormationGroup(int32 ClassIndex) const
+{
+    return Classes.IsValidIndex(ClassIndex) && Classes[ClassIndex].Id == TEXT("sera") ? 1 : 0;
+}
+
+TArray<FVector> ABattleManager::LaneCandidates(EBattleLane Lane) const
+{
+    TArray<FVector> Result = Spots[static_cast<int32>(Lane)];
+    if (Result.IsEmpty())
+        for (int32 i = 0; i < FMath::Max(2, MaxPlayers); ++i) Result.Add(GridSlotLocation(Lane, i));
+    return Result;
+}
+
+bool ABattleManager::PickInitialSlot(FBattlePlayer& Player)
+{
+    const int32 Group = FormationGroup(Player.ClassIndex);
+    // Draw only from lanes with an eligible half. Normally all three are eligible.
+    TArray<EBattleLane> EligibleLanes;
+    for (int32 i = 0; i < 3; ++i)
+        if (Group == 0 || LaneCandidates(static_cast<EBattleLane>(i)).Num() >= 2)
+            EligibleLanes.Add(static_cast<EBattleLane>(i));
+    if (EligibleLanes.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[Battle] No rear spots available for Sera"));
+        return false;
+    }
+    if (bRandomInitialZone)
+        Player.Lane = EligibleLanes[FMath::RandRange(0, EligibleLanes.Num() - 1)];
+    else if (!EligibleLanes.Contains(Player.Lane)) return false;
+    const TArray<FVector> Candidates = LaneCandidates(Player.Lane);
+    TArray<TArray<int32>> Halves;
+    // Request every spot in each half to build the eligible pool.
+    ChooseClassSpots(Candidates, { (Candidates.Num() + 1) / 2, Candidates.Num() / 2 }, BossLocation(), Halves);
+    TArray<int32> Free;
+    for (int32 Index : Halves[Group])
+    {
+        bool bOccupied = false;
+        for (const auto& Pair : Players)
+            if (Pair.Value.TargetLocation.Equals(Candidates[Index], 1.f)) { bOccupied = true; break; }
+        if (!bOccupied) Free.Add(Index);
+    }
+    // If full, share only a spot in the same half, never the opposite formation.
+    const TArray<int32>& Pool = Free.IsEmpty() ? Halves[Group] : Free;
+    if (Pool.IsEmpty()) return false;
+    Player.TargetLocation = Candidates[Pool[FMath::RandRange(0, Pool.Num() - 1)]];
+    return true;
+}
+
 void ABattleManager::AssignSlots()
 {
 	const FVector Boss = BossLocation();
@@ -1558,7 +1540,7 @@ void ABattleManager::AssignSlots()
 	{
 		//이 구역에 서 있는 참가자를 직업군별로 모은다. 배치가 매번 같도록 순서를 고정한다
 		TArray<TArray<FString>> IdsByClass;
-		IdsByClass.SetNum(Classes.Num());
+		IdsByClass.SetNum(2);
 
 		int32 Total = 0;
 		for (const TPair<FString, FBattlePlayer>& Pair : Players)
@@ -1568,7 +1550,7 @@ void ABattleManager::AssignSlots()
 				continue;
 			}
 
-			IdsByClass[FMath::Clamp(Pair.Value.ClassIndex, 0, Classes.Num() - 1)].Add(Pair.Key);
+			IdsByClass[FormationGroup(Pair.Value.ClassIndex)].Add(Pair.Key);
 			++Total;
 		}
 
@@ -1585,14 +1567,7 @@ void ABattleManager::AssignSlots()
 		}
 
 		//레벨에 스팟이 있으면 그것이 후보고, 없으면 격자 좌표를 후보로 쓴다
-		TArray<FVector> Candidates = Spots[LaneIndex];
-		if (Candidates.Num() == 0)
-		{
-			for (int32 i = 0; i < MaxPlayers; ++i)
-			{
-				Candidates.Add(GridSlotLocation((EBattleLane)LaneIndex, i));
-			}
-		}
+        TArray<FVector> Candidates = LaneCandidates(static_cast<EBattleLane>(LaneIndex));
 
 		//직업군 순서대로 앞에서 뒤로 자리를 나눠 받는다
 		TArray<TArray<int32>> ChosenByClass;
@@ -1605,6 +1580,8 @@ void ABattleManager::AssignSlots()
 			{
 				Targets.Add(Candidates[Index]);
 			}
+
+            if (Targets.IsEmpty()) continue;
 
 			//덜 움직이도록, 지금 서 있는 곳에서 가장 가까운 자리부터 가져간다
 			for (const FString& Id : IdsByClass[ClassIdx])
@@ -1637,6 +1614,7 @@ void ABattleManager::ResolveTurn()
 	Phase = EBattlePhase::BossAction;
 	RefreshPlayerUI();
 
+	bool bLaneChanged = false;
 	//turnOrder의 첫 항목 — 회피 이동. 여기서야 구역이 바뀐다.
 	//BeginMove에서 미리 바꾸면 아직 떠나지도 않은 자리를 남이 배정받는다
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
@@ -1646,13 +1624,19 @@ void ABattleManager::ResolveTurn()
 		{
 			//어느 경계를 넘어야 하는지는 '어디서 어디로'가 정한다. 지금 적어 둔다
 			P.LaneBeforeMove = P.Lane;
-			P.Lane = ApplyMove(P.PendingAction, P.Lane);
+			const EBattleLane NextLane = ApplyMove(P.PendingAction, P.Lane);
+            // A one-spot lane has no rear half; keep Sera in her valid current lane.
+            if (FormationGroup(P.ClassIndex) == 0 || LaneCandidates(NextLane).Num() >= 2)
+            {
+                bLaneChanged |= P.Lane != NextLane;
+                P.Lane = NextLane;
+            }
 		}
 	}
 
-	//구역 인원이 바뀌었으니 자리를 다시 배분한다. 떠난 자리는 이제 비었으므로
+	//구역 인원이 바뀌었을 때만 자리를 다시 배분한다. 떠난 자리는 이제 비었으므로
 	//남아 있는 사람이 받아도 겹치지 않는다 — 실제 이동은 EndTurn의 원위치 이동이 맡는다
-	AssignSlots();
+	if (bLaneChanged) AssignSlots();
 
 	//도착한 뒤에 막을 펼친다. 실제로 막는 순간은 BossAttackBeat의 OnHit이고,
 	//그 사이를 버티는 자세까지가 이 모션의 몫이다
@@ -3064,7 +3048,7 @@ void ABattleManager::RunSelfTest()
 		//맨 뒤 직업군은 가장 먼 자리를 쓴다
 		check(ByClass[1].Contains(9));
 
-		//한 직업군만 있으면 그 구역을 전부 쓴다
+		//한 직업군만 있어도 자기 절반만 쓴다
 		ChooseClassSpots(Line, { 0, 2 }, Boss, ByClass);
 		check(ByClass[0].Num() == 0 && ByClass[1].Num() == 2);
 		check(ByClass[1].Contains(9));
