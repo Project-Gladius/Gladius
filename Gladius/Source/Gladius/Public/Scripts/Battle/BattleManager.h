@@ -582,6 +582,10 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
  bool bShowTemporaryDataResetButtons = true;
 
+ // Q/W spawn and select a test player; 1-7 submit actions; E resets test accounts only.
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
+ bool bEnableTestCharacterControls = true;
+
  void InitializePlayerRecords();
 
  //신전에서 여신이 축복(!강화)을 처리할 때 호출. 남은 축복 횟수가 있어야 적용되고 1 차감된다
@@ -766,6 +770,10 @@ public:
 	FVector GridSlotLocation(EBattleLane Lane, int32 SlotIndex) const;
 
 private:
+ FString DebugUserId;
+ bool bTestKeysBound = false;
+ void BindActionKeys();
+ void AddTestPlayer(const FString& CharacterId);
  UPROPERTY(Transient)
  TObjectPtr<UChatLogWidget> ChatLogWidget;
 
@@ -788,6 +796,7 @@ private:
  friend struct FBattleUnificationTestAccess;
  friend struct FBattleCameraTestAccess;
  friend struct FBattlePlacementTestAccess;
+ friend struct FTestCharacterControlsAccess;
  friend struct FLevelTransitionTestAccess;
  bool bRecordLoadFailed = false;
  bool bRecordsInitialized = false;

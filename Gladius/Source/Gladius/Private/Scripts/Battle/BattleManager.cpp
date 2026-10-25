@@ -205,6 +205,7 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ABattleManager::StartBattle()
 {
+ BindActionKeys();
  StopBattle();
  bBattleStartDelayElapsed = false;
  bBattleRunning = true;
@@ -217,6 +218,7 @@ void ABattleManager::StartBattle()
  CutSceneRandom.Initialize(FMath::Rand());
  for (auto& Pair : Players) { if (IsValid(Pair.Value.Unit)) Pair.Value.Unit->Destroy(); }
  Players.Reset();
+ DebugUserId.Reset();
  if (IsValid(BossUnit)) BossUnit->Destroy();
  if (AGameManager* Game = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(this, AGameManager::StaticClass())))
   Game->SetGameState(EGameState::Combat);
@@ -2373,6 +2375,7 @@ void ABattleManager::RemovePlayer(const FString& UserId)
 	}
 
 	Players.Remove(UserId);
+ if (DebugUserId == UserId) DebugUserId.Reset();
 	//전투 중 이탈하면 BATTLE ANALYSIS 목록과 이번 씬 기록에서도 제거
 	SessionStats.RemovePlayer(UserId);
 
@@ -3438,4 +3441,51 @@ void ABattleManager::RefreshEventBuff(const FString& UserId)
  if (FBattlePlayer* Player = Players.Find(UserId))
   if (const FPlayerRecord* Record = Records.Find(UserId)) ApplyRecordToPlayer(*Record, *Player);
  UpdateVisuals(); RefreshPlayerUI();
+}
+
+void ABattleManager::BindActionKeys()
+{
+    if (!bEnableTestCharacterControls) return;
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC) return;
+    EnableInput(PC);
+    if (!InputComponent || bTestKeysBound) return;
+    bTestKeysBound = true;
+    auto Bind = [this](const FKey& Key, TFunction<void()> Action)
+    {
+        FInputKeyBinding Binding(FInputChord(Key), IE_Pressed);
+        Binding.bConsumeInput = false;
+        Binding.KeyDelegate.GetDelegateForManualSet().BindLambda([this, Action = MoveTemp(Action)]()
+        {
+            if (bEnableTestCharacterControls) Action();
+        });
+        InputComponent->KeyBindings.Emplace(MoveTemp(Binding));
+    };
+    static const FKey Keys[] = { EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six, EKeys::Seven };
+    for (int32 i = 0; i < UE_ARRAY_COUNT(Keys); ++i)
+        Bind(Keys[i], [this, i]()
+        {
+            if (const FBattlePlayer* Player = Players.Find(DebugUserId))
+                SubmitAction(DebugUserId, Player->DisplayName, static_cast<EBattleAction>(i));
+        });
+    Bind(EKeys::Q, [this]() { AddTestPlayer(TEXT("gladius")); });
+    Bind(EKeys::W, [this]() { AddTestPlayer(TEXT("sera")); });
+    Bind(EKeys::E, [this]()
+    {
+        if (ResetSavedUserData(true)) DebugUserId.Reset();
+    });
+    UE_LOG(LogTemp, Log, TEXT("[Battle] Test controls: Q=Gladius W=Sera 1=Idle 2/3=Attack 4/5/6=Evade 7=Defense E=Reset test data"));
+}
+
+void ABattleManager::AddTestPlayer(const FString& CharacterId)
+{
+    if (!bBattleRunning || (!IsAcceptingInput() && Phase != EBattlePhase::BattleStart)) return;
+    if (!Classes.ContainsByPredicate([&](const FCharacterDef& C) { return C.Id == CharacterId; })) return;
+    // Numeric test IDs use the same namespace as the selective data reset.
+    int32 Index = 0;
+    FString Id;
+    do { Id = FString::Printf(TEXT("@testuser%02d"), Index++); }
+    while (Players.Contains(Id) || Records.Contains(Id));
+    const FString Name = FString::Printf(TEXT("테스터%02d"), Index - 1);
+    if (LoginPlayer(Id, Name, CharacterId)) DebugUserId = Id;
 }
