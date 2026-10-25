@@ -8,6 +8,7 @@
 class ABattleManager;
 class ULeaderboardBoardWidget;
 class UWidgetTree;
+class UWidgetSwitcher;
 
 // 전투씬 좌측 상단에서 LEADERBOARD -> BATTLE ANALYSIS(1~10위) -> BATTLE ANALYSIS(1위+11~15위)를 일정 시간마다 교대로 보여줌
 // 데이터는 ABattleManager에서 읽어 FLeaderboardBuilder로 페이지를 만들고, 그리는 일은 ULeaderboardBoardWidget에 맡김
@@ -19,6 +20,13 @@ class GLADIUS_API ULeaderboardRotatorWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// One-time migration. Keeps the existing Board and its canvas slot intact.
+	UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+	static bool AddSeparateBattleState(UObject* Asset, TSubclassOf<ULeaderboardBoardWidget> BattleClass);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Leaderboard|Preview")
+	ELeaderboardPreviewPage PreviewPage = ELeaderboardPreviewPage::Total;
+
 	void BindToBattleManager(ABattleManager* InBattleManager);
 
 	//보드가 바뀌는 간격(초)
@@ -47,13 +55,24 @@ public:
 protected:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
+	virtual void NativePreConstruct() override;
 	virtual void NativeDestruct() override;
 
 	//디자이너가 같은 이름으로 배치해야 하는 보드 (WBP_LeaderboardBoard)
 	UPROPERTY(BlueprintReadOnly, Category = "Leaderboard|Widgets", meta = (BindWidgetOptional))
 	TObjectPtr<ULeaderboardBoardWidget> Board;
 
+	// Optional for backward compatibility with existing single-board widgets.
+	UPROPERTY(BlueprintReadOnly, Category="Leaderboard|Widgets", meta=(BindWidgetOptional))
+	TObjectPtr<ULeaderboardBoardWidget> BattleBoard;
+
+	UPROPERTY(BlueprintReadOnly, Category="Leaderboard|Widgets", meta=(BindWidgetOptional))
+	TObjectPtr<UWidgetSwitcher> PageSwitcher;
+
 private:
+	friend struct FLeaderboardStateTestAccess;
+	void ResolveStateWidgets();
+	ULeaderboardBoardWidget* SelectBoard(bool bBattle);
 	enum class EPage : uint8
 	{
 		Total,

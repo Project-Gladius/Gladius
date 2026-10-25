@@ -20,6 +20,9 @@ class GLADIUS_API ULeaderboardRowWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Leaderboard|Preview")
+	bool bPreviewShowHealth = true;
+
 	UFUNCTION(BlueprintCallable, Category = "Leaderboard")
 	void SetRow(const FLeaderboardRow& Row, bool bShowHealth);
 

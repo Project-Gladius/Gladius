@@ -4,6 +4,14 @@
 #include "Styling/SlateBrush.h"
 #include "LeaderboardTypes.generated.h"
 
+UENUM(BlueprintType)
+enum class ELeaderboardPreviewPage : uint8
+{
+ Total,
+ BattleTop,
+ BattleLower
+};
+
 // 리더보드 한 줄
 USTRUCT(BlueprintType)
 struct FLeaderboardRow

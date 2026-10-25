@@ -7,6 +7,13 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "TimerManager.h"
+#include "Components/WidgetSwitcher.h"
+#include "Components/WidgetSwitcherSlot.h"
+#if WITH_EDITOR
+#include "WidgetBlueprint.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#endif
 
 void ULeaderboardRotatorWidget::NativeOnInitialized()
 {
@@ -17,15 +24,46 @@ void ULeaderboardRotatorWidget::NativeOnInitialized()
 	{
 		BuildDefaultLayout(WidgetTree);
 	}
-	if (!Board && WidgetTree)
-	{
-		Board = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("Board")));
-	}
+	ResolveStateWidgets();
+}
+
+void ULeaderboardRotatorWidget::ResolveStateWidgets()
+{
+ if (!WidgetTree) return;
+ if (!Board) Board = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("Board")));
+ if (!BattleBoard) BattleBoard = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("BattleBoard")));
+ if (!PageSwitcher) PageSwitcher = Cast<UWidgetSwitcher>(WidgetTree->FindWidget(TEXT("PageSwitcher")));
+}
+
+ULeaderboardBoardWidget* ULeaderboardRotatorWidget::SelectBoard(bool bBattle)
+{
+ ULeaderboardBoardWidget* Selected = bBattle && BattleBoard ? BattleBoard.Get() : Board.Get();
+ if (PageSwitcher && Selected && Selected->GetParent() == PageSwitcher)
+ {
+  PageSwitcher->SetActiveWidget(Selected);
+ }
+ return Selected;
+}
+
+void ULeaderboardRotatorWidget::NativePreConstruct()
+{
+ Super::NativePreConstruct();
+ if (IsDesignTime())
+ {
+  ResolveStateWidgets();
+  if (ULeaderboardBoardWidget* Selected = SelectBoard(PreviewPage != ELeaderboardPreviewPage::Total))
+  {
+   Selected->PreviewPage = PreviewPage;
+   Selected->RefreshDesignerPreview();
+  }
+ }
 }
 
 void ULeaderboardRotatorWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	ResolveStateWidgets();
+	RefreshCurrentPage();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -100,7 +138,8 @@ void ULeaderboardRotatorWidget::AdvancePage()
 
 void ULeaderboardRotatorWidget::RefreshCurrentPage()
 {
-	if (!Board)
+	ULeaderboardBoardWidget* ActiveBoard = SelectBoard(CurrentPage != EPage::Total);
+	if (!ActiveBoard)
 	{
 		return;
 	}
@@ -108,16 +147,16 @@ void ULeaderboardRotatorWidget::RefreshCurrentPage()
 	switch (CurrentPage)
 	{
 	case EPage::Total:
-		Board->SetPage(FLeaderboardBuilder::MakeTotalPage(RankTotal()));
+		ActiveBoard->SetPage(FLeaderboardBuilder::MakeTotalPage(RankTotal()));
 		break;
 	case EPage::BattleTop:
-		Board->SetPage(FLeaderboardBuilder::MakeBattleTopPage(RankBattle()));
+		ActiveBoard->SetPage(FLeaderboardBuilder::MakeBattleTopPage(RankBattle()));
 		break;
 	case EPage::BattleLower:
 	{
 		const TArray<FLeaderboardRow> Ranked = RankBattle();
 		//보여주는 사이 인원이 줄어 11위가 없어지면 1번 보드로 대체
-		Board->SetPage(FLeaderboardBuilder::HasBattleLowerPage(Ranked)
+		ActiveBoard->SetPage(FLeaderboardBuilder::HasBattleLowerPage(Ranked)
 			? FLeaderboardBuilder::MakeBattleLowerPage(Ranked)
 			: FLeaderboardBuilder::MakeBattleTopPage(Ranked));
 		break;
@@ -179,4 +218,41 @@ TArray<FLeaderboardRow> ULeaderboardRotatorWidget::RankBattle() const
 		}
 	}
 	return FLeaderboardBuilder::Rank(MoveTemp(Sources), CollectCharacterNames(), true);
+}
+
+bool ULeaderboardRotatorWidget::AddSeparateBattleState(UObject* Asset, TSubclassOf<ULeaderboardBoardWidget> BattleClass)
+{
+#if WITH_EDITOR
+ UWidgetBlueprint* BP = Cast<UWidgetBlueprint>(Asset);
+ if (!BP || !BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(StaticClass()) || !BP->WidgetTree || !BattleClass) return false;
+ UWidgetTree* Tree = BP->WidgetTree;
+ // Never rebuild an existing state layout or overwrite subsequent designer edits.
+ if (Tree->FindWidget(TEXT("PageSwitcher")))
+  return Tree->FindWidget(TEXT("Board")) && Tree->FindWidget(TEXT("BattleBoard"));
+ ULeaderboardBoardWidget* Existing = Cast<ULeaderboardBoardWidget>(Tree->FindWidget(TEXT("Board")));
+ if (!Existing || !Existing->GetParent() || Tree->FindWidget(TEXT("BattleBoard"))) return false;
+ UPanelWidget* Parent = Existing->GetParent();
+ const int32 Index = Parent->GetChildIndex(Existing);
+ if (Index == INDEX_NONE) return false;
+ BP->Modify(); Tree->Modify(); Parent->Modify(); Existing->Modify();
+ UWidgetSwitcher* Switcher = GladiusUI::ConstructNamed<UWidgetSwitcher>(Tree, TEXT("PageSwitcher"));
+ // Reuse the actual original slot: anchors, offsets, autosize, alignment and Z order survive.
+ if (!Parent->ReplaceChildAt(Index, Switcher)) return false;
+ Existing->Slot = nullptr;
+ Switcher->AddChild(Existing);
+ ULeaderboardBoardWidget* Battle = Tree->ConstructWidget<ULeaderboardBoardWidget>(BattleClass, TEXT("BattleBoard"));
+ Battle->bIsVariable = true;
+ Battle->SetRenderTransform(Existing->GetRenderTransform());
+ Battle->SetRenderTransformPivot(Existing->GetRenderTransformPivot());
+ Switcher->AddChild(Battle);
+ Switcher->SetActiveWidgetIndex(0);
+ for (const FName Name : {FName(TEXT("PageSwitcher")), FName(TEXT("BattleBoard"))})
+  if (!BP->WidgetVariableNameToGuidMap.Contains(Name)) BP->OnVariableAdded(Name);
+ FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+ FKismetEditorUtilities::CompileBlueprint(BP);
+ BP->MarkPackageDirty();
+ return BP->Status != BS_Error;
+#else
+ return false;
+#endif
 }
