@@ -22,8 +22,13 @@ public:
     // Pure decision helper: no late catch-up after shutdown/sleep or large clock jumps.
     static bool ConsumeDue(const FDateTime& Previous, const FDateTime& Now,
         const TArray<int32>& Minutes, TSet<int64>& Consumed);
+    bool AddManualStart(const FDateTime& At);
+    bool CancelNext(const FDateTime& Now, FDateTime& Cancelled, FDateTime& Next);
+    bool GetNextStart(const FDateTime& Now, FDateTime& Next) const;
 private:
+    TArray<FDateTime> ManualStarts;
     friend struct FRealTimeTestAccess;
+    friend struct FAdminScheduleTestAccess;
     TWeakObjectPtr<URealTimeClockSubsystem> Clock;
     TWeakObjectPtr<UWorld> PreviousWorld;
     FDateTime PreviousTime;

@@ -16,6 +16,7 @@ class UTempleCommandQueue;
 class UTempleAIBatchClient;
 class UTempleStatusWidget;
 class UChatLogWidget;
+class USessionLogWidget;
 
 // 신전 씬의 사이클 진행자
 // CycleSeconds마다: 채팅 조회 -> 큐잉 종료(스냅샷) -> 여신 사이클 시작 + 대화 배치를 AI 서버로 전송
@@ -60,8 +61,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|UI")
 	TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
 
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Session Log")
+ TSubclassOf<USessionLogWidget> SessionLogWidgetClass;
+
 	UFUNCTION(BlueprintPure, Category = "Temple|Cycle")
 	int32 GetCompletedCycles() const { return CompletedCycles; }
+ void SetAIMaintenance(bool bEnabled);
 
 protected:
 	virtual void BeginPlay() override;
@@ -98,6 +103,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UChatLogWidget> ChatLogWidget;
+
+ UPROPERTY(Transient)
+ TObjectPtr<USessionLogWidget> SessionLogWidget;
 
 	FTimerHandle CycleTimerHandle;
 	FTimerHandle TravelTimerHandle;

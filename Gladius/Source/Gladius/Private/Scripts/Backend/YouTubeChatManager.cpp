@@ -5,6 +5,7 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "GameFramework/Actor.h" 
@@ -127,6 +128,7 @@ bool AYouTubeChatManager::SwitchApiKey(const FString& UsedKey, const FString& Bo
 
 void AYouTubeChatManager::StartFetchingChat()
 {
+ if (UGameInstance* Instance = GetGameInstance()) Instance->GetSubsystem<UAdminSubsystem>()->ResolveAdminHandles(CurrentApiKey());
 	if (CurrentApiKey().IsEmpty() || VideoId.IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("ApiKey 또는 VideoId가 설정되지 않았습니다. (키가 모두 할당량을 다 썼을 수도 있습니다)"));
@@ -213,6 +215,13 @@ void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString
 	//받은 채팅을 그날그날 txt 파일로 저장 (도배/블랙 여부와 무관하게 원본 로그로 남김)
 	SaveCommentLogToFile(UserId, CleanContent, Now);
 
+ UAdminSubsystem* Admin = GetGameInstance() ? GetGameInstance()->GetSubsystem<UAdminSubsystem>() : nullptr;
+ const bool bPrivileged = Admin && Admin->IsAdmin(UserId);
+ if (Admin)
+ {
+  if (!Admin->CanInput(UserId, GetCurrentGameState())) return;
+  Admin->RegisterUser(UserId, Username);
+ }
 	FUserInfo* User = UserDatabase.Find(UserId); //왜 포인터로 받게 되는거? -> 데이터 없음 (null) 표현과 데이터 복사방지
 
 	if (!User) //신규 유저 등록
@@ -226,7 +235,7 @@ void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString
 		User = UserDatabase.Find(UserId);
 	}
 
-	if (User->UnbanTime > Now) //블랙리스트 진행중
+	if (!bPrivileged && User->UnbanTime > Now) //블랙리스트 진행중
 	{
 		FTimespan Remaining = User->UnbanTime - Now; //블랙리스트 해제까지 남은 시간
 		UE_LOG(LogTemp, Warning, TEXT("블랙리스트 유저입니다. 남은 시간 %.1f초"), Remaining.GetTotalSeconds());
@@ -235,7 +244,7 @@ void AYouTubeChatManager::ProcessComment(const FString& CommentId, const FString
 		return;
 	}
 
-	if (IsSpamming(UserId, CleanContent, Now)) //도배 감지
+	if (!bPrivileged && IsSpamming(UserId, CleanContent, Now)) //도배 감지
 	{
 		UE_LOG(LogTemp, Warning, TEXT("도배 감지됨: 무시 처리"));
 		HandleSpamPenalty(*User, Now);

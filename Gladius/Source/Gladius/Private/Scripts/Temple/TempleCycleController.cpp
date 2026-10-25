@@ -6,8 +6,10 @@
 #include "Scripts/Temple/TempleCommandQueue.h"
 #include "Scripts/Temple/TempleStatusWidget.h"
 #include "Scripts/UI/ChatLogWidget.h"
+#include "Scripts/UI/SessionLogWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
@@ -22,6 +24,7 @@ ATempleCycleController::ATempleCycleController()
 	PrimaryActorTick.bCanEverTick = false;
 	StatusWidgetClass = UTempleStatusWidget::StaticClass();
 	ChatLogWidgetClass = UChatLogWidget::StaticClass();
+ SessionLogWidgetClass = USessionLogWidget::StaticClass();
 }
 
 void ATempleCycleController::BeginPlay()
@@ -103,6 +106,7 @@ void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		}
 	}
 	if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
+ if (SessionLogWidget) SessionLogWidget->RemoveFromParent();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -138,7 +142,12 @@ void ATempleCycleController::ResolveReferences()
 
 void ATempleCycleController::CreateStatusWidget()
 {
-	if (ChatLogWidgetClass)
+	if (SessionLogWidgetClass)
+ {
+  SessionLogWidget = CreateWidget<USessionLogWidget>(GetWorld(), SessionLogWidgetClass);
+  if (SessionLogWidget) SessionLogWidget->AddToViewport(2);
+ }
+ if (ChatLogWidgetClass)
 	{
 		ChatLogWidget = CreateWidget<UChatLogWidget>(GetWorld(), ChatLogWidgetClass);
 		if (ChatLogWidget)
@@ -217,6 +226,9 @@ void ATempleCycleController::StartCycle()
 
 	//큐잉 종료: 이번 사이클에 처리할 명령을 가져가고 다음 사이클 큐잉 시작
 	FTempleCycleCommands Commands = CommandQueue->TakeSnapshot();
+ UAdminSubsystem* Admin = GetGameInstance()->GetSubsystem<UAdminSubsystem>();
+ for (auto& Tier : Commands.EnhanceTiers) Tier.Commands.RemoveAll([Admin](const FParsedCommand& C) { return !Admin->CanInput(C.UserId, EGameState::Temple); });
+ Commands.Talks.RemoveAll([Admin](const FTempleTalkBatchMessage& M) { return Admin->IsAIMaintenance() || !Admin->CanInput(M.UserId, EGameState::Temple); });
 
 	UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d 시작: 대화 %d건"), CompletedCycles, Commands.Talks.Num());
 
@@ -237,7 +249,7 @@ void ATempleCycleController::StartCycle()
 
 void ATempleCycleController::HandleBatchSucceeded(const FTempleTalkBatchResult& Result)
 {
-	if (bLeavingTemple || Result.BatchId != ActiveBatchId || !Goddess)
+	if (GetGameInstance()->GetSubsystem<UAdminSubsystem>()->IsAIMaintenance() || bLeavingTemple || Result.BatchId != ActiveBatchId || !Goddess)
 	{
 		return; //이전 사이클의 응답
 	}
@@ -257,6 +269,7 @@ void ATempleCycleController::HandleBatchSucceeded(const FTempleTalkBatchResult& 
 		}
 
 		const FTempleTalkBatchMessage& Talk = ActiveTalks[TalkIndex];
+        if (!GetGameInstance()->GetSubsystem<UAdminSubsystem>()->CanInput(Talk.UserId, EGameState::Temple)) continue;
 
 		FTempleTalkItem Item;
 		Item.Uid = Talk.Uid;
@@ -319,6 +332,7 @@ void ATempleCycleController::RequestCombatTravel()
 
 void ATempleCycleController::HandleEnhanceExecuted(const FString& UserId, const FString& Username, int32 Tier)
 {
+ if (!GetGameInstance()->GetSubsystem<UAdminSubsystem>()->CanInput(UserId, EGameState::Temple)) return;
  if (bLeavingTemple) return;
  if (!IsValid(BattleManager)) ResolveReferences();
  if (IsValid(BattleManager) && BattleManager->ApplyTempleEnhancement(UserId, Username, Tier))
@@ -326,4 +340,12 @@ void ATempleCycleController::HandleEnhanceExecuted(const FString& UserId, const 
   if (UGameInstance* Instance = GetGameInstance())
    Instance->GetSubsystem<UChatLogSubsystem>()->AddTempleEnhancement(UserId, Username, Tier);
  }
+}
+
+void ATempleCycleController::SetAIMaintenance(bool bEnabled)
+{
+ if (!bEnabled) return;
+ ActiveBatchId.Reset(); ActiveTalks.Reset();
+ if (BatchClient) BatchClient->CancelActiveBatch();
+ if (Goddess) Goddess->SetNoTalks();
 }

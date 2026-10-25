@@ -124,12 +124,21 @@ void UBattleScheduleSubsystem::HandleTime(const FDateTime& Now)
 {
     UWorld* World = GetGameInstance()->GetWorld();
     const bool bSameWorld = PreviousWorld.Get() == World;
-    const bool bDue = ConsumeDue(PreviousTime, Now, StartMinutes, ConsumedSlots);
+    bool bDue = GetDefault<URealTimeSettings>()->bEnableBattleSchedule
+        && ConsumeDue(PreviousTime, Now, StartMinutes, ConsumedSlots);
+    for (int32 I = ManualStarts.Num() - 1; I >= 0; --I)
+    {
+        if (ManualStarts[I] <= Now)
+        {
+            if (ManualStarts[I] > PreviousTime) bDue = true;
+            ManualStarts.RemoveAt(I);
+        }
+    }
     PreviousTime = Now;
     PreviousWorld = World;
     const URealTimeSettings* Settings = GetDefault<URealTimeSettings>();
     // Consume even outside the temple, preventing late starts on returning from combat.
-    if (!bDue || !Settings->bEnableBattleSchedule || !bSameWorld || !World || !World->HasBegunPlay()
+    if (!bDue || !bSameWorld || !World || !World->HasBegunPlay()
         || !World->IsGameWorld() || World->GetNetMode() == NM_Client
         || !URealTimeSettings::MatchesMap(World, Settings->TempleMap)) return;
     AGameManager* Manager = nullptr;
@@ -160,4 +169,35 @@ void UBattleScheduleSubsystem::HandleTime(const FDateTime& Now)
     }
     else
         UE_LOG(LogTemp, Warning, TEXT("BattleSchedule: no combat map configured."));
+}
+
+bool UBattleScheduleSubsystem::AddManualStart(const FDateTime& At)
+{
+ if (At <= FDateTime::Now()) return false;
+ ManualStarts.AddUnique(At);
+ return true;
+}
+bool UBattleScheduleSubsystem::GetNextStart(const FDateTime& Now, FDateTime& Next) const
+{
+ Next = FDateTime::MaxValue();
+ for (const auto& At : ManualStarts) if (At > Now && At < Next) Next = At;
+ if (GetDefault<URealTimeSettings>()->bEnableBattleSchedule)
+ {
+  // Consumed/cancelled slots are finite; this bound guarantees a future daily occurrence.
+  for (int32 Day = 0; Day <= ConsumedSlots.Num() + 1; ++Day)
+   for (int32 Minute : StartMinutes)
+   {
+    const FDateTime At = Now.GetDate() + FTimespan::FromDays(Day) + FTimespan::FromMinutes(Minute);
+    if (At > Now && At < Next && !ConsumedSlots.Contains(At.GetTicks())) Next = At;
+   }
+ }
+ return Next != FDateTime::MaxValue();
+}
+bool UBattleScheduleSubsystem::CancelNext(const FDateTime& Now, FDateTime& Cancelled, FDateTime& Next)
+{
+ if (!GetNextStart(Now, Cancelled)) return false;
+ ManualStarts.Remove(Cancelled);
+ ConsumedSlots.Add(Cancelled.GetTicks());
+ GetNextStart(Now, Next);
+ return true;
 }

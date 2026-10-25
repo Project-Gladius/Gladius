@@ -116,12 +116,13 @@ bool FTempleCommandTest::RunTest(const FString& Parameters)
  FParsedCommand C;
  TestTrue(TEXT("Combat travel command parses"),FChatCommandParser::TryParse(TEXT("viewer"),TEXT("!전투"),C));
  TestEqual(TEXT("New command has its own type"),C.CommandType,ECommandType::TravelToCombat);
- FParsedCommand Bad;TestFalse(TEXT("Unexpected arguments rejected"),FChatCommandParser::TryParse(TEXT("viewer"),TEXT("!전투 1"),Bad));
+ FParsedCommand Scheduled; TestTrue(TEXT("Scheduled combat parses"),FChatCommandParser::TryParse(TEXT("viewer"),TEXT("!전투 13:20"),Scheduled));
+ TestEqual(TEXT("Schedule payload preserved for admin validation"),Scheduled.Argument,FString(TEXT("13:20")));
  UCommandDispatcher* D=NewObject<UCommandDispatcher>();D->Initialize();
  int32 Calls=0;D->OnTempleCombatCommand.AddLambda([&Calls](){++Calls;});
  D->GetGameStateDelegate.BindLambda([](){return EGameState::Temple;});D->Execute(C);
  D->GetGameStateDelegate.BindLambda([](){return EGameState::Combat;});D->Execute(C);
- TestEqual(TEXT("Command is only active in temple"),Calls,1);
+ TestEqual(TEXT("Unauthenticated travel never reaches legacy delegate"),Calls,0);
  return true;
 }
 

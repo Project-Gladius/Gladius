@@ -58,6 +58,7 @@ enum class ECommandType : uint8
 	TravelToCombat, // !전투: 신전에서 전투 이동 요청
 
 	// ===== 전투상태 (참가) =====
+	Notice, Block, Unblock, Maintenance, EndMaintenance, EventBuff,
 	Login, // !로그인 글라디우스 / !로그인 세라. Argument: 캐릭터 이름
 };
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -11,6 +11,7 @@ class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
 class UChatLogWidget;
+class USessionLogWidget;
 class ULeaderboardRotatorWidget;
 class UBossTelegraphWidget;
 class UBattleDataResetWidget;
@@ -545,6 +546,9 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<UChatLogWidget> ChatLogWidgetClass;
 
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Session Log")
+ TSubclassOf<USessionLogWidget> SessionLogWidgetClass;
+
  //좌측 상단 리더보드 (LEADERBOARD / BATTLE ANALYSIS 교대). 비워 두거나 C++ 클래스면 /Game/Blueprints/UI의 WBP를 자동 사용
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|UI")
  TSubclassOf<ULeaderboardRotatorWidget> LeaderboardWidgetClass;
@@ -571,6 +575,8 @@ public:
  // Clears JSON records and removes matching participants. Test accounts use @testuser + digits.
  UFUNCTION(BlueprintCallable, Category = "Battle|Debug")
  bool ResetSavedUserData(bool bTestUsersOnly);
+ void RefreshEventBuff(const FString& UserId);
+ bool HasEventBuff(const FString& UserId) const;
 
  // Temporary buttons are only displayed in MainBattle.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
@@ -618,7 +624,7 @@ public:
  FString ResolveCharacterId(const FString& NameOrId) const;
 
  //채팅 디스패처의 OnLoginCommand / OnLogoutCommand 구독용
- void HandleLoginCommand(const FString& UserId, const FString& DisplayName, const FString& CharacterName) { LoginPlayer(UserId, DisplayName, CharacterName); }
+ void HandleLoginCommand(const FString& UserId, const FString& DisplayName, const FString& CharacterName);
  void HandleLogoutCommand(const FString& UserId) { LogoutPlayer(UserId); }
 
  UPROPERTY(BlueprintAssignable, Category = "Battle|Events")
@@ -758,6 +764,9 @@ public:
 private:
  UPROPERTY(Transient)
  TObjectPtr<UChatLogWidget> ChatLogWidget;
+
+ UPROPERTY(Transient)
+ TObjectPtr<USessionLogWidget> SessionLogWidget;
  UPROPERTY(Transient)
  TObjectPtr<ULeaderboardRotatorWidget> LeaderboardWidget;
  UPROPERTY(Transient)

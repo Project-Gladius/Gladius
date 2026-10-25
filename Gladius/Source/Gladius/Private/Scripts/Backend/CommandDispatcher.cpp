@@ -2,10 +2,25 @@
 #include "Scripts/Backend/ChatCommandParser.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "Scripts/Backend/AdminSubsystem.h"
 
 void UCommandDispatcher::Execute(const FParsedCommand& Command)
 {
  ABattleManager* Battle = ResolveBattleManager();
+ UWorld* World = GetOuter() ? GetOuter()->GetWorld() : nullptr;
+ UAdminSubsystem* Admin = World && World->GetGameInstance() ? World->GetGameInstance()->GetSubsystem<UAdminSubsystem>() : nullptr;
+ const EGameState CurrentState = IsValid(Battle) ? (Battle->IsBattleRunning() ? EGameState::Combat : EGameState::Temple)
+  : (GetGameStateDelegate.IsBound() ? GetGameStateDelegate.Execute() : EGameState::Temple);
+ if (Admin)
+ {
+  if (!Admin->CanInput(Command.UserId, CurrentState)) return;
+  Admin->RegisterUser(Command.UserId, Command.Username);
+  if (Admin->HandleAdminCommand(Command, Battle)) return;
+  if (Command.CommandType == ECommandType::Talk && Admin->IsAIMaintenance()) return;
+ }
+ else if (UAdminSubsystem::IsAdminCommand(Command.CommandType)) return;
  EBattleAction Action;
  const FString DisplayName = Command.Username.IsEmpty() ? Command.UserId : Command.Username;
  if (FChatCommandParser::TryGetBattleAction(Command.CommandType, Action))

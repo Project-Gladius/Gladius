@@ -8,8 +8,10 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/UI/ChatLogWidget.h"
+#include "Scripts/UI/SessionLogWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
@@ -34,6 +36,7 @@ ABattleManager::ABattleManager()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	ChatLogWidgetClass = UChatLogWidget::StaticClass();
+ SessionLogWidgetClass = USessionLogWidget::StaticClass();
 	LeaderboardWidgetClass = ULeaderboardRotatorWidget::StaticClass();
 	BossTelegraphWidgetClass = UBossTelegraphWidget::StaticClass();
 	TopHudWidgetClass = UBattleTopHudWidget::StaticClass();
@@ -101,6 +104,11 @@ void ABattleManager::BeginPlay()
   }
  }
  if (Chat) Chat->GetCommandDispatcher()->BindBattleManager(this);
+ if (SessionLogWidgetClass)
+ {
+  SessionLogWidget = CreateWidget<USessionLogWidget>(GetWorld(), SessionLogWidgetClass);
+  if (SessionLogWidget) SessionLogWidget->AddToViewport(2);
+ }
  if (ChatLogWidgetClass)
  {
   ChatLogWidget = CreateWidget<UChatLogWidget>(GetWorld(), ChatLogWidgetClass);
@@ -181,6 +189,7 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
  if (DataResetWidget) DataResetWidget->RemoveFromParent();
  if (DataResetController.IsValid()) DataResetController->bShowMouseCursor = bMouseCursorBeforeDataReset;
  if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
+ if (SessionLogWidget) SessionLogWidget->RemoveFromParent();
  if (LeaderboardWidget) LeaderboardWidget->RemoveFromParent();
  if (BossTelegraphWidget) BossTelegraphWidget->RemoveFromParent();
  if (TopHudWidget) TopHudWidget->RemoveFromParent();
@@ -733,14 +742,14 @@ void ABattleManager::LoadRecords()
 int32 ABattleManager::MaxHPFor(const FPlayerRecord& Record) const
 {
 	return static_cast<int32>(FMath::Clamp<int64>(static_cast<int64>(Classes[ClassIndexFor(Record.CharacterId)].BaseHP)
-		+ static_cast<int64>(Record.MaxHPBonus) * HPPerBonus, 5, 6));
+		+ static_cast<int64>(Record.MaxHPBonus) * HPPerBonus, 5, 6)) + (HasEventBuff(Record.UserId) ? 1 : 0);
 }
 
 void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const
 {
 	Player.ClassIndex = ClassIndexFor(Record.CharacterId);
 	Player.MaxHP = MaxHPFor(Record);
-	Player.DamageBonus = Record.DamageBonus * DamagePerBonus;
+	Player.DamageBonus = Record.DamageBonus * DamagePerBonus + (HasEventBuff(Record.UserId) ? 5 : 0);
 	Player.CritChanceBonus = Record.CritChanceBonus * CritChancePerBonus;
 	Player.CritDamageBonus = Record.CritDamageBonus * CritDamagePerBonus;
 }
@@ -955,6 +964,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 		NewPlayer.Unit = GetWorld()->SpawnActor<ABattleUnit>(
 			(UnitClass && *UnitClass) ? UnitClass->Get() : ABattleUnit::StaticClass(),
 			BossLocation(), FRotator::ZeroRotator);
+		if (!IsValid(NewPlayer.Unit)) return false;
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
 		NewPlayer.Unit->OnHitLanded.AddUObject(this, &ABattleManager::HandleHitLanded, UserId);
@@ -1391,6 +1401,8 @@ void ABattleManager::LogoutPlayer(const FString& UserId)
  RemovePlayer(UserId);
  SaveRecords();
  UE_LOG(LogTemp, Log, TEXT("[Battle] 로그아웃: %s"), *UserId);
+ if (UGameInstance* Instance = GetGameInstance())
+  Instance->GetSubsystem<USessionLogSubsystem>()->AddEvent(UserId, DisplayName, ESessionLogEvent::Logout);
  OnPlayerLoggedOut.Broadcast(UserId, DisplayName);
 }
 
@@ -1436,7 +1448,9 @@ bool ABattleManager::LoginPlayer(const FString& UserId, const FString& DisplayNa
  Record.CharacterId = CharacterId;
 
  //참가 처리(기록 반영·스폰·자리 배치)는 기존 SubmitAction이 담당. 로그인 자체는 '대기' 행동으로 들어간다
- if (!SubmitAction(UserId, DisplayName, EBattleAction::Idle, CharacterId) || !Players.Contains(UserId))
+ SubmitAction(UserId, DisplayName, EBattleAction::Idle, CharacterId);
+ const FBattlePlayer* Joined = Players.Find(UserId);
+ if (!Joined || !IsValid(Joined->Unit))
  {
   UE_LOG(LogTemp, Log, TEXT("[Battle] 로그인 실패(정원 초과 등): %s"), *UserId);
   return false;
@@ -1835,8 +1849,11 @@ void ABattleManager::ResolveTurn()
 		}
 	}
 	for (const FString& UserId : Leaving)
-	{
-		RemovePlayer(UserId);
+ {
+  if (UGameInstance* Instance = GetGameInstance())
+   Instance->GetSubsystem<USessionLogSubsystem>()->AddEvent(UserId, Players.FindChecked(UserId).DisplayName,
+    ESessionLogEvent::InactivityLogout);
+  RemovePlayer(UserId);
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 결과 — 보스 %s(%d타) / 입힌 피해 %d (치명타 %d) / 게임오버 %d / 부활 %d → 누적 %d"),
@@ -3415,4 +3432,26 @@ void ABattleManager::RunSelfTest()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] SelfTest 통과"));
+}
+
+void ABattleManager::HandleLoginCommand(const FString& UserId, const FString& DisplayName, const FString& CharacterName)
+{
+ const bool bLoggedIn = LoginPlayer(UserId, DisplayName, CharacterName);
+ if (UGameInstance* Instance = GetGameInstance())
+ {
+  Instance->GetSubsystem<USessionLogSubsystem>()->AddEvent(UserId, DisplayName,
+   bLoggedIn ? ESessionLogEvent::Login : ESessionLogEvent::LoginFailed);
+ }
+}
+
+bool ABattleManager::HasEventBuff(const FString& UserId) const
+{
+ return GetGameInstance() && GetGameInstance()->GetSubsystem<UAdminSubsystem>()->HasEventBuff(UserId);
+}
+void ABattleManager::RefreshEventBuff(const FString& UserId)
+{
+ InitializePlayerRecords();
+ if (FBattlePlayer* Player = Players.Find(UserId))
+  if (const FPlayerRecord* Record = Records.Find(UserId)) ApplyRecordToPlayer(*Record, *Player);
+ UpdateVisuals(); RefreshPlayerUI();
 }

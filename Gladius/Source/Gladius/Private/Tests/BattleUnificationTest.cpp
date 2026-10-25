@@ -22,6 +22,13 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Scripts/UI/BattleDataResetWidget.h"
+#include "Scripts/UI/SessionLogWidget.h"
+#include "Scripts/Backend/AdminSubsystem.h"
+#include "Scripts/Time/BattleScheduleSubsystem.h"
+#include "Scripts/UI/ChatLogSubsystem.h"
+#include "Components/VerticalBox.h"
+#include "Components/TextBlock.h"
+#include "Components/Image.h"
 #include "Components/InputComponent.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
 #include "Scripts/Battle/BattleUnit.h"
@@ -1042,6 +1049,209 @@ bool FBattleHitDisplayTimingTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Early report waits for the damage"),B->BossDamageShown,Before);
  FBattleUnificationTestAccess::Resolve(B);
  TestTrue(TEXT("Early report shows as soon as damage is resolved"),B->BossDamageShown>Before);
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionNotificationTest, "Gladius.SessionLog.CommandsAndIsolation",
+ EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSessionNotificationTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* B = T.Battle;
+ auto* Log = T.Instance->GetSubsystem<USessionLogSubsystem>();
+ auto* ChatLog = T.Instance->GetSubsystem<UChatLogSubsystem>();
+ const int32 ChatCount = ChatLog->GetEntries().Num();
+ B->StartBattle();
+ FBattleUnificationTestAccess::Prepare(B);
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 세라"));
+ TestEqual(TEXT("Login succeeds after unit creation"), Log->GetEntries().Last().Message, FString(TEXT("Visible name 님이 로그인하셨습니다")));
+ TestTrue(TEXT("Logged-in unit exists"), IsValid(B->GetBattlePlayers().FindChecked(TEXT("u")).Unit));
+ T.DispatchRaw(TEXT("u"), TEXT("!로그아웃"));
+ TestEqual(TEXT("Explicit logout"), Log->GetEntries().Last().Message, FString(TEXT("Visible name 님이 로그아웃하셨습니다")));
+ const int32 LoggedOutCount = Log->GetEntries().Num();
+ T.DispatchRaw(TEXT("u"), TEXT("!로그아웃"));
+ TestEqual(TEXT("No false logout for absent user"), Log->GetEntries().Num(), LoggedOutCount);
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 없는캐릭터"));
+ TestEqual(TEXT("Failure reports no successful login"), Log->GetEntries().Last().Message, FString(TEXT("Visible name님의 로그인이 정상 처리되지 못했습니다")));
+ B->MaxPlayers = 0;
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 세라"));
+ TestEqual(TEXT("Capacity rejection reports failure"), Log->GetEntries().Last().Event, ESessionLogEvent::LoginFailed);
+ B->MaxPlayers = 100;
+ T.DispatchRaw(TEXT("u"), TEXT("!로그인 세라"));
+ B->IdleTurnsBeforeKick = 1;
+ FBattleUnificationTestAccess::Prepare(B);
+ FBattleUnificationTestAccess::Resolve(B);
+ TestFalse(TEXT("Inactive participant removed"), B->IsPlayerLoggedIn(TEXT("u")));
+ TestEqual(TEXT("Inactivity has its own message"), Log->GetEntries().Last().Message, FString(TEXT("Visible name 님의 입력이 없어 자동 로그아웃되었습니다")));
+ TestEqual(TEXT("Notifications never enter chat history"), ChatLog->GetEntries().Num(), ChatCount);
+ Log->MaxEntries = 2;
+ Log->AddEvent(TEXT("fallback"), TEXT(""), ESessionLogEvent::Login);
+ TestEqual(TEXT("Bounded history"), Log->GetEntries().Num(), 2);
+ TestEqual(TEXT("Missing nickname falls back to user id"), Log->GetEntries().Last().Message, FString(TEXT("fallback 님이 로그인하셨습니다")));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionLogWidgetTest, "Gladius.SessionLog.WidgetStyleAndHistory",
+ EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* Log = T.Instance->GetSubsystem<USessionLogSubsystem>();
+
+ auto* W = CreateWidget<USessionLogWidget>(T.Instance, USessionLogWidget::StaticClass());
+ if (!TestNotNull(TEXT("Independent log widget"), W)) return false;
+ Log->AddEvent(TEXT("a"), TEXT("가나다"), ESessionLogEvent::Login);
+ const auto SlateWidget = W->TakeWidget();
+ auto* Rows = Cast<UVerticalBox>(W->WidgetTree->FindWidget(TEXT("LogMessages")));
+ if (!TestNotNull(TEXT("Message layer exists"), Rows)) return false;
+ TestEqual(TEXT("History displayed on construct"), Rows->GetChildrenCount(), 1);
+ TestEqual(TEXT("White default"), W->LogColor, FLinearColor::White);
+ TestTrue(TEXT("MaruBuri font resolved"), W->LogFont.FontObject && W->LogFont.FontObject->GetName().Contains(TEXT("MaruBuri")));
+ W->LogFont.Size = 23;
+ W->LogColor = FLinearColor::Yellow;
+ W->MaxVisibleEntries = 2;
+ W->RefreshStyle();
+ auto* Text = Cast<UTextBlock>(Rows->GetChildAt(0));
+ if (!TestNotNull(TEXT("Styled message exists"), Text)) return false;
+ TestEqual(TEXT("Designer font size applied"), Text->GetFont().Size, 23.f);
+ TestEqual(TEXT("Designer color applied"), Text->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Yellow);
+ Log->AddEvent(TEXT("a"), TEXT("가나다"), ESessionLogEvent::Logout);
+ Log->AddEvent(TEXT("b"), TEXT("라마바"), ESessionLogEvent::Login);
+ TestEqual(TEXT("Visible history bounded"), Rows->GetChildrenCount(), 2);
+ auto* Other = CreateWidget<USessionLogWidget>(T.Instance, USessionLogWidget::StaticClass());
+ const auto OtherSlateWidget = Other->TakeWidget();
+ auto* OtherRows = Cast<UVerticalBox>(Other->WidgetTree->FindWidget(TEXT("LogMessages")));
+ TestEqual(TEXT("Replacement window replays shared history"), OtherRows->GetChildrenCount(), 3);
+ const ESessionLogEvent Styles[] = {ESessionLogEvent::Admin, ESessionLogEvent::AdminUrgent, ESessionLogEvent::Event};
+ const FLinearColor Colors[] = {FLinearColor::Yellow, FLinearColor::Red, FLinearColor::Green};
+ for (int32 I=0; I<3; ++I)
+ {
+  Log->AddMessage(TEXT("운영 알림"),Styles[I]);
+  auto* Last=Cast<UTextBlock>(Rows->GetChildAt(Rows->GetChildrenCount()-1));
+  TestEqual(TEXT("Notification category color"),Last->GetColorAndOpacity().GetSpecifiedColor(),Colors[I]);
+ }
+ W->EventColor=FLinearColor::Blue; W->RefreshStyle();
+ TestEqual(TEXT("Designer event color survives rebuilding"),Cast<UTextBlock>(Rows->GetChildAt(Rows->GetChildrenCount()-1))->GetColorAndOpacity().GetSpecifiedColor(),FLinearColor::Blue);
+ return true;
+}
+
+
+struct FAdminTestAccess
+{
+ static bool Bind(UAdminSubsystem* A, const FString& Handle, const FString& Id) { return A->BindVerifiedHandle(Handle, Id); }
+ static FString Path(UAdminSubsystem* A) { return A->StoragePath; }
+ static void SetAdminFields(UAdminSubsystem* A, const FString& Id, const FString& Name, const FString& Until)
+ { auto& U=A->Data.Users[A->FindIndex(Id)]; U.AdminName=Name; U.BlockTime=Until; }
+};
+struct FAdminScheduleTestAccess
+{
+ static void Set(UBattleScheduleSubsystem* S, const TArray<int32>& Times) { S->StartMinutes=Times; S->ManualStarts.Reset(); S->ConsumedSlots.Reset(); }
+ static bool Consume(UBattleScheduleSubsystem* S, FDateTime Before, FDateTime Now) { return S->ConsumeDue(Before,Now,S->StartMinutes,S->ConsumedSlots); }
+};
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAdminCommandsTest,"Gladius.Admin.CommandsPermissionsPersistence",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FAdminCommandsTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* A=T.Instance->GetSubsystem<UAdminSubsystem>();
+ auto* L=T.Instance->GetSubsystem<USessionLogSubsystem>();
+ const FString GM=TEXT("UC1111111111111111111111");
+ TestTrue(TEXT("Seed operator handle exists"),A->FindUser(TEXT("@자작곡싸개"))!=nullptr);
+ TestFalse(TEXT("Unverified handle is not identity"),A->IsAdmin(TEXT("@자작곡싸개")));
+ TestTrue(TEXT("Bind verified API channel"),FAdminTestAccess::Bind(A,TEXT("@자작곡싸개"),GM));
+ TestTrue(TEXT("Verified operator authenticated"),A->IsAdmin(GM));
+ TestEqual(TEXT("Alias"),A->GetAdminName(GM),FString(TEXT("GM복어")));
+ TestEqual(TEXT("Second operator alias"),A->GetAdminName(TEXT("@WorkingHives")),FString(TEXT("GM도리")));
+ FAdminTestAccess::SetAdminFields(A,GM,TEXT(""),(FDateTime::UtcNow()+FTimespan::FromDays(1)).ToIso8601());
+ TestEqual(TEXT("Empty admin alias falls back"),A->GetAdminName(GM),FString(TEXT("GM")));
+ TestFalse(TEXT("Admin ignores blockTime"),A->IsBlocked(GM,FDateTime::UtcNow()));
+ FAdminTestAccess::SetAdminFields(A,GM,TEXT("GM복어"),TEXT(""));
+ auto Send=[&](const FString& Id,const TCHAR* Cmd) { FParsedCommand C; if (FChatCommandParser::TryParse(Id,Cmd,C)) { C.Username=TEXT("@자작곡싸개"); T.Chat->GetCommandDispatcher()->Execute(C); } };
+ const int32 Initial=L->GetEntries().Num();
+ Send(TEXT("imposter"),TEXT("!공지 위조"));
+ TestEqual(TEXT("Display name cannot impersonate admin"),L->GetEntries().Num(),Initial);
+ Send(GM,TEXT("!공지 공백 있는 공지"));
+ TestEqual(TEXT("Notice text"),L->GetEntries().Last().Message,FString(TEXT("[GM복어] 공백 있는 공지")));
+ TestEqual(TEXT("Notice style"),L->GetEntries().Last().Event,ESessionLogEvent::Admin);
+ Send(GM,TEXT("!차단 viewer 0.5"));
+ TestTrue(TEXT("Blocked until expiry"),A->IsBlocked(TEXT("viewer"),FDateTime::UtcNow()));
+ FDateTime Expiry; TestTrue(TEXT("ISO timestamp saved"),FDateTime::ParseIso8601(*A->FindUser(TEXT("viewer"))->BlockTime,Expiry));
+ TestTrue(TEXT("Fractional hours"),FMath::Abs((Expiry-FDateTime::UtcNow()).GetTotalSeconds()-1800)<3);
+ TestFalse(TEXT("Expiry allows input"),A->IsBlocked(TEXT("viewer"),Expiry));
+ Send(GM,TEXT("!차단해제 viewer"));
+ TestTrue(TEXT("Unblock removes timestamp"),A->FindUser(TEXT("viewer"))->BlockTime.IsEmpty());
+ TestEqual(TEXT("Unblock restores role"),A->FindUser(TEXT("viewer"))->Permission,FString(TEXT("user")));
+ Send(GM,TEXT("!차단 viewer"));
+ FDateTime::ParseIso8601(*A->FindUser(TEXT("viewer"))->BlockTime,Expiry);
+ TestEqual(TEXT("Default calendar year"),Expiry.GetYear(),FDateTime::UtcNow().GetYear()+1);
+ const int32 BeforeProtected=L->GetEntries().Num();
+ Send(GM,TEXT("!차단 @자작곡싸개"));
+ TestEqual(TEXT("Admin block silently ignored"),L->GetEntries().Num(),BeforeProtected);
+ Send(GM,TEXT("!차단해제 viewer"));
+ Send(GM,TEXT("!점검 전투"));
+ TestFalse(TEXT("Battle disabled for user"),A->CanInput(TEXT("viewer"),EGameState::Combat));
+ TestTrue(TEXT("Temple remains enabled"),A->CanInput(TEXT("viewer"),EGameState::Temple));
+ TestTrue(TEXT("Operator bypasses maintenance"),A->CanInput(GM,EGameState::Combat));
+ Send(GM,TEXT("!점검해제 전투"));
+ Send(GM,TEXT("!점검 신전"));
+ TestFalse(TEXT("Temple disabled"),A->CanInput(TEXT("viewer"),EGameState::Temple));
+ Send(GM,TEXT("!점검해제 신전"));
+ Send(GM,TEXT("!점검 전체"));
+ TestFalse(TEXT("All input disabled"),A->CanInput(TEXT("viewer"),EGameState::Combat));
+ TestFalse(TEXT("All temple input disabled"),A->CanInput(TEXT("viewer"),EGameState::Temple));
+ Send(GM,TEXT("!점검해제 전체"));
+ Send(GM,TEXT("!점검 AI")); TestTrue(TEXT("AI disabled"),A->IsAIMaintenance());
+ Send(GM,TEXT("!점검해제 AI")); TestFalse(TEXT("AI enabled"),A->IsAIMaintenance());
+ auto* B=T.Battle; B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ Send(TEXT("viewer"),TEXT("!로그인 세라"));
+ const auto Before=B->GetBattlePlayers().FindChecked(TEXT("viewer"));
+ Send(GM,TEXT("!이벤트 viewer"));
+ const auto After=B->GetBattlePlayers().FindChecked(TEXT("viewer"));
+ TestEqual(TEXT("Event max health +1"),After.MaxHP,Before.MaxHP+1);
+ TestEqual(TEXT("Event attack +5"),After.DamageBonus,Before.DamageBonus+5);
+ TestEqual(TEXT("Event green category"),L->GetEntries().Last().Event,ESessionLogEvent::Event);
+ const int32 EventCount=L->GetEntries().Num(); Send(GM,TEXT("!이벤트 viewer"));
+ TestEqual(TEXT("No repeat notice"),L->GetEntries().Num(),EventCount);
+ TestEqual(TEXT("No stacking"),B->GetBattlePlayers().FindChecked(TEXT("viewer")).MaxHP,After.MaxHP);
+ auto* Reloaded=NewObject<UAdminSubsystem>(T.Instance);
+ TestTrue(TEXT("Reload saved permissions"),Reloaded->LoadFromFile(FAdminTestAccess::Path(A)));
+ TestTrue(TEXT("Event survives reload"),Reloaded->HasEventBuff(TEXT("viewer")));
+ TestTrue(TEXT("Admin survives reload"),Reloaded->IsAdmin(GM));
+ Send(GM,TEXT("!차단 viewer 1"));
+ const int32 BlockedCount=L->GetEntries().Num(); Send(TEXT("viewer"),TEXT("!로그아웃"));
+ TestTrue(TEXT("Blocked user's command ignored"),B->IsPlayerLoggedIn(TEXT("viewer")));
+ TestEqual(TEXT("Ignored command makes no log"),L->GetEntries().Num(),BlockedCount);
+ B->StopBattle();
+ Send(GM,TEXT("!전투"));
+ FDateTime Next; auto* S=T.Instance->GetSubsystem<UBattleScheduleSubsystem>();
+ TestTrue(TEXT("Immediate battle queued"),S->GetNextStart(FDateTime::Now(),Next));
+ TestTrue(TEXT("Five-second delay"),(Next-FDateTime::Now()).GetTotalSeconds()<=5.1);
+ Send(GM,TEXT("!전투 취소"));
+ Send(GM,TEXT("!전투 23:59"));
+ TestEqual(TEXT("Schedule style"),L->GetEntries().Last().Event,ESessionLogEvent::Admin);
+ Send(GM,TEXT("!전투 25:99"));
+ TestEqual(TEXT("Invalid time rejected"),L->GetEntries().Last().Event,ESessionLogEvent::AdminUrgent);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAdminScheduleTest,"Gladius.Admin.ScheduleCancellation",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FAdminScheduleTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* S=T.Instance->GetSubsystem<UBattleScheduleSubsystem>();
+ auto* Settings=GetMutableDefault<URealTimeSettings>();
+ TGuardValue<bool> Enabled(Settings->bEnableBattleSchedule,true);
+ const FDateTime Now(2030,1,1,12,0,0);
+ FAdminScheduleTestAccess::Set(S,{13*60,14*60});
+ S->AddManualStart(Now+FTimespan::FromMinutes(30));
+ FDateTime Cancelled, Next;
+ TestTrue(TEXT("Cancel manual first"),S->CancelNext(Now,Cancelled,Next));
+ TestEqual(TEXT("Manual cancelled"),Cancelled,Now+FTimespan::FromMinutes(30));
+ TestEqual(TEXT("Daily follows manual"),Next,Now+FTimespan::FromHours(1));
+ TestTrue(TEXT("Cancel daily next"),S->CancelNext(Now,Cancelled,Next));
+ TestEqual(TEXT("Following daily preserved"),Next,Now+FTimespan::FromHours(2));
+ TestFalse(TEXT("Cancelled daily never fires"),FAdminScheduleTestAccess::Consume(S,Now+FTimespan::FromMinutes(59),Now+FTimespan::FromHours(1)));
+ TestTrue(TEXT("Following daily fires"),FAdminScheduleTestAccess::Consume(S,Now+FTimespan::FromMinutes(119),Now+FTimespan::FromHours(2)));
  return true;
 }
 
