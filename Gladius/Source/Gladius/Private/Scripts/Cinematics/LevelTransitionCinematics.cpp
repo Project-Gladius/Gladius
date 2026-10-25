@@ -7,6 +7,13 @@
 #include "LevelSequencePlayer.h"
 #include "MovieScene.h"
 #include "TimerManager.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/Texture2D.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/SNullWidget.h"
 
 bool ULevelTransitionCinematics::DoesSupportWorldType(EWorldType::Type Type) const
 {
@@ -86,6 +93,7 @@ void ULevelTransitionCinematics::Play(bool bBattle, bool bIntro)
     UE_LOG(LogTemp, Log, TEXT("[Transition] Playing %s"), *Name);
     // Preserve the authored playback range (Battle_Intro starts at frame -23).
     SequencePlayer->Play();
+    if (bIntro) ShowIntroLogo();
 }
 
 void ULevelTransitionCinematics::HandleFinished()
@@ -105,6 +113,7 @@ void ULevelTransitionCinematics::FinishPlayback()
 
 void ULevelTransitionCinematics::Cleanup()
 {
+    RemoveIntroLogo();
     GetWorld()->GetTimerManager().ClearTimer(PlaybackTimer);
     bPlaybackPending = false;
     if (SequencePlayer)
@@ -126,4 +135,70 @@ void ULevelTransitionCinematics::Deinitialize()
     GetWorld()->GetTimerManager().ClearTimer(AutoIntroTimer);
     Cleanup();
     Super::Deinitialize();
+}
+
+void ULevelTransitionCinematics::ShowIntroLogo()
+{
+    RemoveIntroLogo();
+    UGameViewportClient* Viewport = GetWorld()->GetGameViewport();
+    if (!Viewport) return;
+    IntroLogoTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/UI/Cinematics/T_GladiusIntroLogo.T_GladiusIntroLogo"));
+    if (!IntroLogoTexture)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[Transition] Intro logo texture missing"));
+        return;
+    }
+    IntroLogoBrush.SetResourceObject(IntroLogoTexture);
+    IntroLogoBrush.ImageSize = FVector2D(IntroLogoTexture->GetSizeX(), IntroLogoTexture->GetSizeY());
+    IntroLogoBrush.DrawAs = ESlateBrushDrawType::Image;
+    // 1:2:1 columns keep the logo at exactly half the viewport width.
+    // ScaleToFitX preserves the source aspect ratio, including on viewport resize.
+    IntroLogoOverlay = SNew(SHorizontalBox)
+        .Visibility(EVisibility::HitTestInvisible)
+        + SHorizontalBox::Slot().FillWidth(1.f)
+        [ SNullWidget::NullWidget ]
+        + SHorizontalBox::Slot().FillWidth(2.f)
+        [
+            SNew(SScaleBox)
+            .Stretch(EStretch::ScaleToFitX)
+            .HAlign(HAlign_Center)
+            .VAlign(VAlign_Center)
+            [
+                SNew(SBox)
+                .WidthOverride(IntroLogoBrush.ImageSize.X)
+                .HeightOverride(IntroLogoBrush.ImageSize.Y)
+                [
+                    SNew(SImage).Image(&IntroLogoBrush)
+                    .ColorAndOpacity_Lambda([this]() { return FLinearColor(1.f, 1.f, 1.f, GetIntroLogoOpacity()); })
+                ]
+            ]
+        ]
+        + SHorizontalBox::Slot().FillWidth(1.f)
+        [ SNullWidget::NullWidget ];
+    IntroLogoViewport = Viewport;
+    Viewport->AddViewportWidgetContent(IntroLogoOverlay.ToSharedRef(), 1000);
+}
+
+float ULevelTransitionCinematics::GetIntroLogoOpacity() const
+{
+    if (!SequencePlayer) return 0.f;
+    const double Duration = SequencePlayer->GetDuration().AsSeconds();
+    if (Duration <= 0.) return 0.f;
+    const double Elapsed = SequencePlayer->GetCurrentTime().AsSeconds() - SequencePlayer->GetStartTime().AsSeconds();
+    // Follow sequence time, including pause, seeking and playback-rate changes.
+    const float Progress = static_cast<float>(Elapsed / Duration);
+    if (Progress <= 0.f || Progress >= 0.85f) return 0.f;
+    if (Progress < 0.2f) return FMath::SmoothStep(0.f, 0.2f, Progress);
+    if (Progress <= 0.55f) return 1.f;
+    return 1.f - FMath::SmoothStep(0.55f, 0.85f, Progress);
+}
+
+void ULevelTransitionCinematics::RemoveIntroLogo()
+{
+    if (IntroLogoOverlay.IsValid() && IntroLogoViewport.IsValid())
+        IntroLogoViewport->RemoveViewportWidgetContent(IntroLogoOverlay.ToSharedRef());
+    IntroLogoOverlay.Reset();
+    IntroLogoViewport.Reset();
+    IntroLogoBrush.SetResourceObject(nullptr);
+    IntroLogoTexture = nullptr;
 }
