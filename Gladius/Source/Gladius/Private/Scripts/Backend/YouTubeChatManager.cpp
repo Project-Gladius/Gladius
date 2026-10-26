@@ -6,6 +6,8 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/GameManager.h"
 #include "Scripts/Backend/AdminSubsystem.h"
+#include "Scripts/Backend/ExternalData.h"
+#include "HAL/FileManager.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "GameFramework/Actor.h" 
@@ -18,6 +20,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
+#include "TimerManager.h"
 //이걸 왜 헤더가 아니라 여기다가 추가한거지? -> .h를 참조하는 모든 cpp에 헤더가 박히면 느려짐
 
 // Sets default values
@@ -38,15 +41,23 @@ void AYouTubeChatManager::BeginPlay()
 		GameManagerRef = Cast<AGameManager>(UGameplayStatics::GetActorOfClass(GetWorld(), AGameManager::StaticClass()));
 	}
 
+ if (const auto Settings = GladiusExternalData::Broadcast())
+ {
+  const TSharedPtr<FJsonObject>* YouTube = nullptr;
+  if (Settings->TryGetObjectField(TEXT("youtube"), YouTube) && YouTube && YouTube->IsValid())
+   (*YouTube)->TryGetStringField(TEXT("videoId"), VideoId);
+ }
 	GetCommandDispatcher();
 	InitializeKeyPool();
+ RefreshBroadcastSettings();
 	if (UGameInstance* Instance = GetGameInstance())
 	{
-		Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(ApiKey.IsEmpty() ? CurrentApiKey() : ApiKey, VideoId, AdminUserIds);
+		Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(CurrentApiKey(), VideoId, AdminUserIds);
 	}
 
 	IgnoreMessagesBefore = FDateTime::UtcNow();
 
+ bBroadcastFetchingStarted = true;
 	StartFetchingChat();
 }
 
@@ -84,7 +95,7 @@ void AYouTubeChatManager::InitializeKeyPool()
 		const int32 Loaded = KeyPool->LoadFromFile(Path);
 		UE_LOG(LogTemp, Log, TEXT("[YouTube] API 키 %d개를 읽었습니다 (%s)"), Loaded, *Path);
 	}
-	KeyPool->AddKey(ApiKey);
+
 }
 
 FString AYouTubeChatManager::CurrentApiKey()
@@ -320,6 +331,7 @@ void AYouTubeChatManager::RequestLiveChatId()
 
 	Request->OnProcessRequestComplete().BindUObject(this, &AYouTubeChatManager::OnLiveChatIdResponse, Key); //요청했던 자기 자신의 포인터, 구글이 보내준 JSON 응답 본문 및 HTTP 상태 코드(200 OK 등)가 담긴 객체, 연결 성공 여부를 매개변수로 넘김
 
+	ActiveLiveChatRequest = Request;
 	Request->SetURL(Url);
 	Request->SetVerb("GET");
 	Request->ProcessRequest();
@@ -327,6 +339,8 @@ void AYouTubeChatManager::RequestLiveChatId()
 
 void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, FString UsedKey)
 {
+	if (Request != ActiveLiveChatRequest) return;
+ ActiveLiveChatRequest.Reset();
 	bLiveChatIdInFlight = false;
 	if (!bWasSuccessful || !Response.IsValid())
 	{
@@ -588,3 +602,71 @@ void AYouTubeChatManager::SaveCommentLogToFile(const FString& UserId, const FStr
 	);
 }
 
+
+void AYouTubeChatManager::RefreshBroadcastSettings()
+{
+ if (!KeyPool) InitializeKeyPool();
+ const FString Path = BroadcastSettingsOverridePath.IsEmpty() ? FYouTubeApiKeyPool::GetDefaultKeyFilePath() : BroadcastSettingsOverridePath;
+ FString Json; TSharedPtr<FJsonObject> Root;
+ const TSharedPtr<FJsonObject>* YouTube = nullptr;
+ const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+ TArray<FString> Keys; FString StreamKey;
+ bool bValid = FFileHelper::LoadFileToString(Json, *Path)
+  && FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) && Root
+  && Root->TryGetObjectField(TEXT("youtube"), YouTube) && YouTube && YouTube->IsValid();
+ if (bValid && (*YouTube)->HasField(TEXT("apiKeys")))
+ {
+  bValid = (*YouTube)->TryGetArrayField(TEXT("apiKeys"), Entries);
+  if (bValid) for (const auto& Entry : *Entries)
+  {
+   FString Key;
+   if (!Entry || Entry->Type != EJson::String || !Entry->TryGetString(Key)) { bValid = false; break; }
+   Key.TrimStartAndEndInline();
+   if (!Key.IsEmpty()) Keys.AddUnique(Key);
+  }
+ }
+ if (bValid && (*YouTube)->HasField(TEXT("streamKey")))
+  bValid = (*YouTube)->HasTypedField<EJson::String>(TEXT("streamKey")) && (*YouTube)->TryGetStringField(TEXT("streamKey"), StreamKey);
+ StreamKey.TrimStartAndEndInline();
+ const bool bNeedsRefresh = !bValid || Keys.IsEmpty() || StreamKey.IsEmpty();
+ auto& Timers = GetWorldTimerManager();
+ if (bNeedsRefresh)
+ {
+  if (!Timers.IsTimerActive(BroadcastRefreshTimerHandle))
+   Timers.SetTimer(BroadcastRefreshTimerHandle, this, &AYouTubeChatManager::RefreshBroadcastSettings, 30.f, true);
+ }
+ else Timers.ClearTimer(BroadcastRefreshTimerHandle);
+ if (!bValid) return; // Keep the last valid values while the file is being edited.
+ const bool bKeysChanged = KeyPool->ReplaceKeys(Keys);
+ BroadcastStreamKey = MoveTemp(StreamKey);
+ if (Keys.IsEmpty()) { StopFetchingChat(); return; }
+ if (UGameInstance* Instance = GetGameInstance())
+  Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(CurrentApiKey(), VideoId, AdminUserIds);
+ if (!bBroadcastFetchingStarted || !bKeysChanged) return;
+ if (LiveChatId.IsEmpty())
+ {
+  if (ActiveLiveChatRequest.IsValid())
+  {
+   ActiveLiveChatRequest->OnProcessRequestComplete().Unbind();
+   ActiveLiveChatRequest->CancelRequest();
+   ActiveLiveChatRequest.Reset(); bLiveChatIdInFlight = false;
+  }
+  StartFetchingChat();
+ }
+ else if (bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat && !bFetchInFlight)
+  RequestChatFetch();
+}
+
+void AYouTubeChatManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+ bBroadcastFetchingStarted = false;
+ GetWorldTimerManager().ClearTimer(BroadcastRefreshTimerHandle);
+ GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
+ if (ActiveLiveChatRequest.IsValid())
+ {
+  ActiveLiveChatRequest->OnProcessRequestComplete().Unbind();
+  ActiveLiveChatRequest->CancelRequest(); ActiveLiveChatRequest.Reset();
+ }
+ CancelPendingChatFetch();
+ Super::EndPlay(EndPlayReason);
+}

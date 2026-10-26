@@ -1,5 +1,8 @@
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Scripts/Temple/Goddess.h"
+#include "Scripts/Cinematics/LevelTransitionCinematics.h"
+#include "Scripts/Backend/ExternalData.h"
+#include "Scripts/Temple/TempleBlessingDisplay.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Engine/World.h"
 #include "Scripts/Temple/TempleAIBatchClient.h"
@@ -46,6 +49,11 @@ void ATempleCycleController::BeginPlay()
 		const ATempleCycleController* Self = WeakThis.Get();
 		return Self && IsValid(Self->BattleManager) ? Self->BattleManager->GetRemainingBlessings(UserId) : 0;
 	};
+ if (const auto Settings = GladiusExternalData::Connections())
+ {
+  Settings->TryGetStringField(TEXT("TempleAIBatchEndpointUrl"), TempleAIBatchEndpointUrl);
+  Settings->TryGetStringField(TEXT("TempleAIClientToken"), TempleAIClientToken);
+ }
 	BatchClient = NewObject<UTempleAIBatchClient>(this);
 	BatchClient->EndpointUrl = TempleAIBatchEndpointUrl;
 	BatchClient->ClientToken = TempleAIClientToken;
@@ -70,7 +78,14 @@ void ATempleCycleController::BeginPlay()
 		UE_LOG(LogTemp, Error, TEXT("TempleCycleController: Goddess를 찾지 못했습니다."));
 	}
 
-	CreateStatusWidget();
+ // All temple panels are created only after the restored camera leaves the intro.
+ auto* Cinematics = GetWorld()->GetSubsystem<ULevelTransitionCinematics>();
+ if (Cinematics->HasIntroFinished()) CreateStatusWidget();
+ else
+ {
+  Cinematics->OnIntroFinished.AddUObject(this, &ATempleCycleController::CreateStatusWidget);
+  Cinematics->PlayIntro(false);
+ }
 
 	//진입 후 CycleSeconds가 지나면 첫 조회, 이후 CycleSeconds마다 반복
 	GetWorldTimerManager().SetTimer(CycleTimerHandle, this, &ATempleCycleController::HandleCycleTimer, FMath::Max(CycleSeconds, 1.0f), true);
@@ -152,7 +167,7 @@ void ATempleCycleController::CreateStatusWidget()
 		ChatLogWidget = CreateWidget<UChatLogWidget>(GetWorld(), ChatLogWidgetClass);
 		if (ChatLogWidget)
 		{
-			ChatLogWidget->SetExpansionAllowed(true);
+			ChatLogWidget->SetFixedExpanded();
 			ChatLogWidget->AddToViewport(1);
 		}
 	}
@@ -181,7 +196,16 @@ void ATempleCycleController::HandleGoddessStateChanged(EGoddessState NewState, c
 	UGameInstance* Instance = GetGameInstance();
 	if (!Instance) return;
 	UChatLogSubsystem* Log = Instance->GetSubsystem<UChatLogSubsystem>();
-	if (NewState == EGoddessState::Reading)
+	if (!Log) return;
+	if (NewState >= EGoddessState::Blessing1 && NewState <= EGoddessState::Blessing4)
+	{
+		if (Context.BlessedUsernames.IsEmpty()) return;
+		const int32 Tier = static_cast<int32>(NewState) - static_cast<int32>(EGoddessState::Blessing1) + 1;
+		const FString Names = FString::Join(Context.BlessedUsernames, TEXT(", "));
+		const FString Title = UTempleBlessingCardWidget::BlessingTitle(Tier).ToString();
+		Log->AddGoddessMessage(FString::Printf(TEXT("%s에게 %s을 내리노라."), *Names, *Title));
+	}
+	else if (NewState == EGoddessState::Reading)
 	{
 		Log->AddTempleQuestion(Context.Username, Context.Text);
 	}

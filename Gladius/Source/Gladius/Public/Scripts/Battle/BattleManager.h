@@ -475,7 +475,7 @@ public:
 	//프로젝트 폴더(.uproject가 있는 곳) 기준 상대 경로.
 	//저장소에서는 Gladius/ 바깥에 Balancing/ 이 있어 한 단계 올라간다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Balance")
-	FString BalanceDataDir = TEXT("../Balancing/Data");
+	FString BalanceDataDir = TEXT("Content/ExternalData");
 
 	//에디터에서 자리 배치를 점으로 미리 보여준다. Play 없이 격자를 맞출 때 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
@@ -580,7 +580,7 @@ public:
 
  // Temporary buttons are only displayed in MainBattle.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
- bool bShowTemporaryDataResetButtons = true;
+ bool bShowTemporaryDataResetButtons = false;
 
  // Q/W spawn and select a test player; 1-7 submit actions; E resets test accounts only.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")

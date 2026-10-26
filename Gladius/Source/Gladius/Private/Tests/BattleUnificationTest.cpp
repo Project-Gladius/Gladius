@@ -27,6 +27,13 @@
 #include "Scripts/Time/BattleScheduleSubsystem.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Components/VerticalBox.h"
+#include "Components/ScrollBox.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/SizeBox.h"
+#include "Slate/WidgetRenderer.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "ImageUtils.h"
+#include "Misc/CommandLine.h"
 #include "Components/TextBlock.h"
 #include "Components/Image.h"
 #include "Components/InputComponent.h"
@@ -1098,41 +1105,75 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
 {
  FUnifiedBattleWorld T;
  auto* Log = T.Instance->GetSubsystem<USessionLogSubsystem>();
-
+ Log->AddMessage(TEXT("이전 알림"), ESessionLogEvent::Admin);
+ Log->AddMessage(TEXT("최근 알림"), ESessionLogEvent::AdminUrgent);
  auto* W = CreateWidget<USessionLogWidget>(T.Instance, USessionLogWidget::StaticClass());
- if (!TestNotNull(TEXT("Independent log widget"), W)) return false;
- Log->AddEvent(TEXT("a"), TEXT("가나다"), ESessionLogEvent::Login);
  const auto SlateWidget = W->TakeWidget();
  auto* Rows = Cast<UVerticalBox>(W->WidgetTree->FindWidget(TEXT("LogMessages")));
- if (!TestNotNull(TEXT("Message layer exists"), Rows)) return false;
- TestEqual(TEXT("History displayed on construct"), Rows->GetChildrenCount(), 1);
- TestEqual(TEXT("White default"), W->LogColor, FLinearColor::White);
+ if (!TestNotNull(TEXT("Message layer exists"), Rows) || !TestNotNull(TEXT("Single text exists"), W->CurrentText.Get())) return false;
+ TestEqual(TEXT("Exactly one line widget"), Rows->GetChildrenCount(), 1);
+ TestEqual(TEXT("Map entry resumes latest history"), W->CurrentText->GetText().ToString(), FString(TEXT("최근 알림")));
+ TestFalse(TEXT("No wrapping"), W->CurrentText->GetAutoWrapText());
+ TestEqual(TEXT("Urgent color"), W->CurrentText->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Red);
+ TestNotNull(TEXT("Original notice texture resolved"), W->BackgroundBrush.GetResourceObject());
+ auto* Layout = Cast<UCanvasPanelSlot>(W->LogWindow->Slot);
+ TestEqual(TEXT("Upper-right anchor"), Layout->GetAnchors().Minimum, FVector2D(1, 0));
+ TestEqual(TEXT("Upper-right alignment"), Layout->GetAlignment(), FVector2D(1, 0));
+ TestTrue(TEXT("Inset from upper right"), W->WindowOffset.X < 0 && W->WindowOffset.Y > 0);
  TestTrue(TEXT("MaruBuri font resolved"), W->LogFont.FontObject && W->LogFont.FontObject->GetName().Contains(TEXT("MaruBuri")));
  W->LogFont.Size = 23;
- W->LogColor = FLinearColor::Yellow;
- W->MaxVisibleEntries = 2;
  W->RefreshStyle();
- auto* Text = Cast<UTextBlock>(Rows->GetChildAt(0));
- if (!TestNotNull(TEXT("Styled message exists"), Text)) return false;
- TestEqual(TEXT("Designer font size applied"), Text->GetFont().Size, 23.f);
- TestEqual(TEXT("Designer color applied"), Text->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Yellow);
- Log->AddEvent(TEXT("a"), TEXT("가나다"), ESessionLogEvent::Logout);
- Log->AddEvent(TEXT("b"), TEXT("라마바"), ESessionLogEvent::Login);
- TestEqual(TEXT("Visible history bounded"), Rows->GetChildrenCount(), 2);
- auto* Other = CreateWidget<USessionLogWidget>(T.Instance, USessionLogWidget::StaticClass());
- const auto OtherSlateWidget = Other->TakeWidget();
- auto* OtherRows = Cast<UVerticalBox>(Other->WidgetTree->FindWidget(TEXT("LogMessages")));
- TestEqual(TEXT("Replacement window replays shared history"), OtherRows->GetChildrenCount(), 3);
- const ESessionLogEvent Styles[] = {ESessionLogEvent::Admin, ESessionLogEvent::AdminUrgent, ESessionLogEvent::Event};
- const FLinearColor Colors[] = {FLinearColor::Yellow, FLinearColor::Red, FLinearColor::Green};
- for (int32 I=0; I<3; ++I)
+ TestEqual(TEXT("Designer font size applied"), W->CurrentText->GetFont().Size, 23.f);
+ Log->AddMessage(TEXT("다음 공지\n두 번째 줄"), ESessionLogEvent::Admin);
+ Log->AddMessage(TEXT("이벤트 알림"), ESessionLogEvent::Event);
+ TestEqual(TEXT("Incoming messages wait until current finishes"), W->CurrentText->GetText().ToString(), FString(TEXT("최근 알림")));
+ TestEqual(TEXT("Both incoming messages queued"), W->PendingEntries.Num(), 2);
+ W->AdvanceTicker(10.f);
+ TestEqual(TEXT("FIFO and newline normalization"), W->CurrentText->GetText().ToString(), FString(TEXT("다음 공지 두 번째 줄")));
+ TestEqual(TEXT("Admin color preserved"), W->CurrentText->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Yellow);
+ W->AdvanceTicker(10.f);
+ TestEqual(TEXT("Next event displayed"), W->CurrentText->GetText().ToString(), FString(TEXT("이벤트 알림")));
+ W->EventColor = FLinearColor::Blue;
+ W->RefreshStyle();
+ TestEqual(TEXT("Restyling keeps current event"), W->CurrentText->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Blue);
+ TestEqual(TEXT("No stacked history after arrivals"), Rows->GetChildrenCount(), 1);
+ FString LongMessage;
+ for (int32 I=0; I<40; ++I) LongMessage += TEXT("긴 운영진 공지사항 ");
+ FSessionLogEntry LongEntry; LongEntry.Message = LongMessage; LongEntry.Event = ESessionLogEvent::Admin;
+ W->ShowEntry(LongEntry);
+ W->AdvanceTicker(0.5f);
+ TestEqual(TEXT("Readable pause at beginning"), W->LogScrollBox->GetScrollOffset(), 0.f);
+ W->AdvanceTicker(1.5f);
+ AddInfo(FString::Printf(TEXT("Ticker width=%f offset=%f elapsed=%f"), W->CurrentText->GetDesiredSize().X, W->LogScrollBox->GetScrollOffset(), W->MessageElapsed));
+ TestEqual(TEXT("Long line moves left smoothly"), W->LogScrollBox->GetScrollOffset(), 55.f);
+ Log->AddMessage(TEXT("긴 공지 다음 알림"), ESessionLogEvent::AdminUrgent);
+ W->AdvanceTicker(0.1f);
+ TestEqual(TEXT("Long message not interrupted"), W->CurrentText->GetText().ToString(), LongMessage);
+ W->AdvanceTicker(10000.f);
+ TestEqual(TEXT("Complete long text finishes before next"), W->CurrentText->GetText().ToString(), FString(TEXT("긴 공지 다음 알림")));
+ TestEqual(TEXT("Next line resets position"), W->LogScrollBox->GetScrollOffset(), 0.f);
+ TestEqual(TEXT("History retained independently"), Log->GetEntries().Num(), 5);
+ if (!FParse::Param(FCommandLine::Get(), TEXT("NullRHI")))
  {
-  Log->AddMessage(TEXT("운영 알림"),Styles[I]);
-  auto* Last=Cast<UTextBlock>(Rows->GetChildAt(Rows->GetChildrenCount()-1));
-  TestEqual(TEXT("Notification category color"),Last->GetColorAndOpacity().GetSpecifiedColor(),Colors[I]);
+  W->LogFont.Size = 18;
+  W->PendingEntries.Reset();
+  W->AppendMessage(TEXT("[운영진 공지] 글라디우스에 오신 것을 환영합니다. 오늘 전투는 오후 8시에 시작합니다. 끝까지 즐겁게 참여해 주세요!"), ESessionLogEvent::Admin);
+  FWidgetRenderer Renderer(true);
+  auto SavePreview = [&](const TCHAR* Name)
+  {
+   UTextureRenderTarget2D* Target = Renderer.DrawWidget(SlateWidget, FVector2D(1280, 720));
+   TArray<FColor> Pixels;
+   FReadSurfaceDataFlags ReadFlags;
+   ReadFlags.SetLinearToGamma(false);
+   if (!TestTrue(TEXT("Preview render readback"), Target && Target->GameThread_GetRenderTargetResource()->ReadPixels(Pixels, ReadFlags))) return;
+   TArray64<uint8> Png;
+   FImageUtils::PNGCompressImageArray(1280, 720, Pixels, Png);
+   FFileHelper::SaveArrayToFile(Png, *(FPaths::ProjectSavedDir() / Name));
+  };
+  SavePreview(TEXT("NoticeTicker-start.png"));
+  W->AdvanceTicker(5.f);
+  SavePreview(TEXT("NoticeTicker-scroll.png"));
  }
- W->EventColor=FLinearColor::Blue; W->RefreshStyle();
- TestEqual(TEXT("Designer event color survives rebuilding"),Cast<UTextBlock>(Rows->GetChildAt(Rows->GetChildrenCount()-1))->GetColorAndOpacity().GetSpecifiedColor(),FLinearColor::Blue);
  return true;
 }
 

@@ -8,6 +8,18 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "Engine/Texture2D.h"
+#if WITH_EDITOR
+#include "WidgetBlueprint.h"
+#include "Animation/WidgetAnimation.h"
+#include "Layout/ArrangedChildren.h"
+#include "Widgets/SWidget.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#endif
 #include "Components/ProgressBar.h"
 #include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
@@ -47,11 +59,17 @@ void UBattleTopHudWidget::ResolveWidgets()
 	};
 	Find(TopHudBar, TEXT("TopHudBar"));
 	Find(TurnValueText, TEXT("TurnValueText"));
+	Find(TurnValueText, TEXT("TH_TurnValueText"));
 	Find(TurnTotalText, TEXT("TurnTotalText"));
+	Find(TurnTotalText, TEXT("TH_TurnTotalText"));
 	Find(GuideText, TEXT("GuideText"));
+	Find(GuideText, TEXT("TH_GuideText"));
 	Find(Gauge, TEXT("Gauge"));
+	Find(Gauge, TEXT("TH_Gauge"));
 	Find(TimerContent, TEXT("TimerContent"));
+	Find(TimerContent, TEXT("TH_TimerContent"));
 	Find(TimerText, TEXT("TimerText"));
+	Find(TimerText, TEXT("TH_TimerText"));
 }
 
 void UBattleTopHudWidget::BindToBattleManager(ABattleManager* InBattleManager)
@@ -91,7 +109,9 @@ void UBattleTopHudWidget::Apply(const FBattleTopHudState& State)
 	LastState = State;
 
 	UWidget* Container = TopHudBar ? TopHudBar.Get() : this;
-	Container->SetVisibility(State.bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	// The background shares the content's visibility, including cutscenes.
+ if (Container->GetParent() && Container->GetParent()->GetFName()==TEXT("TopHudFrame")) Container=Container->GetParent();
+ Container->SetVisibility(State.bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 
 	if (State.bVisible)
 	{
@@ -150,7 +170,8 @@ void UBattleTopHudWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 		SizeBox->SetWidthOverride(Size.X);
 		SizeBox->SetHeightOverride(Size.Y);
 		UBorder* Panel = ConstructNamed<UBorder>(Tree, Name);
-		Panel->SetBrush(Brush);
+		FSlateBrush EmptyBrush; EmptyBrush.DrawAs=ESlateBrushDrawType::NoDrawType;
+		Panel->SetBrush(EmptyBrush);
 		Panel->SetPadding(FMargin(12.0f, 6.0f));
 		Panel->SetHorizontalAlignment(HAlign_Center);
 		Panel->SetVerticalAlignment(VAlign_Center);
@@ -168,9 +189,17 @@ void UBattleTopHudWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 	Tree->RootWidget = Canvas;
 
 	UHorizontalBox* Bar = ConstructNamed<UHorizontalBox>(Tree, TEXT("TopHudBar"));
+ UOverlay* Frame = ConstructNamed<UOverlay>(Tree, TEXT("TopHudFrame"));
+ UImage* Background = ConstructNamed<UImage>(Tree, TEXT("TopHudBackgroundImage"));
+ Background->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,TEXT("/Game/UI/UIDesign/TimePanel.TimePanel")));
+ // The content determines HUD size; the image stretches to precisely that size.
+ FSlateBrush BackgroundBrush=Background->GetBrush(); BackgroundBrush.ImageSize=FVector2D::ZeroVector;
+ Background->SetBrush(BackgroundBrush); Background->SetVisibility(ESlateVisibility::HitTestInvisible);
+ Frame->AddChildToOverlay(Background);
+ Frame->AddChildToOverlay(Bar);
 
 	//화면 최상단 중앙 고정
-	UCanvasPanelSlot* BarSlot = Canvas->AddChildToCanvas(Bar);
+	UCanvasPanelSlot* BarSlot = Canvas->AddChildToCanvas(Frame);
 	BarSlot->SetAnchors(FAnchors(0.5f, 0.0f));
 	BarSlot->SetAlignment(FVector2D(0.5f, 0.0f));
 	BarSlot->SetPosition(ScreenOffset);
@@ -204,8 +233,10 @@ void UBattleTopHudWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 
 	UProgressBar* GaugeBar = ConstructNamed<UProgressBar>(Tree, TEXT("Gauge"));
 	FProgressBarStyle GaugeStyle = GaugeBar->GetWidgetStyle();
-	GaugeStyle.BackgroundImage = Style.GaugeBackgroundBrush;
+	GaugeStyle.BackgroundImage.DrawAs = ESlateBrushDrawType::NoDrawType;
 	GaugeStyle.FillImage = Style.GaugeFillBrush;
+ GaugeStyle.FillImage.DrawAs=ESlateBrushDrawType::Image;
+ GaugeStyle.MarqueeImage.DrawAs=ESlateBrushDrawType::NoDrawType;
 	GaugeBar->SetWidgetStyle(GaugeStyle);
 	//왼쪽 기준으로 채워져, 비율이 줄면 오른쪽 끝이 왼쪽으로 줄어듦
 	GaugeBar->SetBarFillType(EProgressBarFillType::LeftToRight);
@@ -226,7 +257,8 @@ void UBattleTopHudWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 	// ===== 타이머 패널: 아이콘 + 남은 시간 =====
 	UHorizontalBox* TimerRow = ConstructNamed<UHorizontalBox>(Tree, TEXT("TimerContent"));
 	UImage* TimerIcon = ConstructNamed<UImage>(Tree, TEXT("TimerIcon"));
-	TimerIcon->SetBrush(Style.TimerIconBrush);
+	FSlateBrush EmptyIcon; EmptyIcon.DrawAs=ESlateBrushDrawType::NoDrawType;
+	TimerIcon->SetBrush(EmptyIcon);
 	TimerIcon->SetDesiredSizeOverride(Style.TimerIconSize);
 	if (UHorizontalBoxSlot* IconSlot = TimerRow->AddChildToHorizontalBox(TimerIcon))
 	{
@@ -238,4 +270,167 @@ void UBattleTopHudWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 
 	Bar->AddChildToHorizontalBox(MakePanel(TEXT("TimerPanel"), Style.TimerPanelBrush, Style.TimerPanelSize, TimerRow))
 		->SetVerticalAlignment(VAlign_Center);
+}
+
+bool UBattleTopHudWidget::UseFullSizeBackground(UObject* Asset)
+{
+#if WITH_EDITOR
+ auto* BP=Cast<UWidgetBlueprint>(Asset);
+ if (!BP || !BP->WidgetTree) return false;
+ UWidgetTree* Tree=BP->WidgetTree;
+ auto* Bar=Tree->FindWidget(TEXT("TopHudBar"));
+ if (!Bar) return false;
+ if (Tree->FindWidget(TEXT("TopHudFrame"))) return true;
+ auto* Parent=Bar->GetParent(); if (!Parent) return false;
+ BP->Modify(); Tree->Modify();
+ auto* Frame=Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(),TEXT("TopHudFrame"));
+ Frame->SetRenderTransform(Bar->GetRenderTransform());
+ Frame->SetRenderTransformPivot(Bar->GetRenderTransformPivot());
+ Frame->SetRenderOpacity(Bar->GetRenderOpacity());
+ // ReplaceChild retains the original Canvas anchors, position, autosize and Z order.
+ if (!Parent->ReplaceChild(Bar,Frame)) return false;
+ Bar->SetRenderTransform(FWidgetTransform()); Bar->SetRenderOpacity(1.0f);
+ auto* Background=Cast<UImage>(Tree->FindWidget(TEXT("Image_35")));
+ if (Background) Background->RemoveFromParent();
+ else Background=Tree->ConstructWidget<UImage>(UImage::StaticClass(),TEXT("TopHudBackgroundImage"));
+ if (!Background->GetBrush().GetResourceObject())
+  Background->SetBrushFromTexture(LoadObject<UTexture2D>(nullptr,TEXT("/Game/UI/UIDesign/TimePanel.TimePanel")));
+ auto Brush=Background->GetBrush(); Brush.DrawAs=ESlateBrushDrawType::Image; Brush.ImageSize=FVector2D::ZeroVector;
+ Background->SetBrush(Brush); Background->SetVisibility(ESlateVisibility::HitTestInvisible);
+ Background->SetRenderTransform(FWidgetTransform());
+ auto* ImageSlot=Frame->AddChildToOverlay(Background);
+ ImageSlot->SetHorizontalAlignment(HAlign_Fill); ImageSlot->SetVerticalAlignment(VAlign_Fill);
+ auto* ContentSlot=Frame->AddChildToOverlay(Bar);
+ ContentSlot->SetHorizontalAlignment(HAlign_Fill); ContentSlot->SetVerticalAlignment(VAlign_Fill);
+ // Keep layout containers, padding and authored text positions while removing their shapes.
+ Tree->ForEachWidget([BP](UWidget* W) {
+  if (auto* Border=Cast<UBorder>(W))
+  {
+   auto Brush=Border->Background; Brush.DrawAs=ESlateBrushDrawType::NoDrawType; Border->SetBrush(Brush);
+  }
+  if (auto* Progress=Cast<UProgressBar>(W))
+  {
+   auto Style=Progress->GetWidgetStyle();
+   Style.BackgroundImage.DrawAs=ESlateBrushDrawType::NoDrawType;
+   Style.MarqueeImage.DrawAs=ESlateBrushDrawType::NoDrawType;
+   Style.FillImage.DrawAs=ESlateBrushDrawType::Image;
+   Progress->SetWidgetStyle(Style);
+  }
+  if (auto* Icon=Cast<UImage>(W); Icon && W->GetFName()==TEXT("TimerIcon"))
+  {
+   auto Brush=Icon->GetBrush(); Brush.DrawAs=ESlateBrushDrawType::NoDrawType; Icon->SetBrush(Brush);
+  }
+  if (!BP->WidgetVariableNameToGuidMap.Contains(W->GetFName())) BP->OnVariableAdded(W->GetFName());
+ });
+ FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+ FKismetEditorUtilities::CompileBlueprint(BP);
+ BP->MarkPackageDirty();
+ return BP->Status!=BS_Error;
+#else
+ return false;
+#endif
+}
+
+#if WITH_EDITOR
+namespace
+{
+struct FFreeHudNode
+{
+ UWidget* Widget=nullptr;
+ FVector2D Position=FVector2D::ZeroVector;
+ FVector2D Size=FVector2D::ZeroVector;
+ float LayoutScale=1.0f;
+ TArray<FFreeHudNode> Children;
+};
+bool CaptureHudLayout(FFreeHudNode& Node)
+{
+ auto* Panel=Cast<UPanelWidget>(Node.Widget);
+ if (!Panel) return true;
+ FArrangedChildren Arranged(EVisibility::All);
+ Panel->TakeWidget()->ArrangeChildren(FGeometry::MakeRoot(Node.Size,FSlateLayoutTransform()),Arranged);
+ for (UWidget* Child:Panel->GetAllChildren())
+ {
+  FFreeHudNode Next; Next.Widget=Child;
+  bool bFound=false;
+  for (int32 I=0; I<Arranged.Num(); ++I)
+   if (Arranged[I].Widget==Child->GetCachedWidget())
+   {
+    Next.Position=FVector2D(Arranged[I].Geometry.GetAccumulatedLayoutTransform().GetTranslation());
+    Next.LayoutScale=Arranged[I].Geometry.GetAccumulatedLayoutTransform().GetScale();
+    Next.Size=FVector2D(Arranged[I].Geometry.GetLocalSize());
+    bFound=true; break;
+   }
+  if (!bFound) return false;
+  if (!CaptureHudLayout(Next)) return false;
+  Node.Children.Add(MoveTemp(Next));
+ }
+ return true;
+}
+UWidget* BuildFreeHud(UWidgetTree* Tree,const FFreeHudNode& Node)
+{
+ auto* Old=Cast<UPanelWidget>(Node.Widget);
+ if (!Old) return Node.Widget;
+ const FName Name=Old->GetFName();
+ const FWidgetTransform Transform=Old->GetRenderTransform();
+ const FVector2D Pivot=Old->GetRenderTransformPivot();
+ const float Opacity=Old->GetRenderOpacity();
+ const auto Visibility=Old->GetVisibility(); const auto Clipping=Old->GetClipping();
+ Old->ClearChildren();
+ Old->Rename(*MakeUniqueObjectName(GetTransientPackage(),Old->GetClass(),Name).ToString(),GetTransientPackage(),REN_DontCreateRedirectors);
+ auto* Canvas=Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(),Name);
+ Canvas->SetRenderTransform(Transform); Canvas->SetRenderTransformPivot(Pivot);
+ Canvas->SetRenderOpacity(Opacity); Canvas->SetVisibility(Visibility); Canvas->SetClipping(Clipping);
+ for (const auto& Child:Node.Children)
+ {
+  UWidget* Widget=BuildFreeHud(Tree,Child);
+  auto* Slot=Canvas->AddChildToCanvas(Widget);
+  Slot->SetPosition(Child.Position+(Child.LayoutScale-1.0f)*Widget->GetRenderTransformPivot()*Child.Size); Slot->SetSize(Child.Size.ComponentMax(FVector2D(1,1)));
+  // Preserve scaling formerly supplied by ScaleBox's layout transform.
+  auto Render=Widget->GetRenderTransform();
+  Render.Scale*=Child.LayoutScale; Render.Translation*=Child.LayoutScale;
+  Widget->SetRenderTransform(Render);
+ }
+ return Canvas;
+}
+}
+#endif
+
+bool UBattleTopHudWidget::EnableFreeLayout(UObject* Asset)
+{
+#if WITH_EDITOR
+ auto* BP=Cast<UWidgetBlueprint>(Asset);
+ if (!BP || !BP->WidgetTree || !FSlateApplication::IsInitialized()) return false;
+ UWidgetTree* Tree=BP->WidgetTree;
+ auto* Frame=Tree->FindWidget(TEXT("TopHudFrame"));
+ if (!Frame) return false;
+ if (Cast<UCanvasPanel>(Frame)) return true;
+ auto* Parent=Frame->GetParent(); if (!Parent) return false;
+ const auto Slate=Frame->TakeWidget(); Slate->SlatePrepass(1.0f);
+ FFreeHudNode Node; Node.Widget=Frame; Node.Size=FVector2D(Slate->GetDesiredSize());
+ if (!CaptureHudLayout(Node)) return false;
+ BP->Modify(); Tree->Modify();
+ auto* Canvas=Cast<UCanvasPanel>(BuildFreeHud(Tree,Node));
+ Parent->ReplaceChild(Frame,Canvas); Frame->Slot=nullptr;
+ // The background keeps matching the HUD frame while foreground elements move independently.
+ for (const TCHAR* Name:{TEXT("Image_35"),TEXT("TopHudBackgroundImage")})
+  if (auto* Image=Tree->FindWidget(Name))
+   if (auto* Slot=Cast<UCanvasPanelSlot>(Image->Slot))
+   {
+    Slot->SetAnchors(FAnchors(0,0,1,1)); Slot->SetOffsets(FMargin(0)); Slot->SetZOrder(-1);
+   }
+ TSet<FName> Names;
+ Tree->ForEachWidget([BP,&Names](UWidget* W) {
+  Names.Add(W->GetFName()); W->bIsVariable=true;
+  if (!BP->WidgetVariableNameToGuidMap.Contains(W->GetFName())) BP->OnVariableAdded(W->GetFName());
+ });
+ for (const auto& Animation:BP->Animations) if (Animation) Names.Add(Animation->GetFName());
+ for (auto It=BP->WidgetVariableNameToGuidMap.CreateIterator();It;++It)
+  if (!Names.Contains(It.Key())) It.RemoveCurrent();
+ FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+ FKismetEditorUtilities::CompileBlueprint(BP);
+ BP->MarkPackageDirty();
+ return BP->Status!=BS_Error;
+#else
+ return false;
+#endif
 }

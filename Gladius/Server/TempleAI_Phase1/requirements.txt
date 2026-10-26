@@ -4,3 +4,5 @@ korcen>=1.0.3,<2
 better-profanity>=0.7,<1
 pydantic>=2.10,<3
 uvicorn[standard]>=0.34,<1
+
+python-dotenv>=1,<2

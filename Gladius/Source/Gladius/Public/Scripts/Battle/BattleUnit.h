@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -27,6 +27,9 @@ class GLADIUS_API ABattleUnit : public AActor
 
 public:
 	ABattleUnit();
+ // Align the visible mesh's sole to the collision surface without changing combat coordinates.
+ UFUNCTION(BlueprintCallable, Category = "Battle")
+ bool SnapMeshToGround();
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	//머리 위 이름과 체력 갱신. UMG라 한글·이모지 핸들도 그대로 나온다

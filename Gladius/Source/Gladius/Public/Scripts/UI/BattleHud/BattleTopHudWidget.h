@@ -15,13 +15,19 @@ class UWidgetTree;
 // [Turn 5/10] [안내 문구 + 남은 시간 게이지] [⏱ 30.00]
 // 표시 내용은 FBattleTopHudPresenter가 계산하고, 이 클래스는 아래 이름의 위젯에 값을 넣기만 한다
 // - 디자이너용 WBP(/Game/Blueprints/UI/WBP_TopHud): Designer에서 아래 이름의 위젯을 자유롭게 배치·꾸밈
-// - WBP 없이 C++ 클래스로 쓰면 BuildDefaultLayout으로 기본 도형 레이아웃을 만든다
+// - WBP 없이 C++ 클래스로 쓰면 BuildDefaultLayout으로 이미지 배경 레이아웃을 만든다
 UCLASS(Blueprintable)
 class GLADIUS_API UBattleTopHudWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
 public:
+ UFUNCTION(BlueprintCallable, Category="Top HUD|Editor")
+ static bool EnableFreeLayout(UObject* Asset);
+
+ UFUNCTION(BlueprintCallable, Category="Top HUD|Editor")
+ static bool UseFullSizeBackground(UObject* Asset);
+
 	void BindToBattleManager(ABattleManager* InBattleManager);
 
 	//아래 BindWidgetOptional 위젯들을 같은 이름으로 Tree에 만든다 (C++ 단독 사용, WBP 자동 생성 공용)

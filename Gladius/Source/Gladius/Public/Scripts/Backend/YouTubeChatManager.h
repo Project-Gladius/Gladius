@@ -43,11 +43,12 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	virtual void Tick(float DeltaTime) override;
 
-	//키 목록은 Config/YouTubeApiKeys.txt에서 읽음 (할당량이 바닥나면 다음 키로 교체)
+	//키 목록은 Content/ExternalData/BroadcastSettings.json의 youtube.apiKeys에서 읽음 (할당량이 바닥나면 다음 키로 교체)
 	//이 값은 목록의 맨 뒤에 붙는 예비 키. 파일이 없으면 이 키 하나만 씀
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "YouTube API");
 	FString ApiKey;
@@ -115,6 +116,13 @@ private:
 	//API 키 목록 (게임 인스턴스의 ChatLogSubsystem에 있음. 없으면 LocalKeyPool)
 	FYouTubeApiKeyPool* KeyPool = nullptr;
 	FYouTubeApiKeyPool LocalKeyPool;
+ friend struct FBroadcastReloadTestAccess;
+ FTimerHandle BroadcastRefreshTimerHandle;
+ FString BroadcastStreamKey;
+ FString BroadcastSettingsOverridePath;
+ bool bBroadcastFetchingStarted = false;
+ void RefreshBroadcastSettings();
+ FHttpRequestPtr ActiveLiveChatRequest;
 	void InitializeKeyPool();
 	FString CurrentApiKey();
 	//UsedKey가 쓸 수 없다고 표시. 다른 키가 남아 있으면 true

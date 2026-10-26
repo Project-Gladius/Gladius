@@ -1,24 +1,28 @@
-# 로그인·로그아웃 공용 로그 창
+# 운영진 공지·로그 전광판
 
-`SessionLogWidget`은 기존 `ChatLogWidget`과 다른 창입니다. 일반 채팅과 신전 대화는 기존 채팅 창에 표시하며, 로그인 결과·로그아웃·전투 무입력 자동 퇴장 알림은 이 창에만 표시합니다. MainBattle의 BattleManager와 MainTemple의 TempleCycleController가 각각 창을 생성합니다. 최근 내역은 맵 이동 후에도 유지됩니다.
+MainBattle의 BattleManager와 MainTemple의 TempleCycleController가 공통 `SessionLogWidget`을 사용합니다. 기존 `ChatLogWidget`은 일반 채팅을 담당하고, 이 창은 운영진 공지·긴급 공지·이벤트·로그인/로그아웃 알림을 표시합니다.
+
+## 기본 표시
+
+- 사용자 제공 공지창 원본: `Gladius/SourceAssets/UI/Notice/T_NoticePanel.png`
+- 게임 텍스처: `/Game/UI/UIDesign/T_NoticePanel`
+- 우측 최상단 앵커 (1, 0), 정렬 (1, 0), 오프셋 (-24, 24).
+- 크기 600×100. 화면 배율에 따라 함께 조절됩니다.
+- 글자 영역 여백: 왼쪽 60, 위 20, 오른쪽 24, 아래 20. 느낌표와 장식 테두리를 피합니다.
+- 마루부리 Regular 18. 일반 로그 흰색, 운영 공지 노랑, 긴급 공지 빨강, 이벤트 초록.
+
+## 표시 순서와 이동
+
+항상 메시지 한 개를 한 줄로 표시합니다. 줄바꿈과 탭은 공백으로 표시합니다. 짧은 메시지는 고정하고, 긴 메시지는 처음 1초 대기 후 초당 55 UI 단위의 일정한 속도로 오른쪽에서 왼쪽으로 이동합니다. 마지막 부분까지 드러난 뒤 1.5초 대기합니다.
+
+새 메시지는 현재 내용을 중간에 끊지 않고 도착 순서대로 대기합니다. 짧은 메시지는 기본 4초 뒤 다음 메시지로 넘어갑니다. 대기 메시지가 없으면 짧은 메시지는 그대로 남고, 긴 메시지는 처음부터 반복합니다. 기존 내역은 SessionLogSubsystem에 유지되고, 맵에 진입하면 가장 최근 메시지를 표시합니다.
 
 ## 디자이너 설정
 
-1. Widget Blueprint를 만들고 부모 클래스를 `SessionLogWidget`으로 지정합니다(예: WBP_SessionLog).
-2. 기본 자동 레이아웃을 사용할 때는 빈 위젯 트리를 유지합니다. Class Defaults의 `Session Log` 항목에서 설정합니다.
-3. `Background Brush`의 Image에 텍스처·UI 머티리얼·아틀라스 스프라이트를 지정합니다. Draw As를 Image 또는 Box로 바꾸고, 원본 색을 그대로 쓰려면 Brush Tint와 Background Tint를 흰색으로 설정합니다. Box의 Margin으로 9-slice를 조정할 수 있습니다. 미지정 시 단색 기본 패널이 표시됩니다.
-4. `Log Font`: 기본 마루부리 Regular. 폰트 에셋, 크기, 윤곽선을 변경할 수 있습니다. `Log Color`: 기본 흰색(네 종류 알림 모두 동일).
-5. `Window Size`, `Window Offset`, `Text Padding`, `Line Spacing`, `Max Visible Entries`로 크기·위치·여백·줄 간격·표시 행 수를 변경합니다. 기본 위치는 왼쪽 아래입니다. 런타임 변경 후에는 `Refresh Style`을 호출합니다.
-6. MainBattle의 BattleManager와 MainTemple의 TempleCycleController에 있는 `Session Log Widget Class`에 같은 WBP를 지정합니다. 각 맵에서 다른 WBP를 지정해도 됩니다. C++ 기본 클래스로도 창이 표시됩니다.
+`SessionLogWidget`을 부모로 하는 빈 Widget Blueprint에서 Class Defaults의 `Session Log` 설정을 조절할 수 있습니다. MainBattle의 BattleManager 및 MainTemple의 TempleCycleController의 `Session Log Widget Class`에 지정합니다. 기본 C++ 클래스만으로도 동작합니다.
 
-직접 Designer 레이아웃을 만들 경우 Canvas > SizeBox `LogWindow` > Overlay 아래에 Image `LogBackground`, ScrollBox `LogScrollBox` > VerticalBox `LogMessages`를 배치하고 Is Variable을 켭니다. Image가 먼저, ScrollBox가 나중이어야 텍스트가 이미지 위에 보입니다. 기본 앵커는 좌하단, 정렬은 (0, 1), SizeBox 슬롯은 Auto Size입니다. 배경과 스크롤 슬롯은 Fill로 지정합니다. `LogMessages`는 필수 표시 대상이며 나머지는 선택 바인딩입니다. 스타일은 Class Defaults 값이 적용됩니다.
+`Window Size`, `Window Offset`, `Text Padding`, `Log Font`, `Log Color`, `Admin Color`, `Admin Urgent Color`, `Event Color`, `Background Brush`, `Background Tint`를 조절할 수 있습니다. 기본 이미지를 유지하려면 Brush Tint와 Background Tint를 흰색으로 둡니다.
 
-## 동작
+`Ticker` 항목의 `Scroll Speed`, `Start Hold Seconds`, `End Hold Seconds`, `Short Message Seconds`로 속도와 표시 시간을 조절합니다. 런타임에 스타일을 변경하면 `Refresh Style`을 호출합니다. 이 호출은 현재 메시지나 대기 순서를 초기화하지 않습니다.
 
-- 기존 `!로그인 글라디우스` / `!로그인 세라` 규칙을 유지합니다. 캐릭터 이름 없는 `!로그인`은 기존처럼 무시됩니다.
-- 실제 캐릭터 생성 및 참가 성공: `닉네임 님이 로그인하셨습니다`
-- 로그인 실패(생성 실패, 정원 초과, 잘못된 캐릭터, 참가 불가능 상태 등): `닉네임님의 로그인이 정상 처리되지 못했습니다`
-- 참가 중인 사용자의 `!로그아웃`: `닉네임 님이 로그아웃하셨습니다`
-- 전투에서 무입력 제한 도달: `닉네임 님의 입력이 없어 자동 로그아웃되었습니다`
-- 참가하지 않은 사용자의 로그아웃은 성공 알림을 만들지 않습니다. 신전에서 새 캐릭터 로그인을 허용하지 않습니다.
-- 로그 저장소는 최근 100개, 창은 최근 30개가 기본이며 자동으로 마지막 줄로 스크롤합니다.
+기존 다중 행 설정 `Line Spacing`, `Max Visible Entries`는 호환성을 위해 남아 있으며 한 줄 전광판에는 적용하지 않습니다. 로그 저장소의 최근 내역 수 제한은 기존과 같습니다.

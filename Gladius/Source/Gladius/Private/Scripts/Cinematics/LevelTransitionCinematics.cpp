@@ -14,6 +14,7 @@
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
+#include "Widgets/SViewport.h"
 
 bool ULevelTransitionCinematics::DoesSupportWorldType(EWorldType::Type Type) const
 {
@@ -65,6 +66,7 @@ bool ULevelTransitionCinematics::IsPlaying() const
 void ULevelTransitionCinematics::Play(bool bBattle, bool bIntro)
 {
     bPlaybackPending = false;
+    bActiveIntro = bIntro;
     const FString Name = FString(bBattle ? TEXT("Battle_") : TEXT("Temple_")) + (bIntro ? TEXT("Intro") : TEXT("Outro"));
     const FString Path = FString(TEXT("/Game/Cinematics/")) + (bIntro ? TEXT("IntroSeq/") : TEXT("OutroSeq/")) + Name + TEXT(".") + Name;
     ULevelSequence* Sequence = LoadObject<ULevelSequence>(nullptr, *Path);
@@ -105,9 +107,15 @@ void ULevelTransitionCinematics::HandleFinished()
 
 void ULevelTransitionCinematics::FinishPlayback()
 {
+    const bool bFinishedIntro = bActiveIntro;
     FSimpleDelegate Finished = MoveTemp(Completion);
     Completion.Unbind();
     Cleanup();
+    if (bFinishedIntro)
+    {
+        bIntroFinished = true;
+        OnIntroFinished.Broadcast();
+    }
     Finished.ExecuteIfBound();
 }
 
@@ -151,30 +159,21 @@ void ULevelTransitionCinematics::ShowIntroLogo()
     IntroLogoBrush.SetResourceObject(IntroLogoTexture);
     IntroLogoBrush.ImageSize = FVector2D(IntroLogoTexture->GetSizeX(), IntroLogoTexture->GetSizeY());
     IntroLogoBrush.DrawAs = ESlateBrushDrawType::Image;
-    // 1:2:1 columns keep the logo at exactly half the viewport width.
-    // ScaleToFitX preserves the source aspect ratio, including on viewport resize.
-    IntroLogoOverlay = SNew(SHorizontalBox)
+    // Both scenes use the same explicit viewport-relative logo width.
+    IntroLogoOverlay = SNew(SBox)
         .Visibility(EVisibility::HitTestInvisible)
-        + SHorizontalBox::Slot().FillWidth(1.f)
-        [ SNullWidget::NullWidget ]
-        + SHorizontalBox::Slot().FillWidth(2.f)
+        .HAlign(HAlign_Center).VAlign(VAlign_Center)
         [
-            SNew(SScaleBox)
-            .Stretch(EStretch::ScaleToFitX)
-            .HAlign(HAlign_Center)
-            .VAlign(VAlign_Center)
+            SNew(SBox).WidthOverride_UObject(this, &ULevelTransitionCinematics::GetIntroLogoWidth)
             [
-                SNew(SBox)
-                .WidthOverride(IntroLogoBrush.ImageSize.X)
-                .HeightOverride(IntroLogoBrush.ImageSize.Y)
+                SNew(SScaleBox).Stretch(EStretch::ScaleToFitX)
                 [
-                    SNew(SImage).Image(&IntroLogoBrush)
-                    .ColorAndOpacity_Lambda([this]() { return FLinearColor(1.f, 1.f, 1.f, GetIntroLogoOpacity()); })
+                    SNew(SBox).WidthOverride(IntroLogoBrush.ImageSize.X).HeightOverride(IntroLogoBrush.ImageSize.Y)
+                    [ SNew(SImage).Image(&IntroLogoBrush)
+                      .ColorAndOpacity_Lambda([this]() { return FLinearColor(1.f,1.f,1.f,GetIntroLogoOpacity()); }) ]
                 ]
             ]
-        ]
-        + SHorizontalBox::Slot().FillWidth(1.f)
-        [ SNullWidget::NullWidget ];
+        ];
     IntroLogoViewport = Viewport;
     Viewport->AddViewportWidgetContent(IntroLogoOverlay.ToSharedRef(), 1000);
 }
@@ -201,4 +200,12 @@ void ULevelTransitionCinematics::RemoveIntroLogo()
     IntroLogoViewport.Reset();
     IntroLogoBrush.SetResourceObject(nullptr);
     IntroLogoTexture = nullptr;
+}
+
+FOptionalSize ULevelTransitionCinematics::GetIntroLogoWidth() const
+{
+ if (IntroLogoViewport.IsValid())
+  if (auto View = IntroLogoViewport->GetGameViewportWidget())
+   return FOptionalSize(View->GetCachedGeometry().GetLocalSize().X * .5f);
+ return FOptionalSize(960.f);
 }

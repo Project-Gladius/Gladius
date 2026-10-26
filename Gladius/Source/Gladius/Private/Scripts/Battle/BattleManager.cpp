@@ -9,6 +9,7 @@
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
 #include "Scripts/Backend/AdminSubsystem.h"
+#include "Scripts/Backend/ExternalData.h"
 #include "Scripts/Time/RealTimeSettings.h"
 #include "Scripts/UI/ChatLogWidget.h"
 #include "Scripts/UI/SessionLogWidget.h"
@@ -18,6 +19,7 @@
 #include "Scripts/UI/BattleDataResetWidget.h"
 #include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
 #include "Scripts/UI/UIWidgetBuild.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -143,24 +145,6 @@ void ABattleManager::BeginPlay()
   {
    TopHudWidget->AddToViewport(1);
    TopHudWidget->BindToBattleManager(this);
-  }
- }
- if (bShowTemporaryDataResetButtons && UGameplayStatics::GetCurrentLevelName(this, true) == TEXT("MainBattle"))
- {
-  if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
-  {
-   DataResetWidget = CreateWidget<UBattleDataResetWidget>(PC, UBattleDataResetWidget::StaticClass());
-   if (DataResetWidget)
-   {
-    DataResetWidget->SetBattleManager(this);
-    DataResetWidget->AddToViewport(100);
-    DataResetController = PC;
-    bMouseCursorBeforeDataReset = PC->bShowMouseCursor;
-    PC->bShowMouseCursor = true;
-    FInputModeGameAndUI InputMode;
-    InputMode.SetHideCursorDuringCapture(false);
-    PC->SetInputMode(InputMode);
-   }
   }
  }
  GatherSpots();
@@ -626,7 +610,7 @@ bool ABattleManager::ParseCommand(const FString& Text, EBattleAction& OutAction)
 
 FString ABattleManager::SaveFilePath()
 {
-	return FPaths::ProjectSavedDir() / TEXT("PlayerData.json");
+	return GladiusExternalData::File(TEXT("PlayerData.json"));
 }
 
 void ABattleManager::SaveRecords()
@@ -2385,7 +2369,8 @@ void ABattleManager::RemovePlayer(const FString& UserId)
 
 FString ABattleManager::BalanceFolderPath() const
 {
-	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / BalanceDataDir);
+	// Production data has one canonical location, independent of saved map overrides.
+ return GladiusExternalData::Directory();
 }
 
 void ABattleManager::ApplyBalanceFiles()
@@ -2657,6 +2642,7 @@ void ABattleManager::SpawnBoss()
 	BossUnit = GetWorld()->SpawnActor<ABattleUnit>(
 		BossUnitClass ? BossUnitClass.Get() : ABattleUnit::StaticClass(),
 		BossLocation(), FRotator(0.f, 180.f, 0.f));
+	if (IsValid(BossUnit)) BossUnit->SnapMeshToGround();
 #if WITH_EDITOR
 	BossUnit->SetActorLabel(TEXT("Boss"));
 #endif
@@ -2739,6 +2725,27 @@ void ABattleManager::Tick(float DeltaTime)
 	if (PlayerUIScaleElapsed >= 0.1f)
 	{
 		PlayerUIScaleElapsed = 0.f;
+  // UMG units preserve the same physical ratio after viewport DPI scaling.
+  const FVector2D View = UWidgetLayoutLibrary::GetViewportWidgetGeometry(this).GetLocalSize();
+  if (View.Y > 0.f)
+  {
+   const float Width = View.Y * (16.f / 9.f) / 5.f;
+   const float Margin = View.Y * (24.f / 1080.f);
+   const float NoticeHeight = Width / 6.f;
+   if (LeaderboardWidget) LeaderboardWidget->ApplyBattleSideLayout(Width, Margin);
+   if (SessionLogWidget)
+   {
+    const FVector2D NoticeSize(Width, NoticeHeight);
+    const FVector2D NoticeOffset(-Margin, Margin);
+    if (!SessionLogWidget->WindowSize.Equals(NoticeSize) || !SessionLogWidget->WindowOffset.Equals(NoticeOffset))
+    {
+     SessionLogWidget->WindowSize = NoticeSize;
+     SessionLogWidget->WindowOffset = NoticeOffset;
+     SessionLogWidget->RefreshStyle();
+    }
+   }
+   if (ChatLogWidget) ChatLogWidget->ApplyBattleSideLayout(Width, Margin, Margin + NoticeHeight + Margin * .5f, View.Y * .42f);
+  }
 		if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 		{
 			FVector CameraLocation;

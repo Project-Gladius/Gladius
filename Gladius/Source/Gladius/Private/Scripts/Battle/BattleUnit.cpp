@@ -1,4 +1,4 @@
-﻿#include "Scripts/Battle/BattleUnit.h"
+#include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/UnitNameplate.h"
 #include "Scripts/Battle/DamagePopupStack.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
@@ -9,6 +9,8 @@
 #include "Animation/AnimMontage.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
+#include "SkeletalRenderPublic.h"
+#include "Engine/SkeletalMesh.h"
 #include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -513,4 +515,26 @@ void ABattleUnit::PerformSkill(int32 AttackIndex, bool bCrit, bool bFeverHighlig
 	{
 		CastSkill1(bCrit, bFeverHighlight);
 	}
+}
+
+bool ABattleUnit::SnapMeshToGround()
+{
+ if (!Mesh || !Mesh->GetSkeletalMeshAsset() || !GetWorld()) return false;
+ FHitResult Hit;
+ FCollisionQueryParams Query(SCENE_QUERY_STAT(BossGround), true, this);
+ const FVector Origin = GetActorLocation();
+ if (!GetWorld()->LineTraceSingleByObjectType(Hit, Origin + FVector(0,0,500), Origin - FVector(0,0,2000),
+  FCollisionObjectQueryParams(ECC_WorldStatic), Query)) return false;
+ Mesh->TickAnimation(0.f, false);
+ Mesh->RefreshBoneTransforms();
+ TArray<FFinalSkinVertex> Vertices;
+ Mesh->GetCPUSkinnedVertices(Vertices, 0);
+ if (Vertices.IsEmpty()) return false;
+ double SoleZ = TNumericLimits<double>::Max();
+ for (const FFinalSkinVertex& Vertex : Vertices)
+  SoleZ = FMath::Min(SoleZ, Mesh->GetComponentTransform().TransformPosition(FVector(Vertex.Position)).Z);
+ const double Correction = Hit.ImpactPoint.Z - SoleZ;
+ Mesh->AddWorldOffset(FVector(0,0,Correction));
+ UE_LOG(LogTemp, Log, TEXT("[BossGround] ground=%.3f sole=%.3f correction=%.3f surface=%s"), Hit.ImpactPoint.Z, SoleZ, Correction, *GetNameSafe(Hit.GetActor()));
+ return true;
 }

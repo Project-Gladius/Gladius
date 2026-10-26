@@ -1,34 +1,29 @@
 # 전투 화면 UI 디자인 가이드 (디자이너용)
 
-## 순위표의 독립 상태 편집 (2026-10-26)
+## 순위표 자유 배치 및 공통 Row 편집 (2026-10-26)
 
-누적 순위와 이번 전투 순위는 별도 Board/Row BP를 사용합니다. 기존 디자인을 복제해 시작하며, 한쪽을 편집해도 다른 쪽은 바뀌지 않습니다.
+Row 내부 디자인은 공통 Row BP에서 한 번 수정하면 같은 화면의 10줄 모두에 반영됩니다. Board에서는 각 Row·제목·머리글·배경을 자유롭게 배치합니다.
 
-| 상태 | 틀·열 제목·배경 | 한 줄의 배치·이미지·텍스트 |
+| 화면 | 전체 배치 | 10줄 공통 내부 디자인 |
 |---|---|---|
-| 전체 누적 | `WBP_LeaderboardBoard` | `WBP_LeaderboardRow` |
-| 이번 전투 (1~10위 및 하위 페이지) | `WBP_LeaderboardBoard_Battle` | `WBP_LeaderboardRow_Battle` |
+| LEADERBOARD | `WBP_LeaderboardBoard` | `WBP_LeaderboardRow` |
+| BATTLE ANALYSIS | `WBP_LeaderboardBoard_Battle` | `WBP_LeaderboardRow_Battle` |
 
-모두 `Content/Blueprints/UI`에 있습니다. 각 Board의 Class Defaults → Row Widget Class가 해당 Row BP를 가리킵니다.
+모든 BP는 `Content/Blueprints/UI`에 있습니다.
 
-### 편집 순서
+1. **Row 내부 10줄 일괄 수정**: 해당 Row BP를 열어 `RowCells` 아래의 순위·사용자 이름·캐릭터·체력·데미지 셀을 선택하고 움직입니다. Canvas Slot의 Position X/Y와 Size X/Y를 사용할 수 있습니다. 글꼴·색상·이미지도 이 BP에서 한 번 수정합니다. 컴파일 후 저장하면 보드의 10줄이 함께 갱신됩니다.
+2. **개별 Row 위치 변경**: 해당 Board BP에서 `RowContainer` 아래의 `SharedRow01`~`SharedRow10`을 선택하고 Designer에서 드래그하거나 Canvas Slot → Position X/Y를 입력합니다. Row 안의 항목들은 함께 움직입니다.
+3. **목록 전체 이동**: Board에서 `RowContainer`를 선택하고 Canvas Slot의 Position X/Y를 바꿉니다.
+4. **제목·머리글 이동**: `BoardLayout` 아래의 `LB_TitleText`와 `HeaderPanel`은 Canvas에서 자유 배치할 수 있습니다. `HeaderCells` 아래의 각 머리글도 개별 배치할 수 있습니다.
+5. **배경 이동·크기 조정**: `BackgroundCanvas` 아래의 `NativeBackgroundImage`를 움직이거나 Canvas Slot의 Position/Size를 수정합니다. 현재 배경은 원본 비율과 같은 1440 × 1600이며, 제목·머리글·행은 이 이미지 좌표에 맞춰 정렬되어 있습니다.
+6. Class Defaults → Preview Page에서 Total / Battle Top / Battle Lower를 확인한 후 컴파일하고 저장합니다.
 
-1. 편집할 상태의 Board BP를 열어 열 제목, 배경, 장식과 `RowContainer`의 위치를 조정합니다.
-2. 같은 상태의 Row BP를 열어 이름·데미지·이미지 등의 위치, 크기, 폰트와 색을 편집합니다. Board 미리보기에서 자동으로 생성된 개별 행 대신 **Row BP 원본**을 편집하세요.
-3. Board의 Class Defaults → Leaderboard → Preview → **Preview Page**로 Total / Battle Top / Battle Lower 예시 데이터를 선택할 수 있습니다. Row에는 **Preview Show Health**가 있습니다.
-4. `WBP_LeaderboardRotator`의 같은 **Preview Page** 설정으로 전체 화면에서 상태를 확인합니다. 계층은 `PageSwitcher` 아래 `Board`(누적), `BattleBoard`(전투)입니다.
-5. 전체 위치·앵커·크기는 Rotator의 **PageSwitcher의 Canvas Slot**에서 조정합니다. 기존 Board의 Canvas Slot 값을 그대로 옮겨 보존했습니다. 각 상태의 Render Transform도 독립적으로 편집할 수 있습니다.
-6. 컴파일·저장 후 전투에서 확인합니다. 실제 게임에서는 기존 Switch Seconds 간격으로 자동 전환합니다. Preview Page는 게임 시작 상태를 바꾸지 않습니다.
+두 화면은 별도 Row BP를 사용하므로 서로 다른 디자인을 유지합니다. 기존 첫 번째 Row의 최신 내부 디자인을 공통 템플릿으로 가져왔고, 기존 개별 Row의 배치와 보드 장식은 유지했습니다. 변환 전 원본은 별도로 백업했습니다.
 
-### 디자인 보존 규칙
+`SharedRow01`~`SharedRow10`, `RowContainer`, `LB_TitleText` 및 Row BP의 `RankText`, `NameText`, `CharacterText`, `HealthCell`, `HealthText`, `DamageText`, `Medal`, `RowBackground` 이름은 유지하세요. 위치·부모·크기·장식은 수정할 수 있습니다.
 
-- 상태 전환은 기존 위젯 인스턴스를 선택할 뿐 레이아웃을 다시 생성하지 않습니다. 이동한 위치·앵커·크기·폰트·장식 이미지는 데이터 갱신으로 초기화하지 않습니다.
-- `TitleText`, `DamageHeaderText`, `RankText`, `NameText`, `CharacterText`, `HealthText`, `DamageText`의 **표시 문자열**은 순위 데이터에 맞춰 갱신됩니다. 고정 문구는 별도 Text 위젯으로 만드세요.
-- 체력 칸의 표시 여부, 메달, 1위 강조, 사망 시 흐림은 기존 동적 연출입니다. 1위 배경을 직접 디자인한 것으로 유지하려면 Row의 **Highlight First Row**를 끄세요. 메달은 Row의 Style → Medal Brushes에서 지정합니다.
-- `RowContainer`는 자동 생성 행이 들어갈 빈 패널로 두고, 고정 장식은 바깥에 배치하는 것이 좋습니다. 코드가 임의로 디자이너 자식을 삭제하지는 않습니다.
-- 기존 `LB_TitleText`, `LB_HealthHeaderCell` 이름도 지원합니다. 이름을 바꾸지 않고 연결만 보완했습니다.
-- `Board`, `BattleBoard`, `PageSwitcher` 및 데이터용 위젯 이름은 유지하세요. 기본 레이아웃 재생성이나 BP 삭제는 이 작업에 필요하지 않습니다.
-- 친구 컴퓨터에는 새 `_Battle` BP 두 개, 변경된 기존 BP 세 개와 C++ 소스를 함께 전달하고 에디터 종료 후 Development Editor 빌드를 실행해야 합니다.
+실행·페이지 전환은 데이터와 동적 연출만 갱신합니다. 저장된 Row를 재생성하거나 Canvas 위치를 덮어쓰지 않습니다. 순위·이름·데미지·체력, 메달·1위 강조·사망 시 흐림은 기존처럼 데이터에 따라 표시됩니다.
+
 
 ---
 
@@ -102,6 +97,13 @@
 ## 4. 이름을 바꾸면 안 되는 위젯 목록
 
 ### WBP_TopHud (화면 맨 위 가운데)
+
+각 요소는 이제 Canvas Slot으로 자유 배치합니다. Designer에서 `TurnLabelText`, `TH_TurnValueText`, `TH_TurnTotalText`, `TH_GuideText`, `TH_Gauge`, `TH_TimerText`를 직접 선택해 드래그하거나 Details → Slot (Canvas Panel Slot) → Position X/Y, Size X/Y를 수정합니다. 기존 `HorizontalBox_*`, `VerticalBox_*`, `ScaleBox_*`, `SizeBox_*` 이름의 컨테이너도 Canvas로 변환되어 자동 정렬을 강제하지 않습니다.
+
+턴 영역 전체는 `TurnPanel`, 안내·게이지 영역은 `CenterPanel`, 타이머 영역은 `TimerPanel`을 이동하면 됩니다. HUD 전체 이동은 최상위 `TopHudFrame`의 Canvas Slot에서 조절합니다. `Image_35`는 프레임 전체를 채우는 배경 이미지이며, Anchors (0,0)~(1,1), Offsets 0을 유지하면 전체 크기를 따라갑니다.
+
+데이터 위젯 이름은 유지하세요. 컴파일·저장 후에도 위치와 크기는 유지되며, 전투 중에는 내용·시간·진행률·표시 여부만 갱신됩니다.
+
 | 이름 (그대로 유지) | 종류 | 하는 일 |
 |---|---|---|
 | `TopHudBar` | 아무 위젯 | 상단 UI 전체. 컷신이 나올 때와 전투 시작 전·후에 통째로 숨겨집니다 |
@@ -213,3 +215,15 @@
    "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "D:\Gladius\Gladius\Gladius.uproject" -run=GenerateGladiusUI
    ```
    이미 있는 파일은 건드리지 않고, 없는 파일만 기본 모양으로 새로 만듭니다.
+
+
+## 배경 이미지 비율과 크기
+
+두 Board의 Designer에서 BackgroundFrame을 선택합니다. Hierarchy 검색창에 BackgroundFrame을 입력하면 바로 찾을 수 있습니다.
+
+- Slot (Canvas Panel Slot)의 Size X / Size Y: 배경이 들어갈 영역 크기.
+- Position X / Position Y: 배경 위치.
+- Stretch = Scale To Fit: 원본 가로세로 비율을 유지합니다. 영역 비율이 다르면 여백이 생깁니다.
+- NativeBackgroundImage: 원본 이미지를 교체하는 곳. 현재 원본은 3751 × 4167입니다.
+
+배경 크기는 BackgroundFrame의 Size로 조절하세요. Render Transform의 Scale에는 기존 BoardPanel 비균등 배율을 상쇄하는 값이 있으므로 그대로 둡니다. 제목·헤더·행은 별도 BoardLayout에 남아 있어 배경 크기 변경으로 함께 늘어나지 않습니다. 컴파일이나 데이터 갱신 시 이 배치를 다시 만들지 않습니다.

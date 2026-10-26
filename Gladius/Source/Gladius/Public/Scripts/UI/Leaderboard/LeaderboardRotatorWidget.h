@@ -28,6 +28,7 @@ public:
 	ELeaderboardPreviewPage PreviewPage = ELeaderboardPreviewPage::Total;
 
 	void BindToBattleManager(ABattleManager* InBattleManager);
+	void ApplyBattleSideLayout(float Width, float Margin);
 
 	//보드가 바뀌는 간격(초)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Leaderboard", meta = (ClampMin = "1.0"))
@@ -71,6 +72,7 @@ protected:
 
 private:
 	friend struct FLeaderboardStateTestAccess;
+	friend class FMainBattleSideLayoutTest;
 	void ResolveStateWidgets();
 	ULeaderboardBoardWidget* SelectBoard(bool bBattle);
 	enum class EPage : uint8

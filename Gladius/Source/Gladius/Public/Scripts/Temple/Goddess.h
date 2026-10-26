@@ -5,6 +5,11 @@
 #include "Scripts/Temple/TempleTypes.h"
 #include "Goddess.generated.h"
 
+class UAnimMontage;
+class UMaterialInstanceDynamic;
+class UMaterialInterface;
+class UMeshComponent;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGoddessStateChanged, EGoddessState, NewState, const FGoddessStateContext&, Context);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnGoddessEnhanceExecuted, const FString&, UserId, const FString&, Username, int32, Tier);
 
@@ -41,6 +46,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goddess|Timing", meta = (ClampMin = "0.0"))
 	float CycleBudgetSeconds = 39.0f;
 
+	// Index 0..3: recovery, strength, agility, sharpness. Per-actor dynamic materials preserve authored Glow.
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Goddess|Blessing Icons", meta = (EditFixedSize))
+	TArray<TObjectPtr<AActor>> BlessingIconActors;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goddess|Blessing Icons")
+	TSoftObjectPtr<UAnimMontage> BlessingIconMontage;
+
 	// ===== 이벤트 =====
 
 	//상태가 바뀔 때마다 브로드캐스트 (UI/모션 연출용)
@@ -69,9 +81,29 @@ public:
 	void StopCycle();
 
 protected:
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	friend struct FTempleIconBrightnessTestAccess;
+	struct FBlessingIconMaterial
+	{
+		TWeakObjectPtr<UMeshComponent> Mesh;
+		TWeakObjectPtr<UMaterialInterface> OriginalMaterial;
+		TWeakObjectPtr<UMaterialInstanceDynamic> DynamicMaterial;
+		int32 Slot = 0;
+		int32 TierIndex = 0;
+		float OriginalGlow = 0.f;
+	};
+	TArray<FBlessingIconMaterial> BlessingIconMaterials;
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> LoadedBlessingIconMontage;
+	int32 LitBlessingIcon = INDEX_NONE;
+	void InitializeBlessingIcons();
+	void UpdateBlessingIcons();
+	void ApplyBlessingIconBrightness(int32 ActiveTierIndex);
+
 	enum class ETalkPhase : uint8
 	{
 		None,    //처리할 대화 없음

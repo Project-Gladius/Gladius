@@ -194,14 +194,19 @@ public:
   Test->TestEqual(TEXT("Sharpness increases crit damage level once"),R.CritDamageBonus,1);
   Test->TestEqual(TEXT("Every granted blessing is used"),R.BlessingsAvailable,0);
   const TArray<FChatLogEntry>& Entries=T->Instance->GetSubsystem<UChatLogSubsystem>()->GetEntries();
-  Test->TestEqual(TEXT("Only applied blessings enter the chat log"),Entries.Num(),4);
-  if(Entries.Num()==4)
+  const TArray<FChatLogEntry> Results=Entries.FilterByPredicate([](const FChatLogEntry& Entry){return Entry.Speaker==EChatLogSpeaker::Temple;});
+  const TArray<FChatLogEntry> Replies=Entries.FilterByPredicate([](const FChatLogEntry& Entry){return Entry.Speaker==EChatLogSpeaker::Goddess;});
+  Test->TestEqual(TEXT("Each applied blessing enters the chat log"),Results.Num(),4);
+  Test->TestEqual(TEXT("Each blessing tier receives a goddess reply"),Replies.Num(),4);
+  for(const FChatLogEntry& Reply:Replies)
+   Test->TestTrue(TEXT("Goddess announces the blessing"),Reply.Message.EndsWith(TEXT("의 축복을 내리노라.")));
+  if(Results.Num()==4)
   {
    for(int32 Index=0;Index<4;++Index)
    {
-    Test->TestEqual(TEXT("Blessing appears in tier order"),Entries[Index].EnhancementTier,Index+1);
-    Test->TestEqual(TEXT("Blessing is a temple result, not a raw command"),Entries[Index].Speaker,EChatLogSpeaker::Temple);
-    Test->TestFalse(TEXT("Raw command prefix is hidden"),Entries[Index].Message.Contains(TEXT("!강화")));
+    Test->TestEqual(TEXT("Blessing appears in tier order"),Results[Index].EnhancementTier,Index+1);
+    Test->TestEqual(TEXT("Blessing is a temple result, not a raw command"),Results[Index].Speaker,EChatLogSpeaker::Temple);
+    Test->TestFalse(TEXT("Raw command prefix is hidden"),Results[Index].Message.Contains(TEXT("!강화")));
    }
   }
   FString Json;FFileHelper::LoadFileToString(Json,*FBattleCameraTestAccess::Path(T->Records));

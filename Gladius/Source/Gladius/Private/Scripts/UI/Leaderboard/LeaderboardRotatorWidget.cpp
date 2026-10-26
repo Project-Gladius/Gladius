@@ -31,6 +31,7 @@ void ULeaderboardRotatorWidget::ResolveStateWidgets()
 {
  if (!WidgetTree) return;
  if (!Board) Board = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("Board")));
+ if (!Board) Board = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("LR_Board")));
  if (!BattleBoard) BattleBoard = Cast<ULeaderboardBoardWidget>(WidgetTree->FindWidget(TEXT("BattleBoard")));
  if (!PageSwitcher) PageSwitcher = Cast<UWidgetSwitcher>(WidgetTree->FindWidget(TEXT("PageSwitcher")));
 }
@@ -255,4 +256,32 @@ bool ULeaderboardRotatorWidget::AddSeparateBattleState(UObject* Asset, TSubclass
 #else
  return false;
 #endif
+}
+
+void ULeaderboardRotatorWidget::ApplyBattleSideLayout(float Width, float Margin)
+{
+ ULeaderboardBoardWidget* Active = SelectBoard(CurrentPage != EPage::Total);
+ UWidget* Container = PageSwitcher ? static_cast<UWidget*>(PageSwitcher.Get()) : Active;
+ if (!Active || !Container) return;
+ // Fit the visible artwork, including the authored transforms inside each board.
+ UWidget* Frame = Active->GetWidgetFromName(TEXT("NativeBackgroundImage"));
+ if (!Frame) Frame = Active->GetRootWidget();
+ if (!Frame) return;
+ const FGeometry& Geometry = Frame->GetCachedGeometry();
+ const FGeometry& RootGeometry = GetCachedGeometry();
+ const FVector2D TopLeft = RootGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(FVector2D::ZeroVector));
+ const FVector2D TopRight = RootGeometry.AbsoluteToLocal(Geometry.LocalToAbsolute(FVector2D(Geometry.GetLocalSize().X, 0)));
+ const float CurrentWidth = TopRight.X - TopLeft.X;
+ if (CurrentWidth <= KINDA_SMALL_NUMBER) return; // Wait for the first layout pass.
+ const float Ratio = Width / CurrentWidth;
+ const FVector2D Target(Margin, Margin);
+ if (FMath::IsNearlyEqual(CurrentWidth, Width, .1f) && TopLeft.Equals(Target, .1f)) return;
+ const auto* Layout = Cast<UCanvasPanelSlot>(Container->Slot);
+ if (!Layout) return;
+ const FVector2D Position = Layout->GetPosition();
+ FWidgetTransform Transform = Container->GetRenderTransform();
+ Container->SetRenderTransformPivot(FVector2D::ZeroVector);
+ Transform.Translation = Transform.Translation * Ratio + Target - Position - (TopLeft - Position) * Ratio;
+ Transform.Scale *= Ratio;
+ Container->SetRenderTransform(Transform);
 }

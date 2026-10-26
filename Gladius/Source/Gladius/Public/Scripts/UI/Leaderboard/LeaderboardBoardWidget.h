@@ -21,6 +21,27 @@ class GLADIUS_API ULeaderboardBoardWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+ UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+ static bool CopyAlignedDesigner(UObject* SourceAsset, UObject* TargetAsset, UObject* TargetRowAsset);
+
+ UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+ static bool NormalizeEditorTree(UObject* Asset);
+
+ UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+ static bool ExportImageAlignedPreview(UObject* Asset, const FString& FilePath, bool bBattle, bool bLower);
+
+ // Convert copied rows to shared row assets and freely positioned Canvas slots.
+ UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+ static bool EnableFreeLayout(UObject* Asset, UObject* SharedRowAsset);
+
+ // One-time conversion: copies authored row trees into this Board's Designer.
+ UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
+ static bool EmbedEditableRows(UObject* Asset);
+
+ // Serialized binding names, independent of hierarchy position. Empty keeps legacy rows.
+ UPROPERTY()
+ TArray<FName> InlineRowRoots;
+
 	UFUNCTION(BlueprintCallable, Category="Leaderboard|Editor")
 	static bool EnsureStateBindings(UObject* Asset);
 	void RefreshDesignerPreview();

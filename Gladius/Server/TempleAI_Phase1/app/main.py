@@ -4,6 +4,11 @@ from secrets import compare_digest
 from threading import Lock
 from typing import Optional
 
+from dotenv import load_dotenv
+from app.external_data import external_data_dir
+
+load_dotenv(external_data_dir() / "TempleAI.env", override=False)
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 

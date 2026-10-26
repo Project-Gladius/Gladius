@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Styling/SlateBrush.h"
+#include "Types/SlateStructs.h"
 #include "LevelTransitionCinematics.generated.h"
 
 class ALevelSequenceActor;
@@ -22,6 +23,8 @@ public:
     void PlayIntro(bool bBattle, FSimpleDelegate Finished = FSimpleDelegate());
     void PlayOutro(bool bBattle, FSimpleDelegate Finished);
     bool IsPlaying() const;
+    bool HasIntroFinished() const { return bIntroFinished; }
+    FSimpleMulticastDelegate OnIntroFinished;
 protected:
     virtual bool DoesSupportWorldType(EWorldType::Type Type) const override;
 private:
@@ -35,11 +38,14 @@ private:
     void ShowIntroLogo();
     void RemoveIntroLogo();
     float GetIntroLogoOpacity() const;
+    FOptionalSize GetIntroLogoWidth() const;
     TWeakObjectPtr<AActor> PreviousViewTarget;
     FSimpleDelegate Completion;
     FTimerHandle PlaybackTimer;
     FTimerHandle AutoIntroTimer;
     bool bIntroRequested = false;
+    bool bIntroFinished = false;
+    bool bActiveIntro = false;
     bool bOutroRequested = false;
     bool bPlaybackPending = false;
     void AutoPlayIntro();

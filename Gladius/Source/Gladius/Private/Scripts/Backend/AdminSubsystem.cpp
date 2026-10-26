@@ -1,4 +1,5 @@
 #include "Scripts/Backend/AdminSubsystem.h"
+#include "Scripts/Backend/ExternalData.h"
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Engine/GameInstance.h"
 #include "EngineUtils.h"
@@ -15,12 +16,15 @@
 void UAdminSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
  Super::Initialize(Collection);
- StoragePath = FPaths::ProjectSavedDir() / TEXT("UserData.json");
+ StoragePath = GladiusExternalData::File(TEXT("UserData.json"));
  bTemporary = GIsAutomationTesting;
  if (bTemporary) StoragePath = FPaths::ProjectSavedDir() / TEXT("Automation") / (TEXT("UserData-") + FGuid::NewGuid().ToString() + TEXT(".json"));
  const FString Destination = StoragePath;
  LoadFromFile(IFileManager::Get().FileExists(*StoragePath) ? StoragePath : FPaths::ProjectContentDir() / TEXT("ExternalData/UserData.json"));
  StoragePath = Destination;
+ if (!bTemporary)
+  if (const auto Settings = GladiusExternalData::Broadcast())
+   if (!ApplyBroadcastOperators(Settings)) UE_LOG(LogTemp, Error, TEXT("[Broadcast] Invalid operator settings; existing permissions retained."));
 }
 void UAdminSubsystem::Deinitialize()
 {
@@ -196,4 +200,63 @@ bool UAdminSubsystem::SetMaintenance(const FString& Scope, bool bEnabled)
  }
  else return false;
  return true;
+}
+
+bool UAdminSubsystem::ApplyBroadcastOperators(const TSharedPtr<FJsonObject>& Settings)
+{
+ const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+ if (!Settings || !Settings->TryGetArrayField(TEXT("operators"), Entries)) return false;
+ TArray<FUserPermissionRecord> Operators;
+ TSet<FString> DeclaredIds;
+ for (const auto& Entry : *Entries)
+ {
+  if (!Entry || Entry->Type != EJson::Object) return false;
+  auto Row = Entry->AsObject(); FUserPermissionRecord Operator;
+  if (!Row->HasTypedField<EJson::String>(TEXT("userId")) || !Row->TryGetStringField(TEXT("userId"), Operator.UserId) || Operator.UserId.TrimStartAndEnd().IsEmpty()) return false;
+  Operator.UserId.TrimStartAndEndInline();
+  Row->TryGetStringField(TEXT("channelId"), Operator.ChannelId);
+  Row->TryGetStringField(TEXT("adminName"), Operator.AdminName);
+  Operator.ChannelId.TrimStartAndEndInline();
+  if (!Operator.ChannelId.IsEmpty() && (!Operator.ChannelId.StartsWith(TEXT("UC")) || Operator.ChannelId.Len() != 24)) return false;
+  for (const FString& Id : {Operator.UserId, Operator.ChannelId})
+  {
+   if (Id.IsEmpty() || (Id == Operator.ChannelId && Id == Operator.UserId)) continue;
+   if (DeclaredIds.Contains(Id)) return false;
+   DeclaredIds.Add(Id);
+  }
+  // A channel-ID user has only one identity key.
+  if (Operator.UserId == Operator.ChannelId)
+  { if (DeclaredIds.Contains(Operator.UserId)) return false; DeclaredIds.Add(Operator.UserId); }
+  Operators.Add(MoveTemp(Operator));
+ }
+ FUserPermissionFile Next = Data;
+ for (auto& User : Next.Users) if (User.Permission == TEXT("admin")) User.Permission = TEXT("user");
+ for (const auto& Operator : Operators)
+ {
+  int32 Index = Next.Users.IndexOfByPredicate([&](const auto& User){ return User.UserId == Operator.UserId; });
+  if (Index == INDEX_NONE) { Index = Next.Users.AddDefaulted(); Next.Users[Index].UserId = Operator.UserId; }
+  if (!Operator.ChannelId.IsEmpty())
+  {
+   const int32 Other = Next.Users.IndexOfByPredicate([&](const auto& User){ return User.UserId == Operator.ChannelId && User.UserId != Operator.UserId; });
+   if (Other != INDEX_NONE)
+   {
+    Next.Users[Index].EventBuff |= Next.Users[Other].EventBuff;
+    if (Next.Users[Index].DisplayName.IsEmpty()) Next.Users[Index].DisplayName = Next.Users[Other].DisplayName;
+    Next.Users.RemoveAt(Other);
+    Index = Next.Users.IndexOfByPredicate([&](const auto& User){ return User.UserId == Operator.UserId; });
+   }
+   Next.Users[Index].ChannelId = Operator.ChannelId;
+  }
+  Next.Users[Index].Permission = TEXT("admin");
+  Next.Users[Index].AdminName = Operator.AdminName;
+ }
+ TSet<FString> Ids;
+ for (const auto& User : Next.Users)
+ {
+  if (Ids.Contains(User.UserId)) return false;
+  Ids.Add(User.UserId);
+  if (!User.ChannelId.IsEmpty() && User.ChannelId != User.UserId)
+  { if (Ids.Contains(User.ChannelId)) return false; Ids.Add(User.ChannelId); }
+ }
+ return Commit(MoveTemp(Next));
 }

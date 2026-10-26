@@ -5,6 +5,7 @@
 #include "GladiusTypes.h"
 #include "AdminSubsystem.generated.h"
 class ABattleManager;
+class FJsonObject;
 USTRUCT()
 struct FUserPermissionRecord
 {
@@ -50,6 +51,7 @@ public:
  const FUserPermissionRecord* FindUser(const FString& Id) const;
 private:
  friend struct FAdminTestAccess;
+ friend class FBroadcastOperatorTest;
  UPROPERTY() FUserPermissionFile Data;
  FString StoragePath;
  bool bValid = true, bTemporary = false;
@@ -58,5 +60,6 @@ private:
  int32 FindIndex(const FString& Id) const;
  bool IsReservedAdmin(const FString& Id) const;
  bool Commit(FUserPermissionFile Next);
+ bool ApplyBroadcastOperators(const TSharedPtr<FJsonObject>& Settings);
  bool BindVerifiedHandle(const FString& Handle, const FString& ChannelId);
 };

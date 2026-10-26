@@ -60,6 +60,23 @@ namespace LeaderboardRowLayout
 	}
 }
 
+
+void ULeaderboardRowWidget::BindInlineWidgets(UWidgetTree* Tree, const FString& Prefix, UWidget* Root)
+{
+ InlineRoot = Root;
+ InlineDesignerOpacity = Root ? Root->GetRenderOpacity() : 1.0f;
+ auto Find = [&](auto& Member, const TCHAR* Name)
+ {
+  using T = std::remove_reference_t<decltype(*Member)>;
+  Member = Cast<T>(Tree->FindWidget(FName(*(Prefix + Name))));
+ };
+ Find(RowBackground, TEXT("RowBackground")); Find(Medal, TEXT("Medal"));
+ Find(RankText, TEXT("RankText")); Find(NameText, TEXT("NameText"));
+ Find(CharacterText, TEXT("CharacterText")); Find(HealthCell, TEXT("HealthCell"));
+ Find(HealthText, TEXT("HealthText")); Find(DamageText, TEXT("DamageText"));
+ CaptureDesignerLook();
+}
+
 void ULeaderboardRowWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
@@ -95,10 +112,12 @@ void ULeaderboardRowWidget::NativePreConstruct()
 
 void ULeaderboardRowWidget::ResolveWidgets()
 {
-	if (!WidgetTree)
+	if (!WidgetTree || InlineRoot)
 	{
 		return;
 	}
+ RowBackground=nullptr; Medal=nullptr; RankText=nullptr; NameText=nullptr;
+ CharacterText=nullptr; HealthCell=nullptr; HealthText=nullptr; DamageText=nullptr;
 	auto Find = [this](auto& Member, const TCHAR* Name)
 	{
 		using FWidgetType = std::remove_reference_t<decltype(*Member)>;
@@ -151,7 +170,8 @@ void ULeaderboardRowWidget::SetRow(const FLeaderboardRow& Row, bool bShowHealth)
 			? Style.MedalBrushes[MedalIndex]
 			: LeaderboardRowLayout::MakeEmptyBrush());
 	}
-	SetRenderOpacity(Row.bDimmed ? Style.DimmedOpacity : 1.0f);
+	if (InlineRoot) InlineRoot->SetRenderOpacity(InlineDesignerOpacity * (Row.bDimmed ? Style.DimmedOpacity : 1.0f));
+	else SetRenderOpacity(Row.bDimmed ? Style.DimmedOpacity : 1.0f);
 
 	auto SetText = [](UTextBlock* Text, const FText& Value)
 	{

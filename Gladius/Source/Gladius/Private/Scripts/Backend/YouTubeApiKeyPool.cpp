@@ -1,14 +1,34 @@
 #include "Scripts/Backend/YouTubeApiKeyPool.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Scripts/Backend/ExternalData.h"
 
 FString FYouTubeApiKeyPool::GetDefaultKeyFilePath()
 {
-	return FPaths::ProjectConfigDir() / TEXT("YouTubeApiKeys.txt");
+	return GladiusExternalData::File(TEXT("BroadcastSettings.json"));
 }
 
 int32 FYouTubeApiKeyPool::LoadFromFile(const FString& Path)
 {
+ if (FPaths::GetExtension(Path).Equals(TEXT("json"), ESearchCase::IgnoreCase))
+ {
+  FString Json; TSharedPtr<FJsonObject> Root;
+  if (!FFileHelper::LoadFileToString(Json, *Path) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) || !Root) return 0;
+  const TSharedPtr<FJsonObject>* YouTube = nullptr;
+  const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
+  if (!Root->TryGetObjectField(TEXT("youtube"), YouTube) || !YouTube || !YouTube->IsValid()
+   || !(*YouTube)->TryGetArrayField(TEXT("apiKeys"), Entries)) return 0;
+  TArray<FString> Parsed;
+  for (const auto& Entry : *Entries)
+  {
+   FString Key;
+   if (!Entry.IsValid() || Entry->Type != EJson::String || !Entry->TryGetString(Key)) return 0;
+   Parsed.Add(MoveTemp(Key));
+  }
+  const int32 Before = Keys.Num();
+  for (const auto& Key : Parsed) AddKey(Key);
+  return Keys.Num() - Before;
+ }
 	TArray<FString> Lines;
 	if (!FFileHelper::LoadFileToStringArray(Lines, *Path))
 	{
@@ -92,4 +112,20 @@ bool FYouTubeApiKeyPool::IsAvailable(const FString& Key, const FDateTime& NowUtc
 {
 	const FDateTime* Until = ExhaustedUntil.Find(Key);
 	return !Until || NowUtc >= *Until;
+}
+
+bool FYouTubeApiKeyPool::ReplaceKeys(const TArray<FString>& InKeys)
+{
+ TArray<FString> Next;
+ for (const auto& Key : InKeys)
+ {
+  const FString Clean = Key.TrimStartAndEnd();
+  if (!Clean.IsEmpty()) Next.AddUnique(Clean);
+ }
+ if (Keys == Next) return false;
+ const FString Current = Keys.IsValidIndex(CurrentIndex) ? Keys[CurrentIndex] : FString();
+ Keys = MoveTemp(Next);
+ CurrentIndex = FMath::Max(0, Keys.IndexOfByKey(Current));
+ // ExhaustedUntil intentionally survives reloads, including removed/re-added keys.
+ return true;
 }

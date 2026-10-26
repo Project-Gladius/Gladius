@@ -1,16 +1,102 @@
 #include "Scripts/Temple/Goddess.h"
 #include "Scripts/Temple/TempleTalkScheduler.h"
 #include "TimerManager.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Components/MeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 AGoddess::AGoddess()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
+	BlessingIconActors.SetNum(GTempleEnhanceTierCount);
+	BlessingIconMontage = FSoftObjectPath(TEXT("/Game/Asset/Shop/Aurelia/AnimationMontage/AM_Aurelia_Bestow.AM_Aurelia_Bestow"));
 	BlessingDurations.Init(3.0f, GTempleEnhanceTierCount);
+}
+
+void AGoddess::BeginPlay()
+{
+	Super::BeginPlay();
+	InitializeBlessingIcons();
+}
+
+void AGoddess::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateBlessingIcons();
+}
+
+void AGoddess::InitializeBlessingIcons()
+{
+	for (int32 Tier = 0; Tier < FMath::Min(BlessingIconActors.Num(), GTempleEnhanceTierCount); ++Tier)
+	{
+		AActor* Icon = BlessingIconActors[Tier];
+		if (!IsValid(Icon)) continue;
+		TInlineComponentArray<UMeshComponent*> Meshes(Icon);
+		for (UMeshComponent* Mesh : Meshes)
+		{
+			for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+			{
+				UMaterialInterface* Original = Mesh->GetMaterial(Slot);
+				float Glow = 0.f;
+				if (!Original || !Original->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Glow")), Glow)) continue;
+				UMaterialInstanceDynamic* Dynamic = Mesh->CreateDynamicMaterialInstance(Slot);
+				if (!Dynamic) continue;
+				FBlessingIconMaterial& Entry = BlessingIconMaterials.AddDefaulted_GetRef();
+				Entry.Mesh = Mesh;
+				Entry.OriginalMaterial = Original;
+				Entry.DynamicMaterial = Dynamic;
+				Entry.Slot = Slot;
+				Entry.TierIndex = Tier;
+				Entry.OriginalGlow = Glow;
+				Dynamic->SetScalarParameterValue(TEXT("Glow"), Glow * 0.1f);
+			}
+		}
+	}
+	if (!BlessingIconMaterials.IsEmpty()) LoadedBlessingIconMontage = BlessingIconMontage.LoadSynchronous();
+	UpdateBlessingIcons();
+}
+
+void AGoddess::UpdateBlessingIcons()
+{
+	const bool bBlessing = State >= EGoddessState::Blessing1 && State <= EGoddessState::Blessing4;
+	int32 ActiveTier = INDEX_NONE;
+	if (bBlessing && LoadedBlessingIconMontage)
+	{
+		TInlineComponentArray<USkeletalMeshComponent*> Meshes(this);
+		for (USkeletalMeshComponent* Mesh : Meshes)
+		{
+			UAnimInstance* Anim = Mesh->GetAnimInstance();
+			if (Anim && Anim->Montage_IsPlaying(LoadedBlessingIconMontage))
+			{
+				ActiveTier = static_cast<int32>(State) - static_cast<int32>(EGoddessState::Blessing1);
+				break;
+			}
+		}
+	}
+	ApplyBlessingIconBrightness(ActiveTier);
+	SetActorTickEnabled(bBlessing && !BlessingIconMaterials.IsEmpty());
+}
+
+void AGoddess::ApplyBlessingIconBrightness(int32 ActiveTierIndex)
+{
+	if (LitBlessingIcon == ActiveTierIndex) return;
+	LitBlessingIcon = ActiveTierIndex;
+	for (const FBlessingIconMaterial& Entry : BlessingIconMaterials)
+		if (UMaterialInstanceDynamic* Dynamic = Entry.DynamicMaterial.Get())
+			Dynamic->SetScalarParameterValue(TEXT("Glow"), Entry.OriginalGlow * (Entry.TierIndex == ActiveTierIndex ? 1.f : 0.1f));
 }
 
 void AGoddess::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(StateTimerHandle);
+	for (const FBlessingIconMaterial& Entry : BlessingIconMaterials)
+		if (UMeshComponent* Mesh = Entry.Mesh.Get())
+			if (Mesh->GetMaterial(Entry.Slot) == Entry.DynamicMaterial.Get())
+				Mesh->SetMaterial(Entry.Slot, Entry.OriginalMaterial.Get());
+	BlessingIconMaterials.Reset();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -214,6 +300,8 @@ void AGoddess::SetState(EGoddessState NewState, const FGoddessStateContext& Cont
 {
 	State = NewState;
 	OnStateChanged.Broadcast(NewState, Context);
+	// Blueprint subscribers start the montage synchronously during the broadcast.
+	UpdateBlessingIcons();
 }
 
 float AGoddess::GetBlessingDuration(int32 TierIndex) const

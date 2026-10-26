@@ -74,3 +74,12 @@ Plugins/**/Intermediate/*
 # Cache files for the editor to use
 DerivedDataCache/*
 CLAUDE.md
+
+# Local operator credentials; staged loose by the packaging settings.
+Gladius/Content/ExternalData/YouTubeApiKeys.txt
+Gladius/Content/ExternalData/ConnectionSettings.json
+Gladius/Content/ExternalData/TempleAI.env
+
+# Local broadcast configuration and live records.
+Gladius/Content/ExternalData/BroadcastSettings.json
+Gladius/Content/ExternalData/PlayerData.json

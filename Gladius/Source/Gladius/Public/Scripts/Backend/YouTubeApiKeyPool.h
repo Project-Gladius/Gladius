@@ -16,6 +16,7 @@ struct GLADIUS_API FYouTubeApiKeyPool
 
 	//키 하나를 목록 뒤에 추가 (빈 값/중복은 무시)
 	void AddKey(const FString& Key);
+	bool ReplaceKeys(const TArray<FString>& InKeys);
 
 	//지금 쓸 수 있는 키. 모두 바닥났으면 빈 문자열
 	FString GetCurrentKey(const FDateTime& NowUtc);

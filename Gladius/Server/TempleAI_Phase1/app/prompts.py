@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.schemas import TempleBatchRequest, TempleRequest
+from app.external_data import external_data_dir
 
 
 BASE_INSTRUCTIONS = """
@@ -34,7 +35,9 @@ Non-negotiable runtime rules:
 
 @lru_cache(maxsize=1)
 def load_goddess_profile() -> str:
-    profile_path = Path(__file__).resolve().parents[1] / "config" / "goddess_profile.md"
+    profile_path = external_data_dir() / "goddess_profile.md"
+    if not profile_path.exists():
+        profile_path = Path(__file__).resolve().parents[1] / "config" / "goddess_profile.md"
     if not profile_path.exists():
         return ""
     return profile_path.read_text(encoding="utf-8").strip()

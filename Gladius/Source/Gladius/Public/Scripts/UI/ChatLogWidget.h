@@ -8,6 +8,7 @@
 class UButton;
 class UCanvasPanelSlot;
 class UScrollBox;
+class UCanvasPanel;
 class UTextBlock;
 class UVerticalBox;
 
@@ -20,12 +21,17 @@ class GLADIUS_API UChatLogWidget : public UUserWidget
 public:
 	void SetExpansionAllowed(bool bAllowed);
 	void SetExpanded(bool bInExpanded);
+	void SetFixedExpanded();
+	void ApplyBattleSideLayout(float Width, float Margin, float Top, float Height);
 
 protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual void NativeDestruct() override;
 
+	// Retained only to migrate existing Blueprint layouts to a non-scrolling viewport.
 	UPROPERTY(BlueprintReadOnly, Category = "Chat Log", meta = (BindWidgetOptional))
 	TObjectPtr<UScrollBox> MessageScrollBox;
 
@@ -37,14 +43,19 @@ protected:
 
 private:
 	UPROPERTY(Transient)
+	TObjectPtr<UCanvasPanel> MessageViewport;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> ExpandButtonText;
 
 	TWeakObjectPtr<UChatLogSubsystem> BoundLog;
 	TWeakObjectPtr<UCanvasPanelSlot> PanelSlot;
 	bool bExpansionAllowed = false;
 	bool bExpanded = false;
+	bool bFitBelowBlessings = false;
 
 	void BuildDefaultWidgetTree();
+	void ConfigureMessageViewport();
 	void RefreshLayout();
 	void RebuildEntries();
 	void AppendEntry(const FChatLogEntry& Entry);

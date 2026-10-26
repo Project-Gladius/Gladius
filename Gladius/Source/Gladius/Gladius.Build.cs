@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
+using System.IO;
 
 public class Gladius : ModuleRules
 {
@@ -19,8 +20,15 @@ public class Gladius : ModuleRules
 		if (Target.bBuildEditor)
 		{
 			// AssetRegistry: 전투 UI WBP 자동 생성 커맨드릿(GenerateGladiusUI)
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor", "AssetRegistry" });
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "UMGEditor", "AssetRegistry", "RenderCore" });
 		}
+
+        // Stage the optional AI service source alongside the game, excluding development tools.
+        string ServerRoot = Path.GetFullPath(Path.Combine(ModuleDirectory, "../../Server/TempleAI_Phase1"));
+        foreach (string File in Directory.GetFiles(Path.Combine(ServerRoot, "app"), "*.py", SearchOption.AllDirectories))
+            RuntimeDependencies.Add(File, StagedFileType.NonUFS);
+        RuntimeDependencies.Add(Path.Combine(ServerRoot, "requirements.txt"), StagedFileType.NonUFS);
+        RuntimeDependencies.Add(Path.Combine(ServerRoot, "StartServer.cmd"), StagedFileType.NonUFS);
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

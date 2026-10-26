@@ -20,6 +20,7 @@ class GLADIUS_API ULeaderboardRowWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	void BindInlineWidgets(UWidgetTree* Tree, const FString& Prefix, UWidget* Root);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Leaderboard|Preview")
 	bool bPreviewShowHealth = true;
 
@@ -75,6 +76,9 @@ protected:
 	TObjectPtr<UTextBlock> DamageText;
 
 private:
+	UPROPERTY(Transient)
+	TObjectPtr<UWidget> InlineRoot;
+	float InlineDesignerOpacity = 1.0f;
 	//Designer에서 지정한 원래 줄 배경/데미지 색 (1위가 아닐 때 되돌릴 값)
 	FSlateBrush DesignerRowBrush;
 	FSlateColor DesignerDamageColor;
