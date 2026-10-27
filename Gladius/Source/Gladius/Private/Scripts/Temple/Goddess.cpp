@@ -51,7 +51,7 @@ void AGoddess::InitializeBlessingIcons()
 				Entry.Slot = Slot;
 				Entry.TierIndex = Tier;
 				Entry.OriginalGlow = Glow;
-				Dynamic->SetScalarParameterValue(TEXT("Glow"), Glow * 0.1f);
+				Dynamic->SetScalarParameterValue(TEXT("Glow"), Glow * 0.04f);
 			}
 		}
 	}
@@ -86,7 +86,7 @@ void AGoddess::ApplyBlessingIconBrightness(int32 ActiveTierIndex)
 	LitBlessingIcon = ActiveTierIndex;
 	for (const FBlessingIconMaterial& Entry : BlessingIconMaterials)
 		if (UMaterialInstanceDynamic* Dynamic = Entry.DynamicMaterial.Get())
-			Dynamic->SetScalarParameterValue(TEXT("Glow"), Entry.OriginalGlow * (Entry.TierIndex == ActiveTierIndex ? 1.f : 0.1f));
+			Dynamic->SetScalarParameterValue(TEXT("Glow"), Entry.OriginalGlow * (Entry.TierIndex == ActiveTierIndex ? 0.4f : 0.04f));
 }
 
 void AGoddess::EndPlay(const EEndPlayReason::Type EndPlayReason)

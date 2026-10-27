@@ -53,7 +53,7 @@ bool FTempleIconBrightnessTest::RunTest(const FString& Parameters)
   {
    float Glow = -1.f;
    Icons[I]->GetStaticMeshComponent()->GetMaterial(0)->GetScalarParameterValue(FMaterialParameterInfo(TEXT("Glow")), Glow);
-   TestEqual(*FString::Printf(TEXT("Icon %d while active %d"), I, Lit), Glow, (I + 1) * (I == Lit ? 10.f : 1.f));
+   TestEqual(*FString::Printf(TEXT("Icon %d while active %d"), I, Lit), Glow, (I + 1) * (I == Lit ? 4.f : 0.4f), KINDA_SMALL_NUMBER);
   }
  };
  Check(INDEX_NONE);
