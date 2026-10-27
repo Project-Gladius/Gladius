@@ -64,7 +64,6 @@ void USessionLogWidget::NativeDestruct()
 {
  if (BoundLog.IsValid()) BoundLog->OnEntryAdded.RemoveAll(this);
  BoundLog.Reset();
- PendingEntries.Reset();
  bHasCurrentEntry = false;
  Super::NativeDestruct();
 }
@@ -162,18 +161,33 @@ void USessionLogWidget::AppendMessage(const FString& Message, ESessionLogEvent E
  ShowEntry(Entry);
 }
 
+void USessionLogWidget::RefreshPresentedEntry()
+{
+ if (!BoundLog.IsValid()) return;
+ FSessionLogEntry Presented;
+ if (BoundLog->GetPresentedEntry(Presented))
+ {
+  if (!bHasCurrentEntry || CurrentEntry.Sequence!=Presented.Sequence || CurrentEntry.Message!=Presented.Message || CurrentEntry.Event!=Presented.Event)
+   ShowEntry(Presented);
+ }
+ else
+ {
+  bHasCurrentEntry=false; MessageElapsed=0.f;
+  if (CurrentText) CurrentText->SetText(FText::GetEmpty());
+  if (LogScrollBox) LogScrollBox->SetScrollOffset(0);
+ }
+}
+
 void USessionLogWidget::RebuildEntries()
 {
- PendingEntries.Reset();
- bHasCurrentEntry = false;
- // History stays in the subsystem; a newly opened map resumes with the latest entry.
- if (BoundLog.IsValid() && !BoundLog->GetEntries().IsEmpty()) ShowEntry(BoundLog->GetEntries().Last());
+ bHasCurrentEntry=false;
+ // The game-instance subsystem preserves queue, remaining lifetime, notices and active maintenance across maps.
+ RefreshPresentedEntry();
 }
 
 void USessionLogWidget::HandleEntryAdded(const FSessionLogEntry& Entry)
 {
- if (!bHasCurrentEntry) ShowEntry(Entry);
- else PendingEntries.Add(Entry);
+ RefreshPresentedEntry();
 }
 
 void USessionLogWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -184,6 +198,7 @@ void USessionLogWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 
 void USessionLogWidget::AdvanceTicker(float DeltaSeconds)
 {
+ RefreshPresentedEntry();
  if (!CurrentText || !LogScrollBox || !bHasCurrentEntry) return;
  ForceLayoutPrepass();
  const float ViewWidth = LogScrollBox->GetCachedGeometry().GetLocalSize().X;
@@ -191,20 +206,13 @@ void USessionLogWidget::AdvanceTicker(float DeltaSeconds)
  const float Overflow = FMath::Max(0.f, CurrentText->GetDesiredSize().X - AvailableWidth);
  const float Speed = FMath::Max(1.f, ScrollSpeed);
  const float StartHold = FMath::Max(0.f, StartHoldSeconds);
- const float Duration = Overflow > 0 ? StartHold + Overflow / Speed + FMath::Max(0.f, EndHoldSeconds) : FMath::Max(1.f, ShortMessageSeconds);
+ const float ScrollCycle = StartHold + Overflow / Speed + FMath::Max(0.f, EndHoldSeconds);
  MessageElapsed += FMath::Max(0.f, DeltaSeconds);
  LogScrollBox->SetScrollOffset(FMath::Clamp((MessageElapsed - StartHold) * Speed, 0.f, Overflow));
- if (MessageElapsed < Duration) return;
- if (!PendingEntries.IsEmpty())
+ // Scrolling can repeat while maintenance or the fallback stays on screen. Message lifetime is independent of text width.
+ if (Overflow>0 && MessageElapsed>=ScrollCycle)
  {
-  const FSessionLogEntry Next = PendingEntries[0];
-  PendingEntries.RemoveAt(0);
-  ShowEntry(Next);
- }
- else if (Overflow > 0)
- {
-  MessageElapsed = 0;
+  MessageElapsed=0.f;
   LogScrollBox->SetScrollOffset(0);
  }
 }
-

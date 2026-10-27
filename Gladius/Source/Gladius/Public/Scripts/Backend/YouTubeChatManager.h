@@ -9,6 +9,8 @@
 
 class UCommandDispatcher;
 class AGameManager;
+class APlayerController;
+class UInputComponent;
 
 // 채팅 조회 한 번이 끝났을 때(모든 채팅을 파싱/디스패치한 뒤) 브로드캐스트. bSuccess: 조회 성공 여부
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatFetchFinished, bool /*bSuccess*/);
@@ -63,6 +65,7 @@ public:
 	//채팅 수신 시작 함수 (LiveChatId 조회. 전투상태면 이후 자동으로 주기 조회)
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
 	void StartFetchingChat();
+ bool ReloadBroadcastSettings();
 
 	//채팅 수신 중지 함수
 	UFUNCTION(BlueprintCallable, Category = "YouTube API")
@@ -117,6 +120,10 @@ private:
 	FYouTubeApiKeyPool* KeyPool = nullptr;
 	FYouTubeApiKeyPool LocalKeyPool;
  friend struct FBroadcastReloadTestAccess;
+ TWeakObjectPtr<APlayerController> LocalPatchController;
+ TWeakObjectPtr<UInputComponent> LocalPatchInput;
+ void BindLocalPatchKey();
+ void HandleLocalPatchKey();
  FTimerHandle BroadcastRefreshTimerHandle;
  FString BroadcastStreamKey;
  FString BroadcastSettingsOverridePath;

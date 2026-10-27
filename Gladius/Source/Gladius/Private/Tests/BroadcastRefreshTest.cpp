@@ -8,9 +8,14 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "TimerManager.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/InputComponent.h"
+#include "Scripts/Backend/AdminSubsystem.h"
+#include "Engine/LocalPlayer.h"
 
 struct FBroadcastReloadTestAccess
 {
+ static void BindPatch(AYouTubeChatManager* A){A->BindLocalPatchKey();}
  static void Path(AYouTubeChatManager* A,const FString& Path){A->BroadcastSettingsOverridePath=Path;}
  static void Reload(AYouTubeChatManager* A){A->RefreshBroadcastSettings();}
  static int32 Count(AYouTubeChatManager* A){return A->KeyPool->Num();}
@@ -103,6 +108,33 @@ bool FBroadcastReloadTimerTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Reload interval is thirty seconds"),FBroadcastReloadTestAccess::Rate(T->Chat),30.f);
  T->Write(TEXT(R"json({"youtube":{"apiKeys":["test-key"],"streamKey":""}})json"));
  ADD_LATENT_AUTOMATION_COMMAND(FRefreshTimingAssertions(T,this));
+ return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLocalPatchBindingTest,"Gladius.Broadcast.LocalPatchHotkeyBinding",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FLocalPatchBindingTest::RunTest(const FString& Parameters)
+{
+ FRefreshWorld T;
+ FBroadcastReloadTestAccess::BindPatch(T.Chat);
+ auto* Controller=T.World->SpawnActor<APlayerController>();
+ auto* LocalPlayer=NewObject<ULocalPlayer>(GEngine);
+ T.Instance->AddLocalPlayer(LocalPlayer,FPlatformUserId::CreateFromInternalId(0));
+ Controller->SetPlayer(LocalPlayer);
+ for(int32 I=0;I<5;++I) FBroadcastReloadTestAccess::BindPatch(T.Chat);
+ if(!TestNotNull(TEXT("Input registers after controller appears"),T.Chat->InputComponent.Get())) return false;
+ int32 Count=0;
+ for(const auto& Key:T.Chat->InputComponent->KeyBindings)
+  if(Key.Chord.Key==EKeys::P)
+  {
+   ++Count;
+   TestEqual(TEXT("P triggers once per press"),Key.KeyEvent,IE_Pressed);
+   TestFalse(TEXT("Patch binding does not consume other input"),bool(Key.bConsumeInput));
+   TestTrue(TEXT("Local operator can patch while paused"),bool(Key.bExecuteWhenPaused));
+   TestTrue(TEXT("P has an executable handler"),Key.KeyDelegate.IsBound());
+  }
+ TestEqual(TEXT("Repeated ticks do not duplicate P"),Count,1);
+ T.Instance->GetSubsystem<UAdminSubsystem>()->SetMaintenance(TEXT("전체"),true);
+ FBroadcastReloadTestAccess::BindPatch(T.Chat);
+ TestEqual(TEXT("Maintenance does not remove local recovery key"),T.Chat->InputComponent->KeyBindings.Num(),1);
  return true;
 }
 #endif

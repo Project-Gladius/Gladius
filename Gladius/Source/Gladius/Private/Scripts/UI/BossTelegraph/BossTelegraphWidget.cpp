@@ -1,4 +1,5 @@
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
+#include "Scripts/UI/TutorialRichText.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Scripts/UI/UIWidgetBuild.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -31,6 +32,8 @@ void UBossTelegraphWidget::NativeOnInitialized()
 	{
 		TelegraphBox->SetVisibility(ESlateVisibility::Collapsed);
 	}
+    RichMessageText=TutorialText::Replace(WidgetTree,MessageText);
+    if (RichMessageText && MessageText) TutorialText::Set(RichMessageText,MessageText->GetText().ToString());
 }
 
 void UBossTelegraphWidget::ResolveWidgets()
@@ -99,6 +102,7 @@ void UBossTelegraphWidget::ShowTelegraph(const FString& TelegraphText)
 	if (MessageText)
 	{
 		MessageText->SetText(FText::FromString(CleanText));
+        if (RichMessageText) RichMessageText->SetText(FText::FromString(CleanText));
 	}
 	bShowing = true;
 	ElapsedSeconds = 0.0f;
@@ -146,7 +150,7 @@ void UBossTelegraphWidget::UpdateBoxPosition()
 	const AActor* Boss = Manager ? Manager->GetBossUnit() : nullptr;
 	APlayerController* PC = GetOwningPlayer();
 	FVector2D BossScreen;
-	if (Boss && PC
+	if (!bTutorialMessage && Boss && PC
 		&& UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(PC, Boss->GetActorLocation() + BossWorldOffset, BossScreen, false))
 	{
 		Position = BossScreen + BelowBossScreenOffset;
@@ -168,7 +172,7 @@ bool UBossTelegraphWidget::IsPreparePhase() const
 {
 	//BattleManager 없이 ShowTelegraph만 호출해 쓰는 경우에는 시간만 보고 사라짐
 	const ABattleManager* Manager = BattleManager.Get();
-	return !Manager || Manager->Phase == EBattlePhase::Prepare;
+	return bTutorialMessage || !Manager || Manager->Phase == EBattlePhase::Prepare;
 }
 
 void UBossTelegraphWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -287,4 +291,15 @@ void UBossTelegraphWidget::BuildDefaultLayout(UWidgetTree* Tree) const
 			OrnamentSlot->SetVerticalAlignment(Place.V);
 		}
 	}
+}
+
+void UBossTelegraphWidget::ShowTutorialMessage(const FString& RichText,float Seconds)
+{
+ if (!bTutorialMessage) NormalDisplaySeconds=DisplaySeconds;
+ bTutorialMessage=true; DisplaySeconds=Seconds; ShowTelegraph(RichText);
+}
+void UBossTelegraphWidget::EndTutorial()
+{
+ if (bTutorialMessage) DisplaySeconds=NormalDisplaySeconds;
+ bTutorialMessage=false; HideTelegraph();
 }

@@ -49,6 +49,7 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include <type_traits>
+#include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
 
 struct FBattleUnificationTestAccess
 {
@@ -73,6 +74,7 @@ struct FBattleUnificationTestAccess
    if (Binding.Chord.Key == Key && Binding.KeyEvent == IE_Pressed) { Binding.KeyDelegate.Execute(Key); return true; }
   return false;
  }
+ static FBattlePlayer& LifePlayer(ABattleManager* B, const FString& Id) { return B->Players.FindChecked(Id); }
  static void SetPath(ABattleManager* B, const FString& Path) { B->TestRecordPath = Path; }
  static void Prepare(ABattleManager* B) { B->GetWorldTimerManager().ClearTimer(B->PhaseTimerHandle); B->StartTurn(); }
  static void Select(ABattleManager* B) { B->BeginInput(); }
@@ -519,6 +521,128 @@ bool FUnifiedHealthPersistenceTest::RunTest(const FString& Parameters)
  TestTrue(TEXT("Migration keeps other progression"),R && R->DamageBonus==2 && R->TotalDamageDealt==123);
  return true;
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeadLoginStateTest,"Gladius.LifeState.DeadLoginAndNaturalRevival",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FDeadLoginStateTest::RunTest(const FString& Parameters)
+{
+ for (const FString ClassId : {FString(TEXT("gladius")), FString(TEXT("sera"))})
+ {
+  FUnifiedBattleWorld T; auto* B=T.Battle;
+  B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+  TestTrue(TEXT("Initial login"),B->LoginPlayer(TEXT("dead-rejoin"),TEXT("Viewer"),ClassId));
+  B->SetPlayerHealth(TEXT("dead-rejoin"),0);
+  B->LogoutPlayer(TEXT("dead-rejoin"));
+  TestTrue(TEXT("Zero-health user registers awaiting revival"),B->LoginPlayer(TEXT("dead-rejoin"),TEXT("Viewer"),ClassId));
+  auto& P=FBattleUnificationTestAccess::LifePlayer(B,TEXT("dead-rejoin"));
+  TestTrue(TEXT("Dead rejoin remains registered"),B->IsPlayerLoggedIn(TEXT("dead-rejoin")));
+  TestFalse(TEXT("Dead rejoin cannot act"),P.IsAlive());
+  TestTrue(TEXT("Dead actor flag initialized"),P.Unit->IsDead());
+  TestTrue(TEXT("Dead actor cannot appear as a live summon"),P.Unit->IsHidden());
+  auto* Plate=Cast<UBattlePlayerNameplate>(P.Unit->Nameplate->GetUserWidgetObject());
+  if(TestNotNull(TEXT("Dead rejoin initializes full character UI"),Plate))
+  {
+   TestEqual(TEXT("UI knows the selected class"),Plate->Data.CharacterId,ClassId);
+   TestEqual(TEXT("UI displays actual health"),Plate->Data.HP,0);
+  }
+  const int32 Wait=P.ReviveCountdown;
+  TestFalse(TEXT("Duplicate login is not a resurrection command"),B->LoginPlayer(TEXT("dead-rejoin"),TEXT("Viewer"),ClassId));
+  TestEqual(TEXT("Duplicate login does not restart the wait"),P.ReviveCountdown,Wait);
+  TestFalse(TEXT("Dead attack rejected"),B->SubmitAction(TEXT("dead-rejoin"),TEXT("Viewer"),EBattleAction::Attack1));
+  for(int32 I=0;I<Wait;++I) FBattleUnificationTestAccess::Resolve(B);
+  TestTrue(TEXT("Natural revival restores gameplay eligibility"),P.IsAlive());
+  TestEqual(TEXT("Natural revival restores health"),P.HP,P.MaxHP);
+  TestFalse(TEXT("Natural revival clears actor death flag"),P.Unit->IsDead());
+  TestFalse(TEXT("Natural revival reveals actor"),P.Unit->IsHidden());
+  TestFalse(TEXT("Old death presentation cannot fire again"),P.bDiedThisTurn);
+  FBattleUnificationTestAccess::Prepare(B);
+  TestTrue(TEXT("Attack is accepted after revival"),B->SubmitAction(TEXT("dead-rejoin"),TEXT("Viewer"),EBattleAction::Attack1));
+  TMap<FString,FBattlePlayer> Candidate; Candidate.Add(TEXT("dead-rejoin"),P);
+  FRandomStream Random(19);
+  TestEqual(TEXT("Revived character can be chosen for a cutscene"),ABattleManager::SelectTurnCutSceneUser(Candidate,B->GetCharacterClasses(),FString(),{},Random),FString(TEXT("dead-rejoin")));
+ }
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRevivalStateRepairTest,"Gladius.LifeState.RepairsOrphanedAndStaleDeathState",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FRevivalStateRepairTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
+ B->LoginPlayer(TEXT("repair"),TEXT("Viewer"),TEXT("gladius"));
+ auto& P=FBattleUnificationTestAccess::LifePlayer(B,TEXT("repair"));
+ P.HP=0; P.ReviveCountdown=0;
+ TestFalse(TEXT("HP zero is never alive even without a countdown"),P.IsAlive());
+ TestFalse(TEXT("Orphaned zero-health input rejected"),B->SubmitAction(TEXT("repair"),TEXT("Viewer"),EBattleAction::Attack1));
+ for(int32 I=0;I<FMath::Max(1,B->ReviveTurns);++I) FBattleUnificationTestAccess::Resolve(B);
+ TestTrue(TEXT("Orphaned zero-health player eventually revives"),P.IsAlive());
+ // Reproduce equal-HP early return with stale death flags and pending lethal presentation.
+ P.Unit->NotifyDied(); P.bDiedThisTurn=true; P.HPLossToShow=3; P.DamageTakenThisTurn=3;
+ TestTrue(TEXT("Equal-health setter repairs stale actor state"),B->SetPlayerHealth(TEXT("repair"),P.HP));
+ TestFalse(TEXT("Equal-health repair clears actor death"),P.Unit->IsDead());
+ TestFalse(TEXT("Pending lethal event cleared"),P.bDiedThisTurn);
+ TestEqual(TEXT("Pending lethal damage cleared"),P.DamageTakenThisTurn,0);
+ TestEqual(TEXT("Pending HP presentation cleared"),P.HPLossToShow,0);
+ B->SetPlayerHealth(TEXT("repair"),0);
+ P.ReviveCountdown=1;
+ B->SetPlayerHealth(TEXT("repair"),0);
+ TestEqual(TEXT("Repeated zero update does not postpone revival"),P.ReviveCountdown,1);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRevivalMotionResetTest,"Gladius.LifeState.RevivalClearsOldMotionAndDelayedHits",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FRevivalMotionResetTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; T.Battle->StopBattle();
+ auto* Unit=T.World->SpawnActor<ABattleUnit>();
+ Unit->NotifyActionSelected(EBattleAction::Attack2); Unit->SetDefending(true);
+ Unit->MoveTo(Unit->GetActorLocation()+FVector(100,0,0),3.f,EMoveGait::Run);
+ Unit->NotifyDied();
+ int32 Hits=0;
+ const auto Handle=Unit->OnHitLanded.AddLambda([&Hits](){++Hits;});
+ Unit->ReportHit(.1f);
+ Unit->HoldMotion(10.f);
+ Unit->MoveTo(Unit->GetActorLocation()+FVector(200,0,0),3.f,EMoveGait::Run);
+ Unit->Mesh->bPauseAnims=true; Unit->Mesh->GlobalAnimRateScale=0.f;
+ Unit->NotifyRevived();
+ TestFalse(TEXT("Revival clears death flag"),Unit->IsDead());
+ TestFalse(TEXT("Revival clears old movement"),Unit->IsMoving());
+ TestFalse(TEXT("Revival clears defense"),Unit->IsDefending());
+ TestEqual(TEXT("Revival clears old selection"),Unit->GetSelectedAction(),EBattleAction::Idle);
+ TestFalse(TEXT("Revival resumes animation updates"),bool(Unit->Mesh->bPauseAnims));
+ TestTrue(TEXT("Revival resumes animation playback"),Unit->Mesh->GlobalAnimRateScale>0.f);
+ T.World->GetTimerManager().Tick(.2f);
+ TestEqual(TEXT("Previous life's delayed hit cannot fire"),Hits,0);
+ Unit->MoveTo(Unit->GetActorLocation()+FVector(50,0,0),1.f,EMoveGait::Walk);
+ TestTrue(TEXT("Death motion hold cannot block new movement"),Unit->IsMoving());
+ Unit->OnHitLanded.Remove(Handle); Unit->Destroy();
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCharacterDeathAnimationResetTest,"Gladius.LifeState.CharacterDeathAnimationResets",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FCharacterDeathAnimationResetTest::RunTest(const FString& Parameters)
+{
+ for(const TCHAR* Path : {TEXT("/Game/Blueprints/BP_BattleUnitG.BP_BattleUnitG_C"),TEXT("/Game/Blueprints/BP_BattleUnitS.BP_BattleUnitS_C")})
+ {
+  FUnifiedBattleWorld T; T.Battle->StopBattle();
+  UClass* Class=LoadClass<ABattleUnit>(nullptr,Path);
+  if(!TestNotNull(TEXT("Actual character blueprint"),Class)) return false;
+  auto* Unit=T.World->SpawnActor<ABattleUnit>(Class);
+  if(!Unit->HasActorBegunPlay()) Unit->DispatchBeginPlay();
+  Unit->Mesh->InitAnim(true);
+  UClass* LivingClass=Unit->Mesh->GetAnimClass();
+  Unit->OnHit(1,true); Unit->NotifyDied();
+  UAnimMontage* DeathMontage=Unit->Mesh->GetAnimInstance() ? Unit->Mesh->GetAnimInstance()->GetCurrentActiveMontage() : nullptr;
+  Unit->NotifyRevived();
+  TestFalse(TEXT("Character exits dead state"),Unit->IsDead());
+  TestEqual(TEXT("Living animation class restored"),Unit->Mesh->GetAnimClass(),LivingClass);
+  auto* Anim=Unit->Mesh->GetAnimInstance();
+  if(TestNotNull(TEXT("Living animation instance restored"),Anim) && DeathMontage)
+   TestFalse(TEXT("Lethal-hit montage does not remain active"),Anim->Montage_IsPlaying(DeathMontage));
+  Unit->Destroy();
+ }
+ return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerHealthCapTest, "Gladius.BattleUnified.PlayerHealthCap", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FPlayerHealthCapTest::RunTest(const FString& Parameters)
 {
@@ -1112,20 +1236,28 @@ bool FSessionNotificationTest::RunTest(const FString& Parameters)
  return true;
 }
 
+struct FSessionPresentationTestAccess
+{
+ static void Time(USessionLogSubsystem* Log,double Now) { Log->PresentationTimeOverride=Now; }
+ static int32 Pending(USessionLogSubsystem* Log) { return Log->PendingMessages.Num(); }
+};
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSessionLogWidgetTest, "Gladius.SessionLog.WidgetStyleAndHistory",
  EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
 {
  FUnifiedBattleWorld T;
  auto* Log = T.Instance->GetSubsystem<USessionLogSubsystem>();
+ FSessionPresentationTestAccess::Time(Log,0.0);
  Log->AddMessage(TEXT("이전 알림"), ESessionLogEvent::Admin);
+ FSessionPresentationTestAccess::Time(Log,20.0);
  Log->AddMessage(TEXT("최근 알림"), ESessionLogEvent::AdminUrgent);
  auto* W = CreateWidget<USessionLogWidget>(T.Instance, USessionLogWidget::StaticClass());
  const auto SlateWidget = W->TakeWidget();
  auto* Rows = Cast<UVerticalBox>(W->WidgetTree->FindWidget(TEXT("LogMessages")));
  if (!TestNotNull(TEXT("Message layer exists"), Rows) || !TestNotNull(TEXT("Single text exists"), W->CurrentText.Get())) return false;
  TestEqual(TEXT("Exactly one line widget"), Rows->GetChildrenCount(), 1);
- TestEqual(TEXT("Map entry resumes latest history"), W->CurrentText->GetText().ToString(), FString(TEXT("최근 알림")));
+ TestEqual(TEXT("Map entry resumes the current presentation"), W->CurrentText->GetText().ToString(), FString(TEXT("최근 알림")));
  TestFalse(TEXT("No wrapping"), W->CurrentText->GetAutoWrapText());
  TestEqual(TEXT("Urgent color"), W->CurrentText->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Red);
  TestNotNull(TEXT("Original notice texture resolved"), W->BackgroundBrush.GetResourceObject());
@@ -1137,14 +1269,20 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
  W->LogFont.Size = 23;
  W->RefreshStyle();
  TestEqual(TEXT("Designer font size applied"), W->CurrentText->GetFont().Size, 23.f);
- Log->AddMessage(TEXT("다음 공지\n두 번째 줄"), ESessionLogEvent::Admin);
+ Log->AddNotice(TEXT("다음 공지\n두 번째 줄"));
  Log->AddMessage(TEXT("이벤트 알림"), ESessionLogEvent::Event);
  TestEqual(TEXT("Incoming messages wait until current finishes"), W->CurrentText->GetText().ToString(), FString(TEXT("최근 알림")));
- TestEqual(TEXT("Both incoming messages queued"), W->PendingEntries.Num(), 2);
- W->AdvanceTicker(10.f);
+ TestEqual(TEXT("Both incoming messages queued"), FSessionPresentationTestAccess::Pending(Log), 2);
+ FSessionPresentationTestAccess::Time(Log,39.99);
+ W->AdvanceTicker(0.f);
+ TestEqual(TEXT("Ordinary message lasts the full twenty seconds"),W->CurrentText->GetText().ToString(),FString(TEXT("최근 알림")));
+ W->RebuildEntries();
+ FSessionPresentationTestAccess::Time(Log,40.0);
+ W->AdvanceTicker(0.f);
  TestEqual(TEXT("FIFO and newline normalization"), W->CurrentText->GetText().ToString(), FString(TEXT("다음 공지 두 번째 줄")));
  TestEqual(TEXT("Admin color preserved"), W->CurrentText->GetColorAndOpacity().GetSpecifiedColor(), FLinearColor::Yellow);
- W->AdvanceTicker(10.f);
+ FSessionPresentationTestAccess::Time(Log,60.0);
+ W->AdvanceTicker(0.f);
  TestEqual(TEXT("Next event displayed"), W->CurrentText->GetText().ToString(), FString(TEXT("이벤트 알림")));
  W->EventColor = FLinearColor::Blue;
  W->RefreshStyle();
@@ -1152,8 +1290,10 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("No stacked history after arrivals"), Rows->GetChildrenCount(), 1);
  FString LongMessage;
  for (int32 I=0; I<40; ++I) LongMessage += TEXT("긴 운영진 공지사항 ");
- FSessionLogEntry LongEntry; LongEntry.Message = LongMessage; LongEntry.Event = ESessionLogEvent::Admin;
- W->ShowEntry(LongEntry);
+ FSessionPresentationTestAccess::Time(Log,80.0);
+ W->AdvanceTicker(0.f);
+ TestEqual(TEXT("Idle ticker returns to the most recently shown notice"),W->CurrentText->GetText().ToString(),FString(TEXT("다음 공지 두 번째 줄")));
+ Log->AddNotice(LongMessage);
  W->AdvanceTicker(0.5f);
  TestEqual(TEXT("Readable pause at beginning"), W->LogScrollBox->GetScrollOffset(), 0.f);
  W->AdvanceTicker(1.5f);
@@ -1162,16 +1302,18 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
  Log->AddMessage(TEXT("긴 공지 다음 알림"), ESessionLogEvent::AdminUrgent);
  W->AdvanceTicker(0.1f);
  TestEqual(TEXT("Long message not interrupted"), W->CurrentText->GetText().ToString(), LongMessage);
- W->AdvanceTicker(10000.f);
- TestEqual(TEXT("Complete long text finishes before next"), W->CurrentText->GetText().ToString(), FString(TEXT("긴 공지 다음 알림")));
+ FSessionPresentationTestAccess::Time(Log,100.0);
+ W->AdvanceTicker(0.f);
+ TestEqual(TEXT("Long messages also have a twenty-second lifetime"), W->CurrentText->GetText().ToString(), FString(TEXT("긴 공지 다음 알림")));
  TestEqual(TEXT("Next line resets position"), W->LogScrollBox->GetScrollOffset(), 0.f);
- TestEqual(TEXT("History retained independently"), Log->GetEntries().Num(), 5);
+ TestEqual(TEXT("History retained independently"), Log->GetEntries().Num(), 6);
  if (!FParse::Param(FCommandLine::Get(), TEXT("NullRHI")))
  {
   W->WindowSize=FVector2D(384,64);
   W->RefreshStyle();
   W->LogFont.Size = 18;
-  W->PendingEntries.Reset();
+  Log->OnEntryAdded.RemoveAll(W);
+  W->BoundLog.Reset(); // Isolate the manual visual preview from the live presentation clock.
   W->AppendMessage(TEXT("[운영진 공지] 글라디우스에 오신 것을 환영합니다. 오늘 전투는 오후 8시에 시작합니다. 끝까지 즐겁게 참여해 주세요!"), ESessionLogEvent::Admin);
   FWidgetRenderer Renderer(true);
   auto SavePreview = [&](const TCHAR* Name)
@@ -1195,6 +1337,71 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
 }
 
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNotificationLifetimeTest,"Gladius.SessionLog.TwentySecondsAndLatestNotice",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FNotificationLifetimeTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* Log=NewObject<USessionLogSubsystem>(T.Instance);
+ FSessionLogEntry Entry;
+ FSessionPresentationTestAccess::Time(Log,0.0);
+ TestFalse(TEXT("No invented message before any notification"),Log->GetPresentedEntry(Entry));
+ Log->MaxEntries=1;
+ Log->AddNotice(TEXT("기본 공지"));
+ FSessionPresentationTestAccess::Time(Log,1.0);
+ Log->AddMessage(TEXT("일반 알림"),ESessionLogEvent::Login);
+ FSessionPresentationTestAccess::Time(Log,19.99); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Notice not interrupted by arrival"),Entry.Message,FString(TEXT("기본 공지")));
+ FSessionPresentationTestAccess::Time(Log,20.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Next message starts at twenty seconds"),Entry.Message,FString(TEXT("일반 알림")));
+ FSessionPresentationTestAccess::Time(Log,39.99); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Queued message gets twenty seconds after it is shown"),Entry.Message,FString(TEXT("일반 알림")));
+ FSessionPresentationTestAccess::Time(Log,40.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Latest notice is idle fallback"),Entry.Message,FString(TEXT("기본 공지")));
+ TestEqual(TEXT("Fallback survives history eviction"),Log->GetEntries()[0].Message,FString(TEXT("일반 알림")));
+ FSessionPresentationTestAccess::Time(Log,5000.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Fallback never expires while queue is empty"),Entry.Message,FString(TEXT("기본 공지")));
+ Log->AddNotice(TEXT("새 공지")); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("New notice immediately replaces idle fallback"),Entry.Message,FString(TEXT("새 공지")));
+ FSessionPresentationTestAccess::Time(Log,5020.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Newly displayed notice becomes the fallback"),Entry.Message,FString(TEXT("새 공지")));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPersistentMaintenanceNoticeTest,"Gladius.SessionLog.MaintenanceUntilAllScopesEnd",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPersistentMaintenanceNoticeTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* Log=NewObject<USessionLogSubsystem>(T.Instance);
+ FSessionLogEntry Entry;
+ FSessionPresentationTestAccess::Time(Log,0.0); Log->AddNotice(TEXT("기본 공지"));
+ FSessionPresentationTestAccess::Time(Log,5.0);
+ Log->AddMaintenanceMessage(TEXT("전투"),true,TEXT("전투 점검 중"),ESessionLogEvent::AdminUrgent);
+ FSessionPresentationTestAccess::Time(Log,200.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Maintenance does not time out"),Entry.Message,FString(TEXT("전투 점검 중")));
+ Log->AddMessage(TEXT("대기 알림"),ESessionLogEvent::Login);
+ Log->AddMaintenanceMessage(TEXT("AI"),true,TEXT("AI 점검 중"),ESessionLogEvent::Admin);
+ Log->GetPresentedEntry(Entry);
+ TestTrue(TEXT("Simultaneous maintenance scopes are visible"),Entry.Message.Contains(TEXT("전투"))&&Entry.Message.Contains(TEXT("AI")));
+ FSessionPresentationTestAccess::Time(Log,400.0);
+ Log->AddMaintenanceMessage(TEXT("AI"),false,TEXT("AI 점검 완료"),ESessionLogEvent::Admin);
+ Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Ending one scope preserves the remaining maintenance"),Entry.Message,FString(TEXT("전투 점검 중")));
+ FSessionPresentationTestAccess::Time(Log,500.0);
+ Log->AddMaintenanceMessage(TEXT("전투"),false,TEXT("전투 점검 완료"),ESessionLogEvent::Admin);
+ Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Interrupted notice resumes after maintenance"),Entry.Message,FString(TEXT("기본 공지")));
+ FSessionPresentationTestAccess::Time(Log,514.99); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Paused remaining fifteen seconds are preserved"),Entry.Message,FString(TEXT("기본 공지")));
+ FSessionPresentationTestAccess::Time(Log,515.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Ordinary messages were queued, not expired during maintenance"),Entry.Message,FString(TEXT("대기 알림")));
+ FSessionPresentationTestAccess::Time(Log,535.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Completion messages have normal lifetimes"),Entry.Message,FString(TEXT("AI 점검 완료")));
+ FSessionPresentationTestAccess::Time(Log,555.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("No stale maintenance-start message is replayed"),Entry.Message,FString(TEXT("전투 점검 완료")));
+ FSessionPresentationTestAccess::Time(Log,575.0); Log->GetPresentedEntry(Entry);
+ TestEqual(TEXT("Maintenance completion cannot replace latest notice fallback"),Entry.Message,FString(TEXT("기본 공지")));
+ return true;
+}
+
 struct FAdminTestAccess
 {
  static bool Bind(UAdminSubsystem* A, const FString& Handle, const FString& Id) { return A->BindVerifiedHandle(Handle, Id); }
@@ -1214,6 +1421,7 @@ bool FAdminCommandsTest::RunTest(const FString& Parameters)
  auto* A=T.Instance->GetSubsystem<UAdminSubsystem>();
  auto* L=T.Instance->GetSubsystem<USessionLogSubsystem>();
  const FString GM=TEXT("UC1111111111111111111111");
+ A->RegisterUser(TEXT("viewer"),TEXT("Viewer"));
  TestTrue(TEXT("Seed operator handle exists"),A->FindUser(TEXT("@자작곡싸개"))!=nullptr);
  TestFalse(TEXT("Unverified handle is not identity"),A->IsAdmin(TEXT("@자작곡싸개")));
  TestTrue(TEXT("Bind verified API channel"),FAdminTestAccess::Bind(A,TEXT("@자작곡싸개"),GM));
@@ -1243,8 +1451,8 @@ bool FAdminCommandsTest::RunTest(const FString& Parameters)
  FDateTime::ParseIso8601(*A->FindUser(TEXT("viewer"))->BlockTime,Expiry);
  TestEqual(TEXT("Default calendar year"),Expiry.GetYear(),FDateTime::UtcNow().GetYear()+1);
  const int32 BeforeProtected=L->GetEntries().Num();
- Send(GM,TEXT("!차단 @자작곡싸개"));
- TestEqual(TEXT("Admin block silently ignored"),L->GetEntries().Num(),BeforeProtected);
+ Send(GM,*FString::Printf(TEXT("!차단 %s"),*GM));
+ TestEqual(TEXT("Admin channel-ID block silently ignored"),L->GetEntries().Num(),BeforeProtected);
  Send(GM,TEXT("!차단해제 viewer"));
  Send(GM,TEXT("!점검 전투"));
  TestFalse(TEXT("Battle disabled for user"),A->CanInput(TEXT("viewer"),EGameState::Combat));
@@ -1289,6 +1497,153 @@ bool FAdminCommandsTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Schedule style"),L->GetEntries().Last().Event,ESessionLogEvent::Admin);
  Send(GM,TEXT("!전투 25:99"));
  TestEqual(TEXT("Invalid time rejected"),L->GetEntries().Last().Event,ESessionLogEvent::AdminUrgent);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPatchExhibitTest,"Gladius.PatchExhibit.RolesRoutingAndRanking",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPatchExhibitTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ auto* A=T.Instance->GetSubsystem<UAdminSubsystem>();
+ const FString UserPath = FAdminTestAccess::Path(A);
+ const FString Seed = TEXT(R"({"users":[{"userId":"operator","permission":"admin"},{"userId":"demo","permission":"exhibit"},{"userId":"viewer","permission":"user"}]})");
+ FFileHelper::SaveStringToFile(Seed,*UserPath);
+ TestTrue(TEXT("Exhibit permission loads"),A->LoadFromFile(UserPath));
+ TestTrue(TEXT("Exhibit recognized by channel ID"),A->IsExhibit(TEXT("demo")));
+ TestFalse(TEXT("Exhibit has no admin rights"),A->IsAdmin(TEXT("demo")));
+ TestTrue(TEXT("Admin excluded"),A->IsLeaderboardExcluded(TEXT("operator")));
+ TestTrue(TEXT("Exhibit excluded"),A->IsLeaderboardExcluded(TEXT("demo")));
+ TestFalse(TEXT("Regular user included"),A->IsLeaderboardExcluded(TEXT("viewer")));
+ FParsedCommand C;
+ TestTrue(TEXT("Patch parses"),FChatCommandParser::TryParse(TEXT("operator"),TEXT("!패치"),C));
+ TestEqual(TEXT("Patch type"),C.CommandType,ECommandType::Patch);
+ TestFalse(TEXT("Patch rejects arguments"),FChatCommandParser::TryParse(TEXT("operator"),TEXT("!패치 잘못된인자"),C));
+ C.UserId=TEXT("demo"); C.CommandType=ECommandType::Patch;
+ TestTrue(TEXT("Exhibit patch consumed without execution"),A->HandleAdminCommand(C,T.Battle));
+ T.Battle->StopBattle();
+ auto* Schedule=T.Instance->GetSubsystem<UBattleScheduleSubsystem>();
+ FAdminScheduleTestAccess::Set(Schedule,{});
+ T.DispatchRaw(TEXT("viewer"),TEXT("!전투"));
+ FDateTime Next;
+ TestFalse(TEXT("Regular user cannot start combat"),Schedule->GetNextStart(FDateTime::Now(),Next));
+ T.DispatchRaw(TEXT("demo"),TEXT("!전투"));
+ TestTrue(TEXT("Exhibit can start combat"),Schedule->GetNextStart(FDateTime::Now(),Next));
+ TestTrue(TEXT("Five seconds to combat"),(Next-FDateTime::Now()).GetTotalSeconds()<=5.1);
+ T.Battle->StartBattle(); FBattleUnificationTestAccess::Prepare(T.Battle);
+ for (const FString Id : {FString(TEXT("operator")),FString(TEXT("demo")),FString(TEXT("viewer"))})
+  T.DispatchRaw(Id,TEXT("!로그인 글라디우스"));
+ auto* Widget=CreateWidget<ULeaderboardRotatorWidget>(T.Instance);
+ Widget->BattleManager=T.Battle;
+ const auto Total=Widget->RankTotal();
+ TestEqual(TEXT("Total includes only regular viewers"),Total.Num(),1);
+ if(Total.Num()==1) TestEqual(TEXT("Filtered ranks are contiguous"),Total[0].Rank,1);
+ TestEqual(TEXT("Battle includes all roles"),Widget->RankBattle().Num(),3);
+ T.Battle->SaveRecords();
+ TestTrue(TEXT("Player file reloads"),T.Battle->ReloadExternalFiles());
+ TestEqual(TEXT("Reload retains active participants"),T.Battle->GetBattlePlayers().Num(),3);
+ FFileHelper::SaveStringToFile(TEXT("{"),*UserPath);
+ TestFalse(TEXT("Partial file rejected"),A->LoadFromFile(UserPath));
+ TestTrue(TEXT("Last valid exhibit survives malformed reload"),A->IsExhibit(TEXT("demo")));
+ TestTrue(TEXT("Last valid admin survives malformed reload"),A->IsAdmin(TEXT("operator")));
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNicknameTargetResolverTest,"Gladius.Admin.NicknameTargetResolution",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FNicknameTargetResolverTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* A=T.Instance->GetSubsystem<UAdminSubsystem>();
+ const FString Path=FAdminTestAccess::Path(A);
+ FFileHelper::SaveStringToFile(TEXT(R"({"users":[{"userId":"target1","displayName":"@홍 길동","permission":"user"},{"userId":"target2","displayName":"중복","permission":"user"},{"userId":"target3","displayName":"@중복","permission":"user"},{"userId":"@verified","channelId":"verified-channel","displayName":"인증된 별칭","permission":"user"}]})"),*Path);
+ TestTrue(TEXT("Load isolated users"),A->LoadFromFile(Path));
+ FString Id,Name; bool Ambiguous=false;
+ TestTrue(TEXT("Display nickname with spaces resolves"),A->ResolveUserTarget(TEXT("홍 길동"),T.Battle,Id,Name,Ambiguous));
+ TestEqual(TEXT("Nickname maps to stable account"),Id,FString(TEXT("target1")));
+ TestTrue(TEXT("At-prefix and whitespace accepted"),A->ResolveUserTarget(TEXT("  @홍 길동  "),T.Battle,Id,Name,Ambiguous));
+ TestTrue(TEXT("Exact ID compatibility"),A->ResolveUserTarget(TEXT("target1"),T.Battle,Id,Name,Ambiguous));
+ TestFalse(TEXT("Duplicate nickname rejected"),A->ResolveUserTarget(TEXT("중복"),T.Battle,Id,Name,Ambiguous));
+ TestTrue(TEXT("Duplicate explicitly reported"),Ambiguous);
+ TestTrue(TEXT("Registered verified alias resolves canonically"),A->ResolveUserTarget(TEXT("인증된 별칭"),T.Battle,Id,Name,Ambiguous));
+ TestEqual(TEXT("Alias uses channel identity"),Id,FString(TEXT("verified-channel")));
+ TestFalse(TEXT("Unknown nickname rejected"),A->ResolveUserTarget(TEXT("없는 닉네임"),T.Battle,Id,Name,Ambiguous));
+ TestFalse(TEXT("Unknown is not duplicate"),Ambiguous);
+ TestTrue(TEXT("Resolution does not invent a user"),A->FindUser(TEXT("없는 닉네임"))==nullptr);
+ T.Battle->StartBattle(); FBattleUnificationTestAccess::Prepare(T.Battle);
+ T.Battle->LoginPlayer(TEXT("target1"),TEXT("@홍 길동"),TEXT("gladius"));
+ A->RegisterUser(TEXT("target1"),TEXT("@새 닉네임"));
+ TestTrue(TEXT("Latest chat nickname resolves"),A->ResolveUserTarget(TEXT("새 닉네임"),T.Battle,Id,Name,Ambiguous));
+ TestFalse(TEXT("Stale record nickname is not retained as an alias"),A->ResolveUserTarget(TEXT("홍 길동"),T.Battle,Id,Name,Ambiguous));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FExhibitNicknameEventTest,"Gladius.Admin.ExhibitEventsByNickname",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FExhibitNicknameEventTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* A=T.Instance->GetSubsystem<UAdminSubsystem>();
+ auto* Log=T.Instance->GetSubsystem<USessionLogSubsystem>();
+ const FString Path=FAdminTestAccess::Path(A);
+ FFileHelper::SaveStringToFile(TEXT(R"({"users":[{"userId":"operator","permission":"admin"},{"userId":"exhibitor","displayName":"전시 운영","permission":"exhibit"},{"userId":"viewer","permission":"user"},{"userId":"recipient","displayName":"@홍 길동","permission":"user"},{"userId":"offline","displayName":"오프라인 닉","permission":"user"},{"userId":"duplicate1","displayName":"중복","permission":"user"},{"userId":"duplicate2","displayName":"@중복","permission":"user"}]})"),*Path);
+ TestTrue(TEXT("Load isolated roles"),A->LoadFromFile(Path));
+ auto Send=[&](const FString& Sender,const TCHAR* Text)
+ {
+  FParsedCommand C; TestTrue(TEXT("Parse command"),FChatCommandParser::TryParse(Sender,Text,C));
+  C.Username=Sender==TEXT("exhibitor")?TEXT("전시 운영"):Sender;
+  A->HandleAdminCommand(C,T.Battle);
+ };
+ T.Battle->StartBattle(); FBattleUnificationTestAccess::Prepare(T.Battle);
+ T.Battle->LoginPlayer(TEXT("recipient"),TEXT("@홍 길동"),TEXT("gladius"));
+ const auto Before=T.Battle->GetBattlePlayers().FindChecked(TEXT("recipient"));
+ Send(TEXT("viewer"),TEXT("!이벤트 @홍 길동"));
+ TestFalse(TEXT("Ordinary viewers cannot grant events"),A->HasEventBuff(TEXT("recipient")));
+ Send(TEXT("exhibitor"),TEXT("!이벤트 홍 길동"));
+ TestTrue(TEXT("Exhibit can grant by nickname"),A->HasEventBuff(TEXT("recipient")));
+ const auto After=T.Battle->GetBattlePlayers().FindChecked(TEXT("recipient"));
+ TestEqual(TEXT("Active recipient health bonus applied"),After.MaxHP,Before.MaxHP+1);
+ TestEqual(TEXT("Active recipient attack bonus applied"),After.DamageBonus,Before.DamageBonus+5);
+ TestTrue(TEXT("Notification uses exhibitor name"),Log->GetEntries().Last().Message.StartsWith(TEXT("[전시 운영]")));
+ TestTrue(TEXT("No nickname-keyed phantom account"),A->FindUser(TEXT("홍 길동"))==nullptr);
+ Send(TEXT("exhibitor"),TEXT("!이벤트 @홍 길동"));
+ TestEqual(TEXT("Event remains nonstacking across nickname forms"),T.Battle->GetBattlePlayers().FindChecked(TEXT("recipient")).MaxHP,After.MaxHP);
+ Send(TEXT("operator"),TEXT("!이벤트 오프라인 닉"));
+ TestTrue(TEXT("Offline known user can receive event by name"),A->HasEventBuff(TEXT("offline")));
+ Send(TEXT("exhibitor"),TEXT("!이벤트 중복"));
+ TestFalse(TEXT("Duplicate first user unchanged"),A->HasEventBuff(TEXT("duplicate1")));
+ TestFalse(TEXT("Duplicate second user unchanged"),A->HasEventBuff(TEXT("duplicate2")));
+ TestEqual(TEXT("Ambiguity produces visible error"),Log->GetEntries().Last().Event,ESessionLogEvent::AdminUrgent);
+ Send(TEXT("exhibitor"),TEXT("!이벤트 등록되지 않은 이름"));
+ TestTrue(TEXT("Unknown names cannot create a target row"),A->FindUser(TEXT("등록되지 않은 이름"))==nullptr);
+ const int32 LogCount=Log->GetEntries().Num();
+ Send(TEXT("exhibitor"),TEXT("!공지 금지"));
+ Send(TEXT("exhibitor"),TEXT("!패치"));
+ Send(TEXT("exhibitor"),TEXT("!차단 @홍 길동 1"));
+ Send(TEXT("exhibitor"),TEXT("!점검 전체"));
+ TestEqual(TEXT("Other privileged commands remain denied"),Log->GetEntries().Num(),LogCount);
+ TestFalse(TEXT("Exhibit cannot block"),A->IsBlocked(TEXT("recipient"),FDateTime::UtcNow()));
+ TestTrue(TEXT("Exhibit cannot enable maintenance"),A->CanInput(TEXT("viewer"),EGameState::Temple));
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNicknameModerationTest,"Gladius.Admin.ModerationByNickname",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FNicknameModerationTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* A=T.Instance->GetSubsystem<UAdminSubsystem>();
+ const FString Path=FAdminTestAccess::Path(A);
+ FFileHelper::SaveStringToFile(TEXT(R"({"users":[{"userId":"operator","permission":"admin"},{"userId":"target","displayName":"@공백 닉","permission":"user"},{"userId":"numeric","displayName":"닉네임 2","permission":"user"}]})"),*Path);
+ TestTrue(TEXT("Load isolated moderation users"),A->LoadFromFile(Path));
+ auto Send=[&](const TCHAR* Text)
+ {
+  FParsedCommand C; FChatCommandParser::TryParse(TEXT("operator"),Text,C); A->HandleAdminCommand(C,T.Battle);
+ };
+ Send(TEXT("!차단 @공백 닉 0.5"));
+ TestTrue(TEXT("Spaced nickname blocked"),A->IsBlocked(TEXT("target"),FDateTime::UtcNow()));
+ FDateTime Until; FDateTime::ParseIso8601(*A->FindUser(TEXT("target"))->BlockTime,Until);
+ TestTrue(TEXT("Duration still parsed after a spaced nickname"),FMath::Abs((Until-FDateTime::UtcNow()).GetTotalSeconds()-1800)<3);
+ Send(TEXT("!차단해제 공백 닉"));
+ TestFalse(TEXT("Spaced nickname unblocked"),A->IsBlocked(TEXT("target"),FDateTime::UtcNow()));
+ Send(TEXT("!차단 닉네임 2"));
+ TestTrue(TEXT("Trailing number can be part of the exact nickname"),A->IsBlocked(TEXT("numeric"),FDateTime::UtcNow()));
+ FDateTime::ParseIso8601(*A->FindUser(TEXT("numeric"))->BlockTime,Until);
+ TestEqual(TEXT("Exact numeric name uses default one-year duration"),Until.GetYear(),FDateTime::UtcNow().GetYear()+1);
  return true;
 }
 

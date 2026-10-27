@@ -397,3 +397,15 @@ void ATempleCycleController::SetAIMaintenance(bool bEnabled)
  if (BatchClient) BatchClient->CancelActiveBatch();
  if (Goddess) Goddess->SetNoTalks();
 }
+
+bool ATempleCycleController::ReloadExternalConnections()
+{
+ const auto Settings = GladiusExternalData::Connections();
+ if (!Settings) return false;
+ FString Endpoint, Token;
+ if (!Settings->TryGetStringField(TEXT("TempleAIBatchEndpointUrl"), Endpoint)
+  || !Settings->TryGetStringField(TEXT("TempleAIClientToken"), Token)) return false;
+ TempleAIBatchEndpointUrl = Endpoint; TempleAIClientToken = Token;
+ if (BatchClient) { BatchClient->EndpointUrl = Endpoint; BatchClient->ClientToken = Token; }
+ return true;
+}

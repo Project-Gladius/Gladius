@@ -1,4 +1,5 @@
 #include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Battle/BattleTutorialController.h"
 #include "Scripts/Cinematics/LevelTransitionCinematics.h"
 #include "Scripts/Battle/BattleUnit.h"
 #include "Scripts/Battle/BattlePlayerNameplate.h"
@@ -195,6 +196,7 @@ void ABattleManager::StartBattle()
 {
  BindActionKeys();
  StopBattle();
+ if (bBalanceReloadPending) { ApplyBalanceFiles(); bBalanceReloadPending = false; }
  bBattleStartDelayElapsed = false;
  bBattleRunning = true;
  Phase = EBattlePhase::BattleStart;
@@ -224,6 +226,12 @@ void ABattleManager::StartBattle()
 	// A new battle starts with a fresh participant list; persistent Records are retained.
 	SpawnBoss();
 	UpdateVisuals();
+    if (bEnableEntryTutorial && URealTimeSettings::MatchesMap(GetWorld(), GetDefault<URealTimeSettings>()->BattleMap))
+    {
+        Tutorial = NewObject<UBattleTutorialController>(this);
+        Tutorial->BeginEntry(this);
+        return;
+    }
 	InputPhaseDuration = FMath::Max(0.f, BattleStartSeconds);
  InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
  GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::HandleBattleStartDelayElapsed, FMath::Max(0.001f, BattleStartSeconds), false);
@@ -251,6 +259,7 @@ void ABattleManager::HandleBattleStartDelayElapsed()
 
 void ABattleManager::TryStartFirstTurn()
 {
+ if (Tutorial && Tutorial->IsActive()) return;
  if (!bBattleRunning || Phase != EBattlePhase::BattleStart || !bBattleStartDelayElapsed) return;
  if (GetWorld()->GetSubsystem<ULevelTransitionCinematics>()->IsPlaying()) return;
  StartTurn();
@@ -271,6 +280,7 @@ void ABattleManager::TravelToTemple()
 
 void ABattleManager::StopBattle()
 {
+ if (Tutorial) Tutorial->Shutdown();
  WalkRunOnlyCutSceneUnit.Reset();
  if (bBattleRunning) SaveRecords();
  bBattleRunning = false;
@@ -622,7 +632,7 @@ FString ABattleManager::SaveFilePath()
 
 void ABattleManager::SaveRecords()
 {
- if (bRecordLoadFailed) return;
+ if (bRecordLoadFailed || IsTutorialPracticing()) return;
  for (const auto& Pair : Players)
  {
   if (FPlayerRecord* Record = Records.Find(Pair.Key)) Record->CurrentHealth = Pair.Value.HP;
@@ -911,6 +921,7 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 			(UnitClass && *UnitClass) ? UnitClass->Get() : ABattleUnit::StaticClass(),
 			NewPlayer.TargetLocation, FRotator::ZeroRotator);
 		if (!IsValid(NewPlayer.Unit)) return false;
+  NewPlayer.Unit->SnapMeshToGround();
 		//바로 안 불러주면 다음 판정 때까지 컴포넌트 기본 문자열이 보인다
 		NewPlayer.Unit->SetLabel(DisplayName, NewPlayer.HP, NewPlayer.MaxHP);
 		NewPlayer.Unit->OnHitLanded.AddUObject(this, &ABattleManager::HandleHitLanded, UserId);
@@ -923,6 +934,13 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 #endif
 
 		Player = &Players.Add(UserId, NewPlayer);
+  if (Tutorial) Tutorial->OnPlayerRegistered(UserId);
+  // A zero-health rejoin is registered, but remains dead until its normal revival turn.
+  if (!Player->IsAlive() && IsValid(Player->Unit))
+  {
+   Player->Unit->NotifyDied();
+   Player->Unit->SetActorHiddenInGame(true);
+  }
   SessionStats.RegisterPlayer(UserId, DisplayName, Record.CharacterId);
   SaveRecords();
 
@@ -941,8 +959,10 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 	}
 
 	//사망 중이면 입력을 받지 않는다
-	if (Player->ReviveCountdown > 0)
+	if (!Player->IsAlive())
 	{
+  // Registration can succeed without accepting Idle as an action. Still initialize the full UI.
+  RefreshPlayerUI();
 		return false;
 	}
 
@@ -954,11 +974,12 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 
 	//마지막에 들어온 입력이 이김
 	Player->PendingAction = Action;
+ if (Tutorial && Action != EBattleAction::Idle) Tutorial->OnActionAccepted();
 	Player->bActedThisTurn = true;
 
 	//고른 즉시 준비 자세로 바꾼다. 실제 행동은 행동 턴에 일괄 재생되므로
 	//여기서 공격 모션을 틀면 중복으로 때리는 것처럼 보인다
-	if (Player->Unit && Player->ReviveCountdown == 0)
+	if (Player->Unit && Player->IsAlive())
 	{
 		Player->Unit->NotifyActionSelected(Action);
 	}
@@ -993,7 +1014,7 @@ void ABattleManager::StartTurn()
 
 		//준비 자세를 풀라는 신호. 유닛은 턴이 바뀐 걸 알 방법이 없어서
 		//여기서 Idle을 한 번 쏴 줘야 지난 턴 자세로 계속 서 있지 않는다
-		if (Pair.Value.Unit && Pair.Value.ReviveCountdown == 0)
+		if (Pair.Value.Unit && Pair.Value.IsAlive())
 		{
 			Pair.Value.Unit->NotifyActionSelected(EBattleAction::Idle);
 
@@ -1070,7 +1091,7 @@ FString ABattleManager::SelectTurnCutSceneUser(const TMap<FString, FBattlePlayer
  for (const auto& Pair : Candidates)
  {
   const FBattlePlayer& P = Pair.Value;
-  if (P.HP <= 0 || P.ReviveCountdown > 0 || !IsValid(P.Unit) || !CharacterClasses.IsValidIndex(P.ClassIndex)
+  if (!P.IsAlive() || !IsValid(P.Unit) || !CharacterClasses.IsValidIndex(P.ClassIndex)
    || CutSceneIdsFor(CharacterClasses[P.ClassIndex].Id, P.PendingAction).IsEmpty()) continue;
   if (P.Fever > HighestFever) { HighestFever = P.Fever; Ids.Reset(); }
   if (P.Fever == HighestFever) Ids.Add(Pair.Key);
@@ -1153,7 +1174,7 @@ void ABattleManager::StartSelectedGladiusAttack()
  if (!bBattleRunning || (Phase != EBattlePhase::Move && Phase != EBattlePhase::BossAction)
      || CutSceneAttackUserId == CutSceneUserId) return;
  const FBattlePlayer* P = Players.Find(CutSceneUserId);
- if (!P || !IsValid(P->Unit) || P->HP <= 0 || P->ReviveCountdown > 0
+ if (!P || !IsValid(P->Unit) || !P->IsAlive()
      || !Classes.IsValidIndex(P->ClassIndex) || Classes[P->ClassIndex].Id != TEXT("gladius")
      || (P->PendingAction != EBattleAction::Attack1 && P->PendingAction != EBattleAction::Attack2)) return;
  P->Unit->OnMovementFinished.RemoveAll(this);
@@ -1318,21 +1339,39 @@ bool ABattleManager::SetPlayerHealth(const FString& UserId, int32 CurrentHealth)
  FBattlePlayer* Player = Players.Find(UserId);
  FPlayerRecord* Record = Records.Find(UserId);
  if (!Player || !Record) return false;
+ const bool bWasDead = !Player->IsAlive() || Player->bDiedThisTurn || (IsValid(Player->Unit) && Player->Unit->IsDead());
  const int32 Health = FMath::Clamp(CurrentHealth, 0, Player->MaxHP);
- if (Player->HP == Health && Record->CurrentHealth == Health) return true;
  Player->HP = Health;
- Record->CurrentHealth = Health;
+ if (!IsTutorialPracticing()) Record->CurrentHealth = Health;
  if (Health == 0)
  {
-  Player->ReviveCountdown = FMath::Max(1, ReviveTurns);
-  Player->bDiedThisTurn = true;
+  // Repeated zero-health updates must not restart the revival countdown.
+  if (Player->ReviveCountdown <= 0) Player->ReviveCountdown = FMath::Max(1, ReviveTurns);
+  Player->PendingAction = EBattleAction::Idle;
+  Player->bActedThisTurn = false;
+  Player->bDiedThisTurn = false;
+  Player->DamageTakenThisTurn = 0; Player->HPLossToShow = 0;
+  if (IsValid(Player->Unit))
+  {
+   Player->Unit->NotifyDied();
+   Player->Unit->SetActorHiddenInGame(true);
+  }
  }
- else if (Player->ReviveCountdown > 0)
+ else
  {
+  // Repair all death markers even when HP already matches or the countdown was already zero.
   Player->ReviveCountdown = 0;
   Player->bDiedThisTurn = false;
-  if (IsValid(Player->Unit)) Player->Unit->NotifyRevived();
+  if (bWasDead)
+  {
+   Player->PendingAction = EBattleAction::Idle;
+   Player->bActedThisTurn = false; Player->IdleTurns = 0;
+   Player->DamageTakenThisTurn = 0; Player->HPLossToShow = 0;
+   Player->HitsToShow.Reset(); Player->EarlyHitReports = 0;
+   if (IsValid(Player->Unit)) Player->Unit->NotifyRevived();
+  }
  }
+ RefreshPlayerUI();
  SaveRecords();
  return true;
 }
@@ -1370,6 +1409,7 @@ FString ABattleManager::ResolveCharacterId(const FString& NameOrId) const
 
 bool ABattleManager::LoginPlayer(const FString& UserId, const FString& DisplayName, const FString& CharacterName)
 {
+ if (Tutorial && Tutorial->IsActive() && !Tutorial->AcceptsLogin()) return false;
  if (UserId.TrimStartAndEnd().IsEmpty() || !bBattleRunning)
  {
   return false;
@@ -1407,6 +1447,7 @@ bool ABattleManager::LoginPlayer(const FString& UserId, const FString& DisplayNa
 
  UE_LOG(LogTemp, Log, TEXT("[Battle] 로그인: %s [%s]"), *UserId, *CharacterId);
  OnPlayerLoggedIn.Broadcast(UserId, DisplayName, CharacterId);
+ if (Tutorial) Tutorial->OnLoginSucceeded();
  return true;
 }
 
@@ -1427,6 +1468,7 @@ const FCharacterMotionTimes& ABattleManager::MotionTimesFor(int32 ClassIndex) co
 void ABattleManager::BeginMove()
 {
  if (!bBattleRunning) return;
+ if (Tutorial) Tutorial->OnInputClosed();
  StopTurnCutScenes();
  WalkRunOnlyCutSceneUnit.Reset();
 	Phase = EBattlePhase::Move;
@@ -1442,7 +1484,7 @@ void ABattleManager::BeginMove()
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (!P.Unit || P.ReviveCountdown > 0)
+		if (!P.Unit || !P.IsAlive())
 		{
 			continue;
 		}
@@ -1635,7 +1677,7 @@ void ABattleManager::ResolveTurn()
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (P.ReviveCountdown == 0)
+		if (P.IsAlive())
 		{
 			//어느 경계를 넘어야 하는지는 '어디서 어디로'가 정한다. 지금 적어 둔다
 			P.LaneBeforeMove = P.Lane;
@@ -1658,7 +1700,7 @@ void ABattleManager::ResolveTurn()
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (P.Unit && P.ReviveCountdown == 0 && P.PendingAction == EBattleAction::Defense)
+		if (P.Unit && P.IsAlive() && P.PendingAction == EBattleAction::Defense)
 		{
 			//!방어 -> 캐릭터의 Defend (막는 모션 + 버티는 자세 상태)
 			P.Unit->Defend();
@@ -1680,9 +1722,18 @@ void ABattleManager::ResolveTurn()
 	{
 		FBattlePlayer& P = Pair.Value;
 		FPlayerRecord* Record = Records.Find(Pair.Key);
+        FPlayerRecord PracticeRecord;
+        if (Record && IsTutorialPracticing()) { PracticeRecord=*Record; Record=&PracticeRecord; }
 
+  // Recover an orphaned zero-HP participant instead of leaving them permanently actionless.
+  if (P.HP <= 0 && P.ReviveCountdown <= 0)
+  {
+   P.ReviveCountdown = FMath::Max(1, ReviveTurns);
+   P.PendingAction = EBattleAction::Idle;
+   if (IsValid(P.Unit)) { P.Unit->NotifyDied(); P.Unit->SetActorHiddenInGame(true); }
+  }
 		//게임 오버 중에는 입력할 수 없으므로 무입력으로 세지 않는다
-		if (P.ReviveCountdown == 0)
+		if (P.IsAlive())
 		{
 			P.IdleTurns = P.bActedThisTurn ? 0 : P.IdleTurns + 1;
 		}
@@ -1692,7 +1743,7 @@ void ABattleManager::ResolveTurn()
 			// ponytail: 기획상 부활 전에 '아직 시청 중인지'를 확인해야 하지만
 			// 그건 YouTube API라 여기서는 항상 시청 중이라고 본다.
 			// 슈퍼챗 즉시부활도 아직 없다
-			if (--P.ReviveCountdown == 0)
+			if (P.ReviveCountdown == 1)
 			{
 				//부활하면서 강화 능력치의 GameOverLoss 비율을 잃는다
 				if (Record)
@@ -1706,17 +1757,18 @@ void ABattleManager::ResolveTurn()
 				}
 
 				//부활은 처음 참가한 것과 같은 상태로 되돌린다
-				SetPlayerHealth(Pair.Key, P.MaxHP);
+    if (!SetPlayerHealth(Pair.Key, P.MaxHP))
+    {
+     UE_LOG(LogTemp, Warning, TEXT("[Battle] Revival deferred: missing record for %s"), *Pair.Key);
+     continue;
+    }
 				P.Fever = Balance.InitialFever;
 				P.EvadeStreak = Balance.InitialEvadeStreak;
 				++Revived;
 				RevivedNames.Add(P.DisplayName.IsEmpty() ? Pair.Key : P.DisplayName);
 
-				if (P.Unit)
-				{
-					P.Unit->NotifyRevived();
-				}
 			}
+   else --P.ReviveCountdown;
 			continue;
 		}
 
@@ -1862,7 +1914,7 @@ void ABattleManager::ResolveTurn()
 	TArray<FString> Leaving;
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
 	{
-		if (Pair.Value.IdleTurns >= IdleTurnsBeforeKick)
+		if (!IsTutorialPracticing() && Pair.Value.IdleTurns >= IdleTurnsBeforeKick)
 		{
 			Leaving.Add(Pair.Key);
 		}
@@ -2122,7 +2174,7 @@ void ABattleManager::BeginEvadeApproach(EBattleLane Leaving)
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction) || P.LaneBeforeMove != Leaving)
+		if (!P.Unit || !P.IsAlive() || !IsEvade(P.PendingAction) || P.LaneBeforeMove != Leaving)
 		{
 			continue;
 		}
@@ -2182,7 +2234,7 @@ void ABattleManager::BeginEvadeRolls(EBattleLane Leaving)
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		FBattlePlayer& P = Pair.Value;
-		if (!P.Unit || P.ReviveCountdown > 0 || !IsEvade(P.PendingAction) || P.LaneBeforeMove != Leaving)
+		if (!P.Unit || !P.IsAlive() || !IsEvade(P.PendingAction) || P.LaneBeforeMove != Leaving)
 		{
 			continue;
 		}
@@ -2209,7 +2261,7 @@ void ABattleManager::BossAttackBeat()
 {
 	//맞은 연출이 끝났으니 이제 보스가 친다. 피해는 ResolveTurn에서 이미 반영됐다.
 	//예고한 것과 같은 행동이므로 MotionId도 그때 보여준 것과 짝이 맞는다
-	if (BossUnit)
+	if (BossUnit && !(Tutorial && Tutorial->SuppressesBossAttack()))
 	{
 		BossUnit->OnBossAttack(TelegraphedAction.AttackMotion(), TelegraphedAction.HitCount);
 	}
@@ -2334,7 +2386,7 @@ void ABattleManager::EndTurn()
 	for (const TPair<FString, FBattlePlayer>& Pair : Players)
 	{
 		const FBattlePlayer& P = Pair.Value;
-		if (P.Unit && P.ReviveCountdown == 0)
+		if (P.Unit && P.IsAlive())
 		{
 			const float Distance = FVector::Dist(P.Unit->GetActorLocation(), P.TargetLocation);
 			P.Unit->MoveTo(P.TargetLocation, ReturnSeconds,
@@ -2360,6 +2412,12 @@ void ABattleManager::EndTurn()
 
 	//보스는 체력이 없으므로 격파로 끝나는 길이 없다. 끝나는 조건은 이것 하나다 —
 	//정해진 턴을 다 치르면, 얼마나 버텼고 얼마나 넣었는지로 결과가 갈린다
+    if (IsTutorialPracticing())
+    {
+        GetWorldTimerManager().SetTimer(PhaseTimerHandle, Tutorial.Get(), &UBattleTutorialController::OnTurnFinished,
+            FMath::Max(.001f,FMath::Max(ReturnSeconds,ResolveSeconds)),false);
+        return;
+    }
 	if (TurnIndex >= Turns)
 	{
 		FString TopName;
@@ -2368,7 +2426,7 @@ void ABattleManager::EndTurn()
 		for (const TPair<FString, FBattlePlayer>& Pair : Players)
 		{
 			const FBattlePlayer& P = Pair.Value;
-			if (P.ReviveCountdown == 0)
+			if (P.IsAlive())
 			{
 				++Alive;
 			}
@@ -2431,7 +2489,8 @@ void ABattleManager::ApplyBalanceFiles()
 	}
 
 	const FString Folder = BalanceFolderPath();
-	if (!Balance.LoadFromFolder(Folder))
+	FBattleBalance NextBalance;
+	if (!NextBalance.LoadFromFolder(Folder))
 	{
 		//기획서 7절: 모르는 값을 조용히 기본값으로 대체하지 않는다.
 		//전부 포기하고 에디터에 들어 있던 값으로 진행한다
@@ -2439,6 +2498,7 @@ void ABattleManager::ApplyBalanceFiles()
 		return;
 	}
 
+	Balance = MoveTemp(NextBalance);
 	FeverIncrement = Balance.AttackFeverGain;
 	DefenseFeverGain = Balance.DefenseFeverGain;
 	FeverDamageCoefficient = Balance.FeverDamageCoefficient;
@@ -2574,7 +2634,7 @@ void ABattleManager::ResolveBattleStartTarget()
 	for (const auto& Pair : Players)
 	{
 		const FBattlePlayer& Player = Pair.Value;
-		if (Player.HP <= 0 || Player.ReviveCountdown > 0) continue;
+		if (!Player.IsAlive()) continue;
 		const int32 Lane = static_cast<int32>(Player.Lane);
 		if (Lane < 0 || Lane >= 3) continue;
 		++Counts[Lane];
@@ -2708,7 +2768,7 @@ void ABattleManager::UpdateVisuals()
 		}
 
 		//사망 중에는 자리만 잡아두고 숨긴다
-		P.Unit->SetActorHiddenInGame(P.ReviveCountdown > 0);
+		P.Unit->SetActorHiddenInGame(!P.IsAlive());
 
 	}
 	RefreshPlayerUI();
@@ -2759,7 +2819,7 @@ void ABattleManager::RefreshPlayerUI()
 
 		Player.Unit->SetPlayerUI(Data);
 		//이번 턴에 쓰러질 사람도 칼이 닿을 때까지는 이름표를 남긴다
-		Player.Unit->SetPlayerUIVisible(bShowInPhase && (Player.ReviveCountdown == 0 || Player.HPLossToShow > 0)
+		Player.Unit->SetPlayerUIVisible(bShowInPhase && (Player.IsAlive() || Player.HPLossToShow > 0)
 			&& (!bCutScenePlaying || Pair.Key == CutSceneUserId));
 	}
 }
@@ -3544,4 +3604,28 @@ void ABattleManager::AddTestPlayer(const FString& CharacterId)
     while (Players.Contains(Id) || Records.Contains(Id));
     const FString Name = FString::Printf(TEXT("테스터%02d"), Index - 1);
     if (LoginPlayer(Id, Name, CharacterId)) DebugUserId = Id;
+}
+
+
+bool ABattleManager::RequestTutorial() { return Tutorial && Tutorial->RequestTutorial(); }
+bool ABattleManager::IsTutorialPracticing() const { return Tutorial && Tutorial->IsPracticing(); }
+bool ABattleManager::GetTutorialHud(FBattleTopHudState& Out) const
+{
+ if (!Tutorial || !Tutorial->IsActive()) return false;
+ Out=Tutorial->BuildHud(); return true;
+}
+
+bool ABattleManager::ReloadExternalFiles()
+{
+ FBattleBalance Checked;
+ if (bUseBalanceFiles && !Checked.LoadFromFolder(BalanceFolderPath())) return false;
+ FString Json; FPlayerRecordFile File;
+ if (!FFileHelper::LoadFileToString(Json, *RecordFilePath()) || !FJsonObjectConverter::JsonObjectStringToUStruct(Json, &File)) return false;
+ if (bBattleRunning) bBalanceReloadPending = true;
+ else ApplyBalanceFiles();
+ LoadRecords();
+ if (bRecordLoadFailed) return false;
+ // Active participants keep their current combat snapshot; loaded records update the next login.
+ RefreshPlayerUI();
+ return true;
 }

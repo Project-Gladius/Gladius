@@ -21,6 +21,9 @@
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
 #include "TimerManager.h"
+#include "Components/InputComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "InputCoreTypes.h"
 //이걸 왜 헤더가 아니라 여기다가 추가한거지? -> .h를 참조하는 모든 cpp에 헤더가 박히면 느려짐
 
 // Sets default values
@@ -35,6 +38,7 @@ AYouTubeChatManager::AYouTubeChatManager()
 void AYouTubeChatManager::BeginPlay()
 {
 	Super::BeginPlay();
+ BindLocalPatchKey();
 
 	if (!GameManagerRef)
 	{
@@ -80,6 +84,8 @@ UCommandDispatcher* AYouTubeChatManager::GetCommandDispatcher()
 void AYouTubeChatManager::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+ // PlayerController can appear after this actor, or be replaced during play.
+ BindLocalPatchKey();
 }
 
 void AYouTubeChatManager::InitializeKeyPool()
@@ -495,6 +501,7 @@ void AYouTubeChatManager::OnChatMessagesResponse(FHttpRequestPtr Request, FHttpR
 		AuthorObj->TryGetBoolField(TEXT("isChatOwner"), bOwner);
 		const bool bYouTubeAdmin = bModerator || bOwner;
 		ProcessComment(CommentId, UserId, Username, Content, PostedAt, bYouTubeAdmin);
+  if (Request != ActiveChatRequest) { OnChatFetchFinished.Broadcast(true); return; }
 	}
 
 	//UE_LOG(LogTemp, Log, TEXT(">>> [%.1f초] 뒤에 다음 채팅을 요청합니다. (NextPageToken: %s)"), NextPollDelay, *NextPageToken); //디버깅용
@@ -637,12 +644,28 @@ void AYouTubeChatManager::RefreshBroadcastSettings()
  }
  else Timers.ClearTimer(BroadcastRefreshTimerHandle);
  if (!bValid) return; // Keep the last valid values while the file is being edited.
+ FString NextVideo = VideoId;
+ if ((*YouTube)->HasField(TEXT("videoId")) && !(*YouTube)->TryGetStringField(TEXT("videoId"), NextVideo)) return;
+ NextVideo.TrimStartAndEndInline();
+ const bool bVideoChanged = NextVideo != VideoId;
+ if (bVideoChanged)
+ {
+  StopFetchingChat(); CancelPendingChatFetch();
+  if (ActiveLiveChatRequest.IsValid())
+  {
+   ActiveLiveChatRequest->OnProcessRequestComplete().Unbind(); ActiveLiveChatRequest->CancelRequest();
+   ActiveLiveChatRequest.Reset();
+  }
+  bLiveChatIdInFlight = false;
+  LiveChatId.Reset(); NextPageToken.Reset(); VideoId = NextVideo;
+  IgnoreMessagesBefore = FDateTime::UtcNow();
+ }
  const bool bKeysChanged = KeyPool->ReplaceKeys(Keys);
  BroadcastStreamKey = MoveTemp(StreamKey);
  if (Keys.IsEmpty()) { StopFetchingChat(); return; }
  if (UGameInstance* Instance = GetGameInstance())
   Instance->GetSubsystem<UChatLogSubsystem>()->SetYouTubeSource(CurrentApiKey(), VideoId, AdminUserIds);
- if (!bBroadcastFetchingStarted || !bKeysChanged) return;
+ if (!bBroadcastFetchingStarted || (!bKeysChanged && !bVideoChanged)) return;
  if (LiveChatId.IsEmpty())
  {
   if (ActiveLiveChatRequest.IsValid())
@@ -659,6 +682,8 @@ void AYouTubeChatManager::RefreshBroadcastSettings()
 
 void AYouTubeChatManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+ DisableInput(LocalPatchController.Get());
+ LocalPatchController.Reset(); LocalPatchInput.Reset();
  bBroadcastFetchingStarted = false;
  GetWorldTimerManager().ClearTimer(BroadcastRefreshTimerHandle);
  GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
@@ -669,4 +694,52 @@ void AYouTubeChatManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
  }
  CancelPendingChatFetch();
  Super::EndPlay(EndPlayReason);
+}
+
+bool AYouTubeChatManager::ReloadBroadcastSettings()
+{
+ const FString Path = BroadcastSettingsOverridePath.IsEmpty() ? FYouTubeApiKeyPool::GetDefaultKeyFilePath() : BroadcastSettingsOverridePath;
+ FString Json; TSharedPtr<FJsonObject> Root;
+ const TSharedPtr<FJsonObject>* YouTube = nullptr;
+ if (!FFileHelper::LoadFileToString(Json, *Path) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root)
+  || !Root || !Root->TryGetObjectField(TEXT("youtube"), YouTube) || !YouTube || !YouTube->IsValid()) return false;
+ for (const TCHAR* Field : {TEXT("videoId"), TEXT("streamKey")})
+  if (!(*YouTube)->HasTypedField<EJson::String>(Field)) return false;
+ const TArray<TSharedPtr<FJsonValue>>* Keys = nullptr;
+ if (!(*YouTube)->TryGetArrayField(TEXT("apiKeys"), Keys)) return false;
+ for (const auto& Key : *Keys) if (!Key || Key->Type != EJson::String) return false;
+ RefreshBroadcastSettings();
+ if (GetGameInstance()) GetGameInstance()->GetSubsystem<UAdminSubsystem>()->ResolveAdminHandles(CurrentApiKey());
+ return true;
+}
+
+void AYouTubeChatManager::BindLocalPatchKey()
+{
+ auto* Controller = UGameplayStatics::GetPlayerController(this, 0);
+ if (!Controller || !Controller->IsLocalController()) return;
+ if (LocalPatchController.Get() == Controller && LocalPatchInput.IsValid() && LocalPatchInput.Get() == InputComponent.Get()) return;
+ if (LocalPatchController.IsValid()) DisableInput(LocalPatchController.Get());
+ EnableInput(Controller);
+ if (!InputComponent) return;
+ // Reusing an input component must not register P a second time.
+ for (int32 Index=InputComponent->KeyBindings.Num()-1; Index>=0; --Index)
+  if (InputComponent->KeyBindings[Index].Chord.Key == EKeys::P) InputComponent->KeyBindings.RemoveAt(Index);
+ FInputKeyBinding Binding(FInputChord(EKeys::P), IE_Pressed);
+ Binding.bConsumeInput = false;
+ Binding.bExecuteWhenPaused = true;
+ Binding.KeyDelegate.GetDelegateForManualSet().BindUObject(this, &AYouTubeChatManager::HandleLocalPatchKey);
+ InputComponent->KeyBindings.Emplace(MoveTemp(Binding));
+ LocalPatchController = Controller;
+ LocalPatchInput = InputComponent;
+}
+
+void AYouTubeChatManager::HandleLocalPatchKey()
+{
+ // Local keyboard access is an operator action; no chat-user impersonation or permission edit is needed.
+ if (!GetGameInstance()) return;
+ if (auto* Admin = GetGameInstance()->GetSubsystem<UAdminSubsystem>())
+ {
+  auto* Battle = Cast<ABattleManager>(UGameplayStatics::GetActorOfClass(this, ABattleManager::StaticClass()));
+  Admin->ExecutePatch(Battle);
+ }
 }

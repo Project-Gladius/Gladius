@@ -5,6 +5,7 @@
 #include "Scripts/UI/BattleHud/BattleTopHudTypes.h"
 #include "BattleTopHudWidget.generated.h"
 
+class URichTextBlock;
 class ABattleManager;
 class ATempleCycleController;
 class UProgressBar;
@@ -85,6 +86,7 @@ private:
 	TWeakObjectPtr<ABattleManager> BattleManager;
 	TWeakObjectPtr<ATempleCycleController> TempleController;
 
+	UPROPERTY(Transient) TObjectPtr<URichTextBlock> RichGuideText;
 	bool bHasLastState = false;
 	FBattleTopHudState LastState;
 

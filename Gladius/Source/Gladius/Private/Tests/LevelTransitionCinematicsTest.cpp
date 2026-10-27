@@ -1,5 +1,6 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
+#include "Scripts/UI/BattleHud/BattleTopHudTypes.h"
 #include "BattleCameraTestAccess.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -190,8 +191,15 @@ public:
    Test->TestTrue(TEXT("First turn waits for real intro"),B->Phase==EBattlePhase::BattleStart);
    Phase=1;
   }
-  else if (Phase==1 && B && !C->IsPlaying() && B->Phase==EBattlePhase::Prepare)
+  else if (Phase==1 && B && !C->IsPlaying() && B->Phase==EBattlePhase::BattleStart)
   {
+   FBattleTopHudState Offer;
+   Test->TestTrue(TEXT("Intro ends at tutorial offer"),B->GetTutorialHud(Offer));
+   Test->TestEqual(TEXT("Offer shows turn zero"),Offer.TurnText,FString(TEXT("0")));
+   Test->TestFalse(TEXT("Offer hides timer"),Offer.bShowTimer);
+   Test->TestTrue(TEXT("Offer hides boss"),B->GetBossUnit()->IsHidden());
+   Test->TestTrue(TEXT("Login skips tutorial"),B->LoginPlayer(TEXT("transition_tutorial_skip"),TEXT("Transition Skip"),B->Classes[0].Id));
+   Test->TestTrue(TEXT("Normal battle starts after skip"),B->Phase==EBattlePhase::Prepare);
    FLevelTransitionTestAccess::EndBattle(B);
    Test->TestTrue(TEXT("Battle outro runs in BattleEnd"),B->Phase==EBattlePhase::BattleEnd);
    auto* Outro=FLevelTransitionTestAccess::Player(C);

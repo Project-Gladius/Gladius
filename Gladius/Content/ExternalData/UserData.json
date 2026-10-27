@@ -1,20 +1,32 @@
 {
-	"users": [
-		{
-			"userId": "@자작곡싸개",
-			"channelId": "UCMMVM77O6Ejb-968tWG-pGA",
-			"displayName": "",
-			"permission": "admin",
-			"adminName": "GM복어",
-			"eventBuff": false
-		},
-		{
-			"userId": "@WorkingHives",
-			"channelId": "UCM6b5Ew8oMDhsRZUjlWMXZQ",
-			"displayName": "",
-			"permission": "admin",
-			"adminName": "GM도리",
-			"eventBuff": false
-		}
-	]
+  "users": [
+    {
+      "userId": "@자작곡싸개",
+      "channelId": "UCMMVM77O6Ejb-968tWG-pGA",
+      "displayName": "",
+      "permission": "admin",
+      "adminName": "GM복어",
+      "eventBuff": false
+    },
+    {
+      "userId": "@WorkingHives",
+      "channelId": "UCM6b5Ew8oMDhsRZUjlWMXZQ",
+      "displayName": "",
+      "permission": "admin",
+      "adminName": "GM도리",
+      "eventBuff": false
+    },
+    {
+      "userId": "UC2pwE-IygCdP96O1T2J9R_Q",
+      "displayName": "@글라디우스_R777",
+      "eventBuff": false,
+      "permission": "exhibit"
+    },
+    {
+      "userId": "UCJAbSeOxSD7ulRDIRC1Cbvg",
+      "displayName": "@GLADIUS-전시용",
+      "eventBuff": false,
+      "permission": "exhibit"
+    }
+  ]
 }

@@ -7,6 +7,8 @@
 #include "Scripts/Battle/BattleUnit.h"
 #include "BattleManager.generated.h"
 
+class UBattleTutorialController;
+struct FBattleTopHudState;
 class ABattleUnit;
 class UTextRenderComponent;
 class ACutSceneApplier;
@@ -164,6 +166,9 @@ struct FBattlePlayer
 	//0보다 크면 게임 오버 상태. 매 턴 줄어들고 0이 되면 부활한다
 	UPROPERTY() int32 ReviveCountdown = 0;
 
+ // Gameplay eligibility must agree across input, motion, cutscenes and visibility.
+ bool IsAlive() const { return HP > 0 && ReviveCountdown == 0; }
+
 	//이번 전투에 보스에게 넣은 누적 피해. Records의 TotalDamageDealt는 방송 전체
 	//누적이라 초기화되지 않으므로, 판 단위 순위에는 이쪽을 써야 한다
 	UPROPERTY() int32 DamageDealt = 0;
@@ -217,6 +222,13 @@ class GLADIUS_API ABattleManager : public AActor
 	GENERATED_BODY()
 
 public:
+    friend class UBattleTutorialController;
+    friend struct FBattleTutorialTestAccess;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle|Tutorial") bool bEnableEntryTutorial = true;
+    UPROPERTY(Transient) TObjectPtr<UBattleTutorialController> Tutorial;
+    UFUNCTION(BlueprintCallable, Category="Battle|Tutorial") bool RequestTutorial();
+    bool IsTutorialPracticing() const;
+    bool GetTutorialHud(FBattleTopHudState& Out) const;
 	ABattleManager();
 
 protected:
@@ -697,6 +709,7 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Battle|Save")
 	void LoadRecords();
+ bool ReloadExternalFiles();
 
 	static FString SaveFilePath();
 
@@ -939,6 +952,7 @@ private:
 	//PreviousId는 직전에 끝난 패턴 (연속 재선택 금지에 쓴다)
 	const FBossPattern* ChoosePattern(int32 TurnsLeft, const FString& PreviousId) const;
 
+ bool bBalanceReloadPending = false;
 	//밸런스 파일 내용. bLoaded가 false면 에디터 값으로 돈다
 	FBattleBalance Balance;
 

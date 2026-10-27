@@ -71,6 +71,7 @@ protected:
 	TObjectPtr<UWidgetSwitcher> PageSwitcher;
 
 private:
+ friend class FPatchExhibitTest;
 	friend struct FLeaderboardStateTestAccess;
 	friend class FMainBattleSideLayoutTest;
 	void ResolveStateWidgets();

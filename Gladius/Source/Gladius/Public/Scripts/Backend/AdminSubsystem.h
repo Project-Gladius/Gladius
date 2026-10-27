@@ -33,12 +33,20 @@ public:
  virtual void Deinitialize() override;
  // Explicit IDs and API-verified handle mappings authenticate; display names and unresolved handles never do.
  bool IsAdmin(const FString& Id) const;
+ bool IsExhibit(const FString& Id) const;
+ bool IsLeaderboardExcluded(const FString& Id) const;
+ bool ReloadExternalData(ABattleManager* Battle, TArray<FString>& Failures);
+ // Shared operation and result messages for authenticated chat and the local operator hotkey.
+ bool ExecutePatch(ABattleManager* Battle);
  bool IsBlocked(const FString& Id, const FDateTime& Now) const;
  bool CanInput(const FString& Id, EGameState State) const;
  bool HasEventBuff(const FString& Id) const;
  bool IsAIMaintenance() const { return bAI; }
  FString GetAdminName(const FString& Id) const;
  FString CanonicalId(const FString& Id) const;
+ // Display-name targeting never changes authentication: return one canonical account or reject ambiguity.
+ bool ResolveUserTarget(const FString& Target, const ABattleManager* Battle,
+  FString& OutId, FString& OutName, bool& bAmbiguous) const;
  void RegisterUser(const FString& Id, const FString& Name);
  bool Block(const FString& Id, const FDateTime& Until);
  bool Unblock(const FString& Id);
@@ -54,7 +62,7 @@ private:
  friend class FBroadcastOperatorTest;
  UPROPERTY() FUserPermissionFile Data;
  FString StoragePath;
- bool bValid = true, bTemporary = false;
+ bool bValid = false, bTemporary = false;
  bool bBattle = false, bTemple = false, bAll = false, bAI = false;
  TMap<FString, FHttpRequestPtr> HandleRequests;
  int32 FindIndex(const FString& Id) const;

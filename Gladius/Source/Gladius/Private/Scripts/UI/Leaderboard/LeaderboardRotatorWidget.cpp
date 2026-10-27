@@ -1,4 +1,6 @@
 #include "Scripts/UI/Leaderboard/LeaderboardRotatorWidget.h"
+#include "Scripts/Backend/AdminSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Scripts/UI/Leaderboard/LeaderboardBoardWidget.h"
 #include "Scripts/UI/Leaderboard/LeaderboardBuilder.h"
 #include "Scripts/Battle/BattleManager.h"
@@ -186,6 +188,8 @@ TArray<FLeaderboardRow> ULeaderboardRotatorWidget::RankTotal() const
 		//Saved/PlayerData.json에 저장되는 기록과 같은 데이터 (메모리 쪽이 항상 최신)
 		for (const TPair<FString, FPlayerRecord>& Pair : Manager->GetPlayerRecords())
 		{
+			const auto* Admin = GetGameInstance() ? GetGameInstance()->GetSubsystem<UAdminSubsystem>() : nullptr;
+			if (Admin && Admin->IsLeaderboardExcluded(Pair.Value.UserId.IsEmpty() ? Pair.Key : Pair.Value.UserId)) continue;
 			FLeaderboardSource Source;
 			Source.UserId = Pair.Value.UserId.IsEmpty() ? Pair.Key : Pair.Value.UserId;
 			Source.Name = Pair.Value.DisplayName;

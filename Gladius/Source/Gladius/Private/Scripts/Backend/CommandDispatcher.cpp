@@ -21,6 +21,7 @@ void UCommandDispatcher::Execute(const FParsedCommand& Command)
   if (Command.CommandType == ECommandType::Talk && Admin->IsAIMaintenance()) return;
  }
  else if (UAdminSubsystem::IsAdminCommand(Command.CommandType)) return;
+ if (Command.CommandType == ECommandType::Tutorial) { if (IsValid(Battle)) Battle->RequestTutorial(); return; }
  EBattleAction Action;
  const FString DisplayName = Command.Username.IsEmpty() ? Command.UserId : Command.Username;
  if (FChatCommandParser::TryGetBattleAction(Command.CommandType, Action))

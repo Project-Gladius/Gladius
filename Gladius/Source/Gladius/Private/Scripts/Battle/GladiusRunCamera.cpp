@@ -127,7 +127,7 @@ bool AGladiusRunCamera::UpdatePose()
     const ABattleUnit* Subject = GetSubject();
     if (!Subject || !FMath::IsFinite(CameraDistance) || CameraDistance < 1.f
         || !FMath::IsFinite(CameraPitch) || !FMath::IsFinite(FocusHeight)) { return false; }
-    const FVector Focus = Subject->GetActorLocation() + FVector(0, 0, FocusHeight);
+    const FVector Focus = Subject->GetGroundedVisualOrigin() + FVector(0, 0, FocusHeight);
     const FRotator Rotation(FMath::Clamp(CameraPitch, -89.f, 89.f), CurrentYaw, 0.f);
     SetActorLocationAndRotation(Focus - Rotation.Vector() * CameraDistance, Rotation);
     return true;

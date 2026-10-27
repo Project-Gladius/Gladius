@@ -6,6 +6,7 @@
 #include "BattleUnit.generated.h"
 
 class USkeletalMeshComponent;
+class UAnimInstance;
 class UAnimMontage;
 class UDamagePopupStack;
 class UWidgetComponent;
@@ -30,6 +31,9 @@ public:
  // Align the visible mesh's sole to the collision surface without changing combat coordinates.
  UFUNCTION(BlueprintCallable, Category = "Battle")
  bool SnapMeshToGround();
+ // Sequence curves already contain the authored mesh transform; add only the runtime ground correction.
+ FVector GetGroundedVisualOrigin() const { return GetActorLocation() + FVector(0, 0, GroundMeshOffsetZ); }
+ double GetGroundMeshOffsetZ() const { return GroundMeshOffsetZ; }
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	//머리 위 이름과 체력 갱신. UMG라 한글·이모지 핸들도 그대로 나온다
@@ -340,6 +344,18 @@ private:
 
 	bool bDefending = false;
 	bool bDead = false;
+ friend struct FCharacterGroundingTestAccess;
+ // Neutral-pose sole calibration stays fixed during attacks/rolls so their vertical animation survives.
+ bool bHasGroundReference = false;
+ double GroundSoleOffsetZ = 0.0;
+ double GroundMeshOffsetZ = 0.0;
+ bool FindGroundHeight(double& OutHeight) const;
+ bool UpdateGroundContact();
+ void ApplyGroundHeight(double GroundHeight);
+ // Preserve the living animation blueprint even if the death event switches animation mode.
+ UPROPERTY(Transient) TSubclassOf<UAnimInstance> LivingAnimClass;
+ float LivingAnimRateScale = 1.f;
+ void ResetLifeMotion(bool bCancelPreviousLife = true);
 
 	//이번 턴에 고른 행동과 마지막 이동의 걸음걸이. ABP가 읽어 간다
 	EBattleAction SelectedAction = EBattleAction::Idle;

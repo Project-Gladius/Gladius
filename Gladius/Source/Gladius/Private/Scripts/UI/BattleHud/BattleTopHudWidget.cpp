@@ -1,4 +1,6 @@
 #include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
+#include "Scripts/Time/RealTimeSettings.h"
+#include "Scripts/UI/TutorialRichText.h"
 #include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Scripts/Time/BattleScheduleSubsystem.h"
@@ -44,6 +46,8 @@ void UBattleTopHudWidget::NativeOnInitialized()
 
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 	Apply(FBattleTopHudState());
+    if (URealTimeSettings::MatchesMap(GetWorld(),GetDefault<URealTimeSettings>()->BattleMap))
+        RichGuideText=TutorialText::Replace(WidgetTree,GuideText);
 }
 
 void UBattleTopHudWidget::ResolveWidgets()
@@ -111,6 +115,8 @@ void UBattleTopHudWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaT
 		return;
 	}
 
+	FBattleTopHudState TutorialState;
+    if (Manager->GetTutorialHud(TutorialState)) { Apply(TutorialState); return; }
 	Apply(FBattleTopHudPresenter::Build(
 		Manager->Phase,
 		Manager->IsTurnCutScenePlaying(),
@@ -142,6 +148,7 @@ void UBattleTopHudWidget::Apply(const FBattleTopHudState& State)
 		SetTextIfChanged(TurnValueText, State.TurnText);
 		SetTextIfChanged(TurnTotalText, State.TurnTotalText);
 		SetTextIfChanged(GuideText, State.GuideText);
+        TutorialText::Set(RichGuideText,State.GuideText);
 		SetTextIfChanged(TimerText, State.TimerText);
   SetTextIfChanged(WidgetTree ? Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("TempleTimerLabelText"))) : nullptr, State.TimerLabel);
 

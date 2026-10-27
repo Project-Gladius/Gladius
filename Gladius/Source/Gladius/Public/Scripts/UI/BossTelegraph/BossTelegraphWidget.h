@@ -5,6 +5,7 @@
 #include "Scripts/UI/BossTelegraph/BossTelegraphTypes.h"
 #include "BossTelegraphWidget.generated.h"
 
+class URichTextBlock;
 class ABattleManager;
 class UCanvasPanelSlot;
 class UTextBlock;
@@ -32,6 +33,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Boss Telegraph")
 	void HideTelegraph();
+    void ShowTutorialMessage(const FString& RichText,float Seconds);
+    void EndTutorial();
+    UPROPERTY(Transient) TObjectPtr<URichTextBlock> RichMessageText;
+    bool bTutorialMessage=false;
+    float NormalDisplaySeconds=5.f;
 
 	//문구가 나타날 때 / 사라질 때 호출. 디자이너가 UMG 애니메이션을 붙이는 용도
 	UFUNCTION(BlueprintImplementableEvent, Category = "Boss Telegraph")

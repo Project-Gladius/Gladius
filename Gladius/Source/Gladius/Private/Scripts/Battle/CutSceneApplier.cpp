@@ -5,6 +5,9 @@
 #include "Scripts/Battle/CutSceneCamera.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
 #include "Components/SceneComponent.h"
+#include "Components/MeshComponent.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "DefaultLevelSequenceInstanceData.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -23,6 +26,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogCutSceneApplier, Log, All);
 
 ACutSceneApplier::ACutSceneApplier()
 {
+    for (const TCHAR* Part : {TEXT("Body"), TEXT("Body_ORG"), TEXT("Cloth"), TEXT("Hair"), TEXT("HairClip"), TEXT("Leather"), TEXT("Mace"), TEXT("Metal"), TEXT("Necklace"), TEXT("Rope")})
+    {
+        const FString Name = FString(TEXT("T_Trudon_")) + Part;
+        const FString Path = TEXT("/Game/Cinematics/Battle/TrudonFade/") + Name + TEXT("_Cutscene.") + Name + TEXT("_Cutscene");
+        if (auto* Material = LoadObject<UMaterialInterface>(nullptr, *Path)) BossFadeMaterials.Add(FName(Name), Material);
+    }
     PrimaryActorTick.bCanEverTick = false;
     RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
     FCutSceneDefinition GladiusRun;
@@ -159,6 +168,13 @@ FTransform ACutSceneApplier::MakeOrigin(const AActor& Subject, const AActor& Bos
     return FTransform(Forward.Rotation(), Subject.GetActorLocation(), FVector::OneVector);
 }
 
+FTransform ACutSceneApplier::MakeGroundedOrigin(const ABattleUnit& Subject, const AActor& Boss)
+{
+ FTransform Origin = MakeOrigin(Subject, Boss);
+ Origin.SetLocation(Subject.GetGroundedVisualOrigin());
+ return Origin;
+}
+
 bool ACutSceneApplier::ApplyCutScene(ECutSceneCharacterStrategy Strategy, FName CutSceneType)
 {
     return ApplyCutSceneToSubject(FindCharacter(Strategy), CutSceneType);
@@ -257,7 +273,7 @@ bool ACutSceneApplier::StartShot(ABattleUnit* Subject, ABattleUnit* Boss)
         }
         SequenceActor = NewSequenceActor;
         SequencePlayer = NewPlayer;
-        SetActorTransform(MakeOrigin(*Subject, *Boss));
+        SetActorTransform(MakeGroundedOrigin(*Subject, *Boss));
         SequenceActor->bOverrideInstanceData = true;
         UDefaultLevelSequenceInstanceData* InstanceData = NewObject<UDefaultLevelSequenceInstanceData>(SequenceActor);
         InstanceData->TransformOriginActor = this;
@@ -304,11 +320,43 @@ bool ACutSceneApplier::StartShot(ABattleUnit* Subject, ABattleUnit* Boss)
         SequencePlayer->OnStop.AddDynamic(this, &ACutSceneApplier::HandleSequenceStopped);
         SequenceActor->OnDestroyed.AddDynamic(this, &ACutSceneApplier::HandleActorDestroyed);
     }
+    if (CutSceneType == TEXT("GladiusSkill1") || CutSceneType == TEXT("GladiusSkill2")) ApplyBossOpacity(Boss);
     OnCutSceneApplied.Broadcast(CutSceneType, Subject);
     if (bPlaying && NewPlayer && SequencePlayer == NewPlayer) { SequencePlayer->Play(); }
     return true;
 }
 
+
+void ACutSceneApplier::ApplyBossOpacity(ABattleUnit* Boss)
+{
+    TInlineComponentArray<UMeshComponent*> Meshes(Boss);
+    for (UMeshComponent* Mesh : Meshes)
+    {
+        for (int32 Slot = 0; Slot < Mesh->GetNumMaterials(); ++Slot)
+        {
+            UMaterialInterface* Original = Mesh->GetMaterial(Slot);
+            UMaterial* Base = Original ? Original->GetMaterial() : nullptr;
+            const auto* Fade = Base ? BossFadeMaterials.Find(Base->GetFName()) : nullptr;
+            if (!Fade || !IsValid(Fade->Get())) continue;
+            auto* Dynamic = UMaterialInstanceDynamic::Create(Fade->Get(), this);
+            Dynamic->CopyMaterialUniformParameters(Original);
+            Dynamic->SetScalarParameterValue(TEXT("CutsceneOpacity"), 0.2f);
+            FCutSceneSavedMaterial& Saved = SavedBossMaterials.AddDefaulted_GetRef();
+            Saved.Mesh = Mesh; Saved.Slot = Slot; Saved.Original = Original; Saved.Applied = Dynamic;
+            Mesh->SetMaterial(Slot, Dynamic);
+        }
+    }
+}
+
+void ACutSceneApplier::RestoreBossMaterials()
+{
+    for (const FCutSceneSavedMaterial& Saved : SavedBossMaterials)
+    {
+        if (IsValid(Saved.Mesh) && Saved.Mesh->GetMaterial(Saved.Slot) == Saved.Applied)
+            Saved.Mesh->SetMaterial(Saved.Slot, Saved.Original);
+    }
+    SavedBossMaterials.Reset();
+}
 
 void ACutSceneApplier::CancelCutScene()
 {
@@ -352,6 +400,7 @@ void ACutSceneApplier::FinishCutScene(bool bInterrupted, bool bNotify)
         ActiveSubject->OnDestroyed.RemoveDynamic(this, &ACutSceneApplier::HandleActorDestroyed);
         ActiveSubject->CustomTimeDilation = SavedSubjectDilation;
     }
+    RestoreBossMaterials();
     if (ActiveBoss.IsValid()) { ActiveBoss->OnDestroyed.RemoveDynamic(this, &ACutSceneApplier::HandleActorDestroyed); }
     if (GetWorld()) { UGameplayStatics::SetGlobalTimeDilation(this, SavedGlobalDilation); }
     if (CameraController.IsValid() && PreviousViewTarget.IsValid())

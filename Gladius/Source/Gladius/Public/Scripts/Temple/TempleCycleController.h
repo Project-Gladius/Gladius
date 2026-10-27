@@ -71,6 +71,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Temple|Cycle")
 	int32 GetCompletedCycles() const { return CompletedCycles; }
  void SetAIMaintenance(bool bEnabled);
+ bool ReloadExternalConnections();
 
 protected:
 	virtual void BeginPlay() override;

@@ -6,7 +6,7 @@ namespace
 	const TArray<FString>& GetKnownKeywords()
 	{
 		static const TArray<FString> Keywords = {
-			TEXT("차단해제"), TEXT("점검해제"), TEXT("공지"), TEXT("차단"), TEXT("점검"), TEXT("이벤트"), TEXT("공격"), TEXT("방어"), TEXT("회피"), TEXT("로그아웃"), TEXT("로그인"), TEXT("강화"), TEXT("대화"), TEXT("전투")
+			TEXT("패치"), TEXT("튜토리얼"), TEXT("차단해제"), TEXT("점검해제"), TEXT("공지"), TEXT("차단"), TEXT("점검"), TEXT("이벤트"), TEXT("공격"), TEXT("방어"), TEXT("회피"), TEXT("로그아웃"), TEXT("로그인"), TEXT("강화"), TEXT("대화"), TEXT("전투")
 		};
 		return Keywords;
 	}
@@ -51,6 +51,8 @@ bool FChatCommandParser::TryParse(const FString& UserId, const FString& RawConte
 
 bool FChatCommandParser::ResolveCommand(const FString& Keyword, const FString& Remainder, FParsedCommand& OutCommand)
 {
+ if (Keyword == TEXT("패치")) { OutCommand.CommandType=ECommandType::Patch; return Remainder.IsEmpty(); }
+ if (Keyword == TEXT("튜토리얼")) { OutCommand.CommandType=ECommandType::Tutorial; return Remainder.IsEmpty(); }
  if (Keyword == TEXT("공지")) { OutCommand.CommandType = ECommandType::Notice; return !Remainder.IsEmpty(); }
  if (Keyword == TEXT("차단")) { OutCommand.CommandType = ECommandType::Block; return !Remainder.IsEmpty(); }
  if (Keyword == TEXT("차단해제")) { OutCommand.CommandType = ECommandType::Unblock; return !Remainder.IsEmpty(); }

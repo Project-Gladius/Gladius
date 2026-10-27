@@ -9,6 +9,7 @@
 #include "Animation/AnimMontage.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/World.h"
+#include "Engine/LatentActionManager.h"
 #include "SkeletalRenderPublic.h"
 #include "Engine/SkeletalMesh.h"
 #include "TimerManager.h"
@@ -59,6 +60,11 @@ void ABattleUnit::OnConstruction(const FTransform& Transform)
 void ABattleUnit::BeginPlay()
 {
 	Super::BeginPlay();
+ if (Mesh)
+ {
+  LivingAnimClass = Mesh->GetAnimClass();
+  LivingAnimRateScale = Mesh->GlobalAnimRateScale;
+ }
 	// Keep the authored anchor's head clearance, reduced to one sixth.
 	if (Mesh && Nameplate && PlayerUIClass)
 	{
@@ -123,16 +129,65 @@ void ABattleUnit::OnDamageShown_Implementation(int32 Damage, bool bCrit, bool bS
 	}
 }
 
+void ABattleUnit::ResetLifeMotion(bool bCancelPreviousLife)
+{
+ if (UWorld* World = GetWorld())
+ {
+  // These callbacks belong to the previous life (including delayed hit/death Blueprint events).
+  World->GetTimerManager().ClearTimer(FlurryHandle);
+  World->GetTimerManager().ClearTimer(MotionHoldHandle);
+  if (bCancelPreviousLife)
+  {
+   World->GetTimerManager().ClearAllTimersForObject(this);
+   World->GetLatentActionManager().RemoveActionsForObject(this);
+  }
+ }
+ FlurryCrits.Reset(); FlurrySections.Reset(); FlurryIndex = 0;
+ bHasPendingMove = false; MotionHoldUntil = 0.f;
+ bMoving = false; bTurning = false; MoveElapsed = 0.f; MoveDuration = 0.f;
+ LastGait = EMoveGait::Walk;
+ SelectedAction = EBattleAction::Idle; bDefending = false;
+ SetActorTickEnabled(false);
+}
+
 void ABattleUnit::NotifyDied()
 {
-	bDead = true;
-	OnDied();
+ if (bDead) return;
+ if (Mesh && Mesh->GetAnimationMode() == EAnimationMode::AnimationBlueprint && Mesh->GetAnimClass())
+ {
+  LivingAnimClass = Mesh->GetAnimClass();
+  if (Mesh->GlobalAnimRateScale > 0.f) LivingAnimRateScale = Mesh->GlobalAnimRateScale;
+ }
+ // Keep the lethal OnHit/death sequence running; cancel its deferred work only on revival.
+ ResetLifeMotion(false);
+ bDead = true;
+ OnDied();
 }
 
 void ABattleUnit::NotifyRevived()
 {
-	bDead = false;
-	OnRevived();
+ ResetLifeMotion();
+ if (Mesh)
+ {
+  if (UAnimInstance* Anim = Mesh->GetAnimInstance()) Anim->Montage_Stop(0.f);
+  // Stopping a death montage can invoke its callbacks; discard their pending work as well.
+  ResetLifeMotion();
+  bDead = false;
+  Mesh->bPauseAnims = false;
+  Mesh->bNoSkeletonUpdate = false;
+  Mesh->GlobalAnimRateScale = LivingAnimRateScale;
+  if (LivingAnimClass)
+  {
+   Mesh->SetAnimationMode(EAnimationMode::AnimationBlueprint, false);
+   Mesh->SetAnimInstanceClass(LivingAnimClass.Get());
+  }
+  // Reset the state machine too: a stopped montage alone can leave the death state's final pose.
+  Mesh->InitAnim(true);
+ }
+ bDead = false;
+ UpdateGroundContact();
+ SetActorHiddenInGame(false);
+ OnRevived();
 }
 
 void ABattleUnit::PlayFeverFlurry(const TArray<bool>& Crits, float FirstDelay,
@@ -247,6 +302,7 @@ void ABattleUnit::MoveTo(const FVector& Target, float Duration, EMoveGait Gait)
 	if (Duration <= 0.f)
 	{
 		SetActorLocation(Target);
+  UpdateGroundContact();
 		return;
 	}
 
@@ -394,11 +450,13 @@ void ABattleUnit::Tick(float DeltaSeconds)
 	//곡선을 꽂으면 가감속이 붙는다. 없으면 등속
 	const float Progress = MoveCurve ? MoveCurve->GetFloatValue(Alpha) : Alpha;
 	SetActorLocation(FMath::Lerp(MoveStart, MoveTarget, Progress));
+ UpdateGroundContact();
 
 	if (Alpha >= 1.f)
 	{
 		//곡선이 1에서 끝나지 않더라도 목적지에 정확히 세운다
 		SetActorLocation(MoveTarget);
+  UpdateGroundContact();
 		bMoving = false;
 
 		//도착했으면 다시 보스를 본다. 돌아가는 동안에는 Tick이 더 돌아야 한다
@@ -532,14 +590,57 @@ void ABattleUnit::PerformSkill(int32 AttackIndex, bool bCrit, bool bFeverHighlig
 	}
 }
 
+bool ABattleUnit::FindGroundHeight(double& OutHeight) const
+{
+ if (!GetWorld()) return false;
+ FHitResult Hit;
+ FCollisionQueryParams Query(SCENE_QUERY_STAT(BattleGround), true, this);
+ TArray<AActor*> Attached; GetAttachedActors(Attached, true, true);
+ Query.AddIgnoredActors(Attached);
+ const FVector Origin = GetActorLocation();
+ const FVector Start = Origin + FVector(0,0,500);
+ const FVector End = Origin - FVector(0,0,2000);
+ const FCollisionObjectQueryParams Objects(ECC_WorldStatic);
+ if (!GetWorld()->LineTraceSingleByObjectType(Hit, Start, End, Objects, Query))
+ {
+  // Some arena surfaces expose only their simple collision.
+  Query.bTraceComplex = false;
+  if (!GetWorld()->LineTraceSingleByObjectType(Hit, Start, End, Objects, Query)) return false;
+ }
+ if (!FMath::IsFinite(Hit.ImpactPoint.Z) || Hit.ImpactNormal.Z < .5f) return false;
+ OutHeight = Hit.ImpactPoint.Z;
+ return true;
+}
+
+void ABattleUnit::ApplyGroundHeight(double GroundHeight)
+{
+ if (!Mesh || !bHasGroundReference || !FMath::IsFinite(GroundHeight)) return;
+ const double NextOffset = GroundHeight - GetActorLocation().Z - GroundSoleOffsetZ;
+ const double Delta = NextOffset - GroundMeshOffsetZ;
+ if (FMath::Abs(Delta) > KINDA_SMALL_NUMBER)
+ {
+  Mesh->AddWorldOffset(FVector(0,0,Delta));
+  // The nameplate attaches to Root, not Mesh; preserve its authored head clearance.
+  if (Nameplate) Nameplate->AddWorldOffset(FVector(0,0,Delta));
+ }
+ GroundMeshOffsetZ = NextOffset;
+}
+
+bool ABattleUnit::UpdateGroundContact()
+{
+ if (!bHasGroundReference) return SnapMeshToGround();
+ double GroundHeight;
+ if (!FindGroundHeight(GroundHeight)) return false;
+ ApplyGroundHeight(GroundHeight);
+ return true;
+}
+
 bool ABattleUnit::SnapMeshToGround()
 {
  if (!Mesh || !Mesh->GetSkeletalMeshAsset() || !GetWorld()) return false;
- FHitResult Hit;
- FCollisionQueryParams Query(SCENE_QUERY_STAT(BossGround), true, this);
- const FVector Origin = GetActorLocation();
- if (!GetWorld()->LineTraceSingleByObjectType(Hit, Origin + FVector(0,0,500), Origin - FVector(0,0,2000),
-  FCollisionObjectQueryParams(ECC_WorldStatic), Query)) return false;
+ if (bHasGroundReference) return UpdateGroundContact();
+ double GroundHeight;
+ if (!FindGroundHeight(GroundHeight)) return false;
  Mesh->TickAnimation(0.f, false);
  Mesh->RefreshBoneTransforms();
  TArray<FFinalSkinVertex> Vertices;
@@ -548,8 +649,10 @@ bool ABattleUnit::SnapMeshToGround()
  double SoleZ = TNumericLimits<double>::Max();
  for (const FFinalSkinVertex& Vertex : Vertices)
   SoleZ = FMath::Min(SoleZ, Mesh->GetComponentTransform().TransformPosition(FVector(Vertex.Position)).Z);
- const double Correction = Hit.ImpactPoint.Z - SoleZ;
- Mesh->AddWorldOffset(FVector(0,0,Correction));
- UE_LOG(LogTemp, Log, TEXT("[BossGround] ground=%.3f sole=%.3f correction=%.3f surface=%s"), Hit.ImpactPoint.Z, SoleZ, Correction, *GetNameSafe(Hit.GetActor()));
+ if (!FMath::IsFinite(SoleZ)) return false;
+ GroundSoleOffsetZ = SoleZ - GetActorLocation().Z - GroundMeshOffsetZ;
+ bHasGroundReference = true;
+ ApplyGroundHeight(GroundHeight);
+ UE_LOG(LogTemp, Log, TEXT("[BattleGround] %s ground=%.3f sole=%.3f correction=%.3f"), *GetName(), GroundHeight, SoleZ, GroundMeshOffsetZ);
  return true;
 }

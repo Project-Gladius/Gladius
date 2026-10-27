@@ -1,7 +1,9 @@
 #include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/Backend/ExternalData.h"
+#include "Scripts/Battle/BattleManager.h"
 #include "Scripts/Temple/TempleCycleController.h"
 #include "Engine/GameInstance.h"
+#include "Scripts/UI/SessionLogSubsystem.h"
 #include "EngineUtils.h"
 #include "JsonObjectConverter.h"
 #include "Dom/JsonObject.h"
@@ -38,7 +40,7 @@ bool UAdminSubsystem::LoadFromFile(const FString& Path)
  StoragePath = Path;
  FString Json;
  FUserPermissionFile Loaded;
- bValid = false;
+ // Keep the last valid permissions if an edited file is incomplete.
  TSharedPtr<FJsonObject> Root;
  if (!FFileHelper::LoadFileToString(Json, *Path)
   || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) || !Root.IsValid()
@@ -48,7 +50,7 @@ bool UAdminSubsystem::LoadFromFile(const FString& Path)
  for (const auto& U : Loaded.Users)
  {
   if (U.UserId.IsEmpty() || Ids.Contains(U.UserId)
-   || (U.Permission != TEXT("admin") && U.Permission != TEXT("user") && U.Permission != TEXT("blocked"))) return false;
+   || (U.Permission != TEXT("admin") && U.Permission != TEXT("user") && U.Permission != TEXT("blocked") && U.Permission != TEXT("exhibit"))) return false;
   Ids.Add(U.UserId);
   if (!U.ChannelId.IsEmpty() && U.ChannelId != U.UserId)
   { if (Ids.Contains(U.ChannelId)) return false; Ids.Add(U.ChannelId); }
@@ -71,6 +73,16 @@ bool UAdminSubsystem::IsAdmin(const FString& Id) const
 {
  const auto* U = FindUser(Id);
  return bValid && U && U->Permission == TEXT("admin") && !Id.StartsWith(TEXT("@")) && (U->UserId == Id || U->ChannelId == Id);
+}
+bool UAdminSubsystem::IsExhibit(const FString& Id) const
+{
+ const auto* U = FindUser(Id);
+ return bValid && U && U->Permission == TEXT("exhibit") && !Id.StartsWith(TEXT("@"));
+}
+bool UAdminSubsystem::IsLeaderboardExcluded(const FString& Id) const
+{
+ const auto* U = FindUser(Id);
+ return bValid && U && (U->Permission == TEXT("admin") || U->Permission == TEXT("exhibit"));
 }
 bool UAdminSubsystem::IsBlocked(const FString& Id, const FDateTime& Now) const
 {
@@ -199,6 +211,15 @@ bool UAdminSubsystem::SetMaintenance(const FString& Scope, bool bEnabled)
    for (TActorIterator<ATempleCycleController> It(World); It; ++It) It->SetAIMaintenance(bEnabled);
  }
  else return false;
+ if (auto* Log=GetGameInstance()->GetSubsystem<USessionLogSubsystem>())
+ {
+  FString Message;
+  if (Scope==TEXT("전체")) Message=bEnabled?TEXT("[긴급점검] 게임 점검 중! 입력이 비활성화됩니다."):TEXT("[점검완료] 게임 입력이 재활성화됩니다.");
+  else if (Scope==TEXT("AI")) Message=bEnabled?TEXT("[긴급점검] 여신 AI 기능이 비활성화됩니다."):TEXT("[점검완료] 여신 AI 기능이 재활성화됩니다.");
+  else Message=bEnabled ? FString::Printf(TEXT("[긴급점검] %s 조작 기능이 비활성화됩니다."),*Scope) : FString::Printf(TEXT("[점검완료] %s 조작 기능이 재활성화됩니다."),*Scope);
+  const ESessionLogEvent Style=bEnabled && Scope!=TEXT("AI")?ESessionLogEvent::AdminUrgent:ESessionLogEvent::Admin;
+  Log->AddMaintenanceMessage(Scope,bEnabled,Message,Style);
+ }
  return true;
 }
 
@@ -259,4 +280,59 @@ bool UAdminSubsystem::ApplyBroadcastOperators(const TSharedPtr<FJsonObject>& Set
   { if (Ids.Contains(User.ChannelId)) return false; Ids.Add(User.ChannelId); }
  }
  return Commit(MoveTemp(Next));
+}
+
+bool UAdminSubsystem::ResolveUserTarget(const FString& Target, const ABattleManager* Battle,
+ FString& OutId, FString& OutName, bool& bAmbiguous) const
+{
+ OutId.Reset(); OutName.Reset(); bAmbiguous = false;
+ const FString Clean = Target.TrimStartAndEnd();
+ if (!bValid || Clean.IsEmpty()) return false;
+ auto Normalize = [](FString Name)
+ {
+  Name.TrimStartAndEndInline(); Name.RemoveFromStart(TEXT("@"));
+  return Name;
+ };
+ const FString Query = Normalize(Clean);
+ if (Query.IsEmpty()) return false;
+ TMap<FString,FString> Names;
+ auto Add = [&](const FString& Id, const FString& Name)
+ {
+  const FString Canonical = CanonicalId(Id);
+  // Unverified handle-only rows are not live account identities.
+  if (!Canonical.IsEmpty() && !Canonical.StartsWith(TEXT("@")) && !Name.TrimStartAndEnd().IsEmpty()) Names.Add(Canonical,Name);
+ };
+ if (Battle)
+ {
+  for (const auto& Pair : Battle->GetPlayerRecords()) Add(Pair.Value.UserId.IsEmpty()?Pair.Key:Pair.Value.UserId, Pair.Value.DisplayName);
+  for (const auto& Pair : Battle->GetBattlePlayers()) Add(Pair.Key,Pair.Value.DisplayName);
+ }
+ // Chat registration carries the newest name; do not continue matching a stale leaderboard name after a rename.
+ for (const auto& User : Data.Users) Add(User.UserId,User.DisplayName);
+ // An explicit channel ID is an unambiguous escape hatch even if a display name resembles an ID.
+ if (Clean.StartsWith(TEXT("UC")) && Clean.Len()==24)
+ {
+  OutId=CanonicalId(Clean); OutName=Names.Contains(OutId)?Names.FindChecked(OutId):Clean;
+  return true;
+ }
+ TArray<FString> Matches;
+ for (const auto& Pair : Names)
+  if (Normalize(Pair.Value).Equals(Query,ESearchCase::IgnoreCase)) Matches.Add(Pair.Key);
+ if (Matches.Num()>1) { bAmbiguous=true; return false; }
+ if (Matches.Num()==1)
+ {
+  OutId=Matches[0]; OutName=Names.FindChecked(OutId); return true;
+ }
+ // Preserve precise account-ID input, including pre-emptive targeting of a YouTube channel.
+ const auto* Known=FindUser(Clean);
+ const FString Canonical=CanonicalId(Clean);
+ const bool bChannelId=Clean.StartsWith(TEXT("UC")) && Clean.Len()==24;
+ if ((Known || (Battle && (Battle->GetPlayerRecords().Contains(Clean) || Battle->GetBattlePlayers().Contains(Clean))) || bChannelId)
+  && !Canonical.StartsWith(TEXT("@")))
+ {
+  OutId=Canonical;
+  OutName=Names.Contains(Canonical)?Names.FindChecked(Canonical):Clean;
+  return true;
+ }
+ return false;
 }

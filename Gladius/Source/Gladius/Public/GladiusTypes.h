@@ -60,6 +60,8 @@ enum class ECommandType : uint8
 	// ===== 전투상태 (참가) =====
 	Notice, Block, Unblock, Maintenance, EndMaintenance, EventBuff,
 	Login, // !로그인 글라디우스 / !로그인 세라. Argument: 캐릭터 이름
+	Tutorial, // !튜토리얼
+	Patch, // !패치: 외부 설정 새로고침
 };
 
 // 채팅 한 줄을 파싱한 결과

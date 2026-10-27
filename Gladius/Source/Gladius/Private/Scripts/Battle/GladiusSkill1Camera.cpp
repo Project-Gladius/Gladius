@@ -49,7 +49,7 @@ bool AGladiusSkill1Camera::MeasureVisibleMeshTop(const ABattleUnit& Subject, FNa
         HighestZ = FMath::Max(HighestZ, Box.Max.Z);
         bFound = true;
     }
-    OutHeight = bFound ? static_cast<float>(HighestZ - Subject.GetActorLocation().Z) : 0.f;
+    OutHeight = bFound ? static_cast<float>(HighestZ - Subject.GetGroundedVisualOrigin().Z) : 0.f;
     return bFound;
 }
 
@@ -73,7 +73,7 @@ bool AGladiusSkill1Camera::SampleHeight(float& OutHeight) const
         if (!BoneComponent.IsValid() || BoneComponent->GetBoneIndex(PelvisBoneName) == INDEX_NONE) { return false; }
         const FVector Position = BoneComponent->GetSocketLocation(PelvisBoneName);
         if (Position.ContainsNaN()) { return false; }
-        OutHeight = static_cast<float>(Position.Z - Subject->GetActorLocation().Z);
+        OutHeight = static_cast<float>(Position.Z - Subject->GetGroundedVisualOrigin().Z);
         return true;
     }
     return MeasureVisibleMeshTop(*Subject, HeightSourceComponentName, OutHeight);
@@ -140,8 +140,8 @@ void AGladiusSkill1Camera::UpdatePose()
     ABattleUnit* Subject = GetSubject();
     if (!Subject) { return; }
     const ABattleUnit* Boss = GetBattleManager()->GetBossUnit();
-    FTransform Frame(FRotator(0.f, Subject->GetActorRotation().Yaw, 0.f), Subject->GetActorLocation());
-    if (IsValid(Boss)) { Frame = ACutSceneApplier::MakeOrigin(*Subject, *Boss); }
+    FTransform Frame(FRotator(0.f, Subject->GetActorRotation().Yaw, 0.f), Subject->GetGroundedVisualOrigin());
+    if (IsValid(Boss)) { Frame = ACutSceneApplier::MakeGroundedOrigin(*Subject, *Boss); }
     SetActorTransform(CalculatePose(Frame, Distance, Height, RightAngle, Delta, DuckRatio, TiltRatio));
 }
 

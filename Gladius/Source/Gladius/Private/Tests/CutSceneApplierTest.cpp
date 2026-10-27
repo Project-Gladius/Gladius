@@ -23,9 +23,17 @@
 #include "Channels/MovieSceneDoubleChannel.h"
 #include "Channels/MovieSceneChannelProxy.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Components/BoxComponent.h"
+#include "SkeletalRenderPublic.h"
 #include "MovieSceneSequenceTickManager.h"
 #include "EntitySystem/MovieSceneEntitySystemRunner.h"
 #include "Misc/AutomationTest.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/Material.h"
+#include "MaterialShared.h"
+#include "ShaderCompiler.h"
+#include "Materials/MaterialExpressionTextureSample.h"
 
 namespace
 {
@@ -678,6 +686,220 @@ bool FFourAuthoredCameraPathsTest::RunTest(const FString& Parameters)
         }
     }
     return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGladiusBossOpacityTest, "Gladius.CutSceneApplier.BossOpacityLifecycle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGladiusBossOpacityTest::RunTest(const FString& Parameters)
+{
+    FCutSceneTestWorld Context;
+    auto* Manager = Context.World->SpawnActor<ABattleManager>();
+    FBattleCameraTestAccess::RecordsOnly(Manager);
+    FCharacterDef Character; Character.Id = TEXT("gladius"); Character.BaseHP = 5;
+    Manager->Classes = {Character};
+    FBattleCameraTestAccess::Prepare(Manager);
+    if (!Manager->SubmitAction(TEXT("opacity"), TEXT("Opacity"), EBattleAction::Attack1, TEXT("gladius"))) return false;
+    Manager->StopBattle();
+    auto* Boss = Manager->GetBossUnit();
+    if (!TestNotNull(TEXT("Boss exists"), Boss)) return false;
+    auto* Mesh = NewObject<USkeletalMeshComponent>(Boss);
+    Boss->AddInstanceComponent(Mesh); Mesh->SetSkeletalMesh(LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Asset/Battle/Trudon/SK_Modeling/SK_Trudon.SK_Trudon"))); Mesh->RegisterComponent();
+    auto* Original = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/Asset/Battle/Trudon/MTL/MTL_Inst/T_Trudon_Body.T_Trudon_Body"));
+    if (!TestNotNull(TEXT("Real Trudon material exists"), Original)) return false;
+    Mesh->SetMaterial(0, Original);
+    auto* Applier = Context.World->SpawnActor<ACutSceneApplier>(); Applier->BattleManager = Manager;
+    auto* Sequence = NewObject<ULevelSequence>(Applier); Sequence->Initialize();
+    Sequence->GetMovieScene()->SetPlaybackRange(0, 2400);
+    for (const TCHAR* Id : {TEXT("GladiusSkill1"), TEXT("GladiusSkill2"), TEXT("SeraSkill1")})
+    {
+        auto& Def = Applier->CutScenes.FindOrAdd(FName(Id)); Def.Sequence = Sequence;
+        Def.CameraClass = nullptr; Def.WorldTimeScale = 1.f; Def.SubjectBindingTag = Def.BossBindingTag = NAME_None;
+    }
+    for (const TCHAR* Id : {TEXT("GladiusSkill1"), TEXT("GladiusSkill2")})
+    {
+        TestTrue(TEXT("Gladius attack starts"), Applier->ApplyCutSceneForUser(TEXT("opacity"), FName(Id)));
+        auto* Dynamic = Cast<UMaterialInstanceDynamic>(Mesh->GetMaterial(0));
+        if (TestNotNull(TEXT("Boss uses temporary fade material"), Dynamic))
+            TestEqual(TEXT("Boss opacity is exactly twenty percent"), Dynamic->K2_GetScalarParameterValue(TEXT("CutsceneOpacity")), .2f);
+        Applier->CancelCutScene();
+        TestEqual(TEXT("Cancellation restores exact original instance"), Mesh->GetMaterial(0), Original);
+        Applier->ApplyCutSceneForUser(TEXT("opacity"), FName(Id));
+        AdvanceCurrentShot(Context.World, Applier);
+        TestFalse(TEXT("Short shot naturally finished"), Applier->IsPlaying());
+        TestEqual(TEXT("Natural finish restores material"), Mesh->GetMaterial(0), Original);
+    }
+    Applier->ApplyCutSceneForUser(TEXT("opacity"), TEXT("GladiusSkill1"));
+    Applier->ApplyCutSceneForUser(TEXT("opacity"), TEXT("GladiusSkill2"));
+    TestTrue(TEXT("Replacement retains fade"), Mesh->GetMaterial(0) != Original);
+    Applier->ApplyCutSceneForUser(TEXT("opacity"), TEXT("SeraSkill1"));
+    TestEqual(TEXT("Other cutscene restores original"), Mesh->GetMaterial(0), Original);
+    Applier->CancelCutScene();
+    Applier->ApplyCutSceneForUser(TEXT("opacity"), TEXT("GladiusSkill1"));
+    Applier->DispatchBeginPlay(); Applier->Destroy();
+    TestEqual(TEXT("EndPlay restores original"), Mesh->GetMaterial(0), Original);
+    return true;
+}
+
+
+#if WITH_EDITOR
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBossFadeTexturesTest, "Gladius.CutSceneApplier.BossFadeTexturesAndSkeletalUsage",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBossFadeTexturesTest::RunTest(const FString& Parameters)
+{
+    for (const TCHAR* Part : {TEXT("Body"), TEXT("Body_ORG"), TEXT("Cloth"), TEXT("Hair"), TEXT("HairClip"), TEXT("Leather"), TEXT("Mace"), TEXT("Metal"), TEXT("Necklace"), TEXT("Rope")})
+    {
+        const FString Name = FString(TEXT("T_Trudon_")) + Part;
+        auto* Original = LoadObject<UMaterial>(nullptr, *(TEXT("/Game/Asset/Battle/Trudon/MTL/") + Name + TEXT(".") + Name));
+        auto* Fade = LoadObject<UMaterial>(nullptr, *(TEXT("/Game/Cinematics/Battle/TrudonFade/") + Name + TEXT("_Cutscene.") + Name + TEXT("_Cutscene")));
+        if (!TestNotNull(*Name, Original) || !TestNotNull(*(Name + TEXT(" fade")), Fade)) return false;
+        // Runtime-assigned materials are never placed on a mesh by the editor. The skeletal
+        // permutation must be explicitly authored or a packaged game uses the gray fallback.
+        TestTrue(*(Name + TEXT(" has pre-authored skeletal support")), bool(Fade->bUsedWithSkeletalMesh));
+        TestTrue(*(Name + TEXT(" uses translucency")), Fade->GetBlendMode() == BLEND_Translucent);
+        if (GShaderCompilingManager) GShaderCompilingManager->FinishAllCompilation();
+        TArray<UTexture*> OriginalTextures, FadeTextures;
+        Original->GetUsedTextures(OriginalTextures);
+        Fade->GetUsedTextures(FadeTextures);
+        TestTrue(*(Name + TEXT(" original textures exist")), !OriginalTextures.IsEmpty());
+        TArray<UMaterialExpression*> OpacityChain;
+        Fade->GetExpressionsInPropertyChain(MP_Opacity, OpacityChain, nullptr);
+        TArray<UTexture*> OpacityTextures;
+        for (auto* Expression : OpacityChain)
+            if (auto* Sample = Cast<UMaterialExpressionTextureSample>(Expression)) OpacityTextures.Add(Sample->Texture);
+        for (UTexture* Texture : OriginalTextures)
+        {
+            // An original alpha channel may be constant-folded by the translucent compiler.
+            // Check its actual opacity connection rather than requiring an unused sampler.
+            const bool bOpacityConnected = OpacityTextures.Contains(Texture);
+            TestTrue(*(Name + TEXT(" preserves ") + GetNameSafe(Texture)), FadeTextures.Contains(Texture) || bOpacityConnected);
+        }
+        TArray<UMaterialExpression*> OriginalColorChain, FadeColorChain;
+        Original->GetExpressionsInPropertyChain(MP_BaseColor, OriginalColorChain, nullptr);
+        Fade->GetExpressionsInPropertyChain(MP_BaseColor, FadeColorChain, nullptr);
+        for (auto* Expression : OriginalColorChain)
+            if (auto* Sample = Cast<UMaterialExpressionTextureSample>(Expression))
+            {
+                bool bColorPreserved = false;
+                for (auto* FadeExpression : FadeColorChain)
+                    if (auto* FadeSample = Cast<UMaterialExpressionTextureSample>(FadeExpression))
+                        bColorPreserved |= FadeSample->Texture == Sample->Texture;
+                TestTrue(*(Name + TEXT(" preserves actual base-color input")), bColorPreserved && FadeTextures.Contains(Sample->Texture));
+            }
+        auto* Resource = Fade->GetMaterialResource(SP_PCD3D_SM6);
+        if (TestNotNull(*(Name + TEXT(" shader resource")), Resource))
+        {
+            TestTrue(*(Name + TEXT(" has compiled shaders")), Resource->GetGameThreadShaderMap() != nullptr);
+            TestEqual(*(Name + TEXT(" has no shader compilation errors")), Resource->GetCompileErrors().Num(), 0);
+        }
+    }
+    return true;
+}
+#endif // WITH_EDITOR
+
+
+struct FCharacterGroundingTestAccess
+{
+ static void Calibrate(ABattleUnit* Unit, double SoleOffset)
+ {
+  Unit->bHasGroundReference=true; Unit->GroundSoleOffsetZ=SoleOffset;
+ }
+ static void Ground(ABattleUnit* Unit, double Height) { Unit->ApplyGroundHeight(Height); }
+};
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGroundContactContinuityTest,"Gladius.Grounding.NoDriftAcrossMovementAndGroundChanges",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FGroundContactContinuityTest::RunTest(const FString& Parameters)
+{
+ FCutSceneTestWorld T;
+ auto* Unit=T.World->SpawnActor<ABattleUnit>();
+ Unit->SetActorLocation(FVector(50,100,5));
+ const FVector OriginalActor=Unit->GetActorLocation();
+ const FVector MeshBefore=Unit->Mesh->GetComponentLocation();
+ const FVector PlateBefore=Unit->Nameplate->GetComponentLocation();
+ FCharacterGroundingTestAccess::Calibrate(Unit,2.0);
+ FCharacterGroundingTestAccess::Ground(Unit,0.0);
+ TestTrue(TEXT("Grounding preserves combat position"),Unit->GetActorLocation().Equals(OriginalActor));
+ TestTrue(TEXT("Neutral sole reaches floor"),FMath::IsNearlyZero(Unit->GetActorLocation().Z+2.0+Unit->GetGroundMeshOffsetZ()));
+ TestTrue(TEXT("Nameplate moves with body, preserving head clearance"),
+  FMath::IsNearlyEqual(Unit->Mesh->GetComponentLocation().Z-MeshBefore.Z,Unit->Nameplate->GetComponentLocation().Z-PlateBefore.Z));
+ const FVector GroundedMesh=Unit->Mesh->GetComponentLocation();
+ for(int32 I=0;I<30;++I) FCharacterGroundingTestAccess::Ground(Unit,0.0);
+ TestTrue(TEXT("Repeated grounding never accumulates offsets"),Unit->Mesh->GetComponentLocation().Equals(GroundedMesh));
+ Unit->SetActorLocation(FVector(100,100,12));
+ FCharacterGroundingTestAccess::Ground(Unit,0.0);
+ TestTrue(TEXT("A higher formation marker does not make the character float"),FMath::IsNearlyEqual(Unit->Mesh->GetComponentLocation().Z,GroundedMesh.Z));
+ FCharacterGroundingTestAccess::Ground(Unit,4.0);
+ TestTrue(TEXT("New floor height raises the body exactly once"),FMath::IsNearlyEqual(Unit->Mesh->GetComponentLocation().Z,GroundedMesh.Z+4.0));
+ TestTrue(TEXT("New floor height does not alter character scale"),Unit->GetActorScale3D().Equals(FVector::OneVector));
+ Unit->Destroy();
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGroundedCutSceneFrameTest,"Gladius.Grounding.CutsceneFramingFollowsGroundCorrection",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FGroundedCutSceneFrameTest::RunTest(const FString& Parameters)
+{
+ FCutSceneTestWorld T;
+ auto* Subject=T.World->SpawnActor<ABattleUnit>(); auto* Boss=T.World->SpawnActor<ABattleUnit>();
+ Subject->SetActorLocation(FVector(100,-400,12)); Boss->SetActorLocation(FVector(500,-200,80));
+ const FTransform Original=ACutSceneApplier::MakeOrigin(*Subject,*Boss);
+ const FVector LocalCamera(230,-140,170);
+ const FVector OriginalWorldCamera=Original.TransformPosition(LocalCamera);
+ FCharacterGroundingTestAccess::Calibrate(Subject,2.0);
+ for(double FloorHeight : {0.0,7.5,-10.0})
+ {
+  FCharacterGroundingTestAccess::Ground(Subject,FloorHeight);
+  const FTransform Grounded=ACutSceneApplier::MakeGroundedOrigin(*Subject,*Boss);
+  const FVector NewWorldCamera=Grounded.TransformPosition(LocalCamera);
+  TestTrue(TEXT("Ground correction preserves camera X/Y"),FMath::IsNearlyEqual(NewWorldCamera.X,OriginalWorldCamera.X)&&FMath::IsNearlyEqual(NewWorldCamera.Y,OriginalWorldCamera.Y));
+  TestTrue(TEXT("Camera and body receive the same height correction"),FMath::IsNearlyEqual(NewWorldCamera.Z-OriginalWorldCamera.Z,Subject->GetGroundMeshOffsetZ()));
+  TestTrue(TEXT("Boss-facing rotation is unchanged"),Grounded.GetRotation().Equals(Original.GetRotation()));
+  TestTrue(TEXT("Original camera curve scale is unchanged"),Grounded.GetScale3D().Equals(FVector::OneVector));
+ }
+ Subject->Destroy(); Boss->Destroy();
+ return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FActualSoleGroundContactTest,"Gladius.Grounding.ActualCharacterSolesOnFloor",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FActualSoleGroundContactTest::RunTest(const FString& Parameters)
+{
+ FCutSceneTestWorld T;
+ auto* Floor=T.World->SpawnActor<AActor>();
+ auto* Box=NewObject<UBoxComponent>(Floor);
+ Floor->SetRootComponent(Box); Floor->AddInstanceComponent(Box);
+ Box->SetBoxExtent(FVector(5000,5000,25));
+ Box->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+ Box->SetCollisionObjectType(ECC_WorldStatic);
+ Box->SetCollisionResponseToAllChannels(ECR_Block);
+ Box->RegisterComponent(); Floor->SetActorLocation(FVector(0,0,-25));
+ for(const TCHAR* Path : {TEXT("/Game/Blueprints/ScaledBattleUnits/BP_BattleUnitG_DevBattle.BP_BattleUnitG_DevBattle_C"),TEXT("/Game/Blueprints/ScaledBattleUnits/BP_BattleUnitS_DevBattle.BP_BattleUnitS_DevBattle_C")})
+ {
+  UClass* Class=LoadClass<ABattleUnit>(nullptr,Path);
+  if(!TestNotNull(TEXT("Actual battle class"),Class)) return false;
+  auto* Unit=T.World->SpawnActor<ABattleUnit>(Class,FVector(0,0,20),FRotator::ZeroRotator);
+  if(!Unit->HasActorBegunPlay()) Unit->DispatchBeginPlay();
+  Unit->Mesh->InitAnim(true);
+  if(!TestTrue(TEXT("Actual body finds physical floor"),Unit->SnapMeshToGround())) return false;
+  auto Sole=[&]()
+  {
+   TArray<FFinalSkinVertex> Vertices;
+   Unit->Mesh->GetCPUSkinnedVertices(Vertices,0);
+   TestTrue(TEXT("Actual posed body vertices are available"),!Vertices.IsEmpty());
+   double Z=TNumericLimits<double>::Max();
+   for(const auto& V:Vertices) Z=FMath::Min(Z,Unit->Mesh->GetComponentTransform().TransformPosition(FVector(V.Position)).Z);
+   return Z;
+  };
+  const double InitialSole=Sole();
+  AddInfo(FString::Printf(TEXT("%s: actual sole Z %.6f cm, correction %.6f cm"),Path,InitialSole,Unit->GetGroundMeshOffsetZ()));
+  TestTrue(TEXT("Actual visible sole touches the floor"),FMath::Abs(InitialSole)<.05);
+  Unit->MoveTo(FVector(100,0,60),0.f,EMoveGait::Walk);
+  TestTrue(TEXT("Higher formation target cannot lift the actual sole"),FMath::Abs(Sole())<.05);
+  Unit->NotifyDied(); Unit->NotifyRevived();
+  TestTrue(TEXT("Ground correction survives revival"),FMath::Abs(Sole())<.05);
+  Unit->Destroy();
+ }
+ Floor->Destroy();
+ return true;
 }
 
 #endif

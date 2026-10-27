@@ -4,7 +4,7 @@ from secrets import compare_digest
 from threading import Lock
 from typing import Optional
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values
 from app.external_data import external_data_dir
 
 load_dotenv(external_data_dir() / "TempleAI.env", override=False)
@@ -75,6 +75,33 @@ def create_app(gateway: Optional[ModelGateway] = None) -> FastAPI:
     app.state.batch_results = {}
     app.state.batch_lock = Lock()
 
+    app.state.reload_token = None
+    app.state.file_env_keys = set(dotenv_values(external_data_dir() / "TempleAI.env"))
+
+    def reload_external_settings() -> None:
+        marker = external_data_dir() / ".reload-token"
+        token = marker.read_text(encoding="utf-8").strip() if marker.exists() else ""
+        if token == app.state.reload_token:
+            return
+        if token:
+            values = dotenv_values(external_data_dir() / "TempleAI.env")
+            for key in app.state.file_env_keys - values.keys():
+                os.environ.pop(key, None)
+            for key, value in values.items():
+                if value is not None:
+                    os.environ[key] = value
+            app.state.file_env_keys = set(values)
+            from app.prompts import load_goddess_profile
+            load_goddess_profile.cache_clear()
+            if gateway is None:
+                app.state.model_gateway = None
+        app.state.reload_token = token
+
+    def authenticate(x_temple_client_token: Optional[str] = Header(default=None)) -> None:
+        with app.state.batch_lock:
+            reload_external_settings()
+        require_client_token(x_temple_client_token)
+
     def resolve_gateway() -> ModelGateway:
         if app.state.model_gateway is None:
             app.state.model_gateway = GeminiGateway.from_environment()
@@ -91,7 +118,7 @@ def create_app(gateway: Optional[ModelGateway] = None) -> FastAPI:
     @app.post("/temple/respond", response_model=TempleResponse)
     def create_temple_response(
         request: TempleRequest,
-        _: None = Depends(require_client_token),
+        _: None = Depends(authenticate),
     ) -> TempleResponse:
         if app.state.input_moderation.check(request.uid, request.message) is not None:
             raise HTTPException(
@@ -133,7 +160,7 @@ def create_app(gateway: Optional[ModelGateway] = None) -> FastAPI:
     @app.post("/temple/respond-batch", response_model=TempleBatchResponse)
     def create_temple_batch_response(
         request: TempleBatchRequest,
-        _: None = Depends(require_client_token),
+        _: None = Depends(authenticate),
     ) -> TempleBatchResponse:
         fingerprint = request.model_dump_json()
 

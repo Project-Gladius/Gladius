@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "CutSceneApplier.generated.h"
 
+class UMeshComponent;
+class UMaterialInterface;
 class ABattleManager;
 class ABattleUnit;
 class ALevelSequenceActor;
@@ -12,6 +14,16 @@ class ACutSceneCamera;
 class ULevelSequence;
 class ULevelSequencePlayer;
 struct FBattlePlayer;
+
+USTRUCT()
+struct FCutSceneSavedMaterial
+{
+    GENERATED_BODY()
+    UPROPERTY() TObjectPtr<UMeshComponent> Mesh;
+    UPROPERTY() int32 Slot = 0;
+    UPROPERTY() TObjectPtr<UMaterialInterface> Original;
+    UPROPERTY() TObjectPtr<UMaterialInterface> Applied;
+};
 
 UENUM(BlueprintType)
 enum class ECutSceneCharacterStrategy : uint8
@@ -107,6 +119,7 @@ public:
         ECutSceneCharacterStrategy Strategy, const FVector& BossLocation,
         int32 RequiredClassIndex = INDEX_NONE);
     static FTransform MakeOrigin(const AActor& Subject, const AActor& Boss);
+    static FTransform MakeGroundedOrigin(const ABattleUnit& Subject, const AActor& Boss);
 
 protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -116,6 +129,10 @@ private:
     bool ApplyCutSceneToSubject(ABattleUnit* Subject, FName CutSceneType);
     bool StartShot(ABattleUnit* Subject, ABattleUnit* Boss);
     void FinishCutScene(bool bInterrupted, bool bNotify = true);
+    void ApplyBossOpacity(ABattleUnit* Boss);
+    void RestoreBossMaterials();
+    UPROPERTY() TMap<FName, TObjectPtr<UMaterialInterface>> BossFadeMaterials;
+    UPROPERTY(Transient) TArray<FCutSceneSavedMaterial> SavedBossMaterials;
 
     UFUNCTION() void HandleSequenceFinished();
     UFUNCTION() void HandleSequenceStopped();

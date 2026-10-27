@@ -35,7 +35,8 @@ public:
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Session Log|Ticker", meta=(ClampMin="1")) float ScrollSpeed = 55.f;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Session Log|Ticker", meta=(ClampMin="0")) float StartHoldSeconds = 1.f;
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Session Log|Ticker", meta=(ClampMin="0")) float EndHoldSeconds = 1.5f;
- UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Session Log|Ticker", meta=(ClampMin="1")) float ShortMessageSeconds = 4.f;
+ // Legacy serialized value; the subsystem enforces a 20-second ordinary-message lifetime.
+ UPROPERTY() float ShortMessageSeconds = 20.f;
  UFUNCTION(BlueprintCallable, Category="Session Log") void RefreshStyle();
 protected:
  virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -51,7 +52,7 @@ protected:
 private:
  friend class FSessionLogWidgetTest;
  UPROPERTY(Transient) TObjectPtr<UTextBlock> CurrentText;
- TArray<FSessionLogEntry> PendingEntries;
+ void RefreshPresentedEntry();
  FSessionLogEntry CurrentEntry;
  bool bHasCurrentEntry = false;
  float MessageElapsed = 0.f;
