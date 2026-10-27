@@ -92,7 +92,7 @@ void USessionLogWidget::BuildDefaultLayout()
  LogScrollBox->SetVisibility(ESlateVisibility::HitTestInvisible);
  auto* TextSlot = Layers->AddChildToOverlay(LogScrollBox);
  TextSlot->SetHorizontalAlignment(HAlign_Fill);
- TextSlot->SetVerticalAlignment(VAlign_Center);
+ TextSlot->SetVerticalAlignment(VAlign_Fill);
  LogMessages = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LogMessages"));
  LogScrollBox->AddChild(LogMessages);
  CurrentText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LogCurrentMessage"));
@@ -116,7 +116,15 @@ void USessionLogWidget::RefreshStyle()
   }
  }
  if (LogScrollBox)
-  if (auto* TextLayoutSlot = Cast<UOverlaySlot>(LogScrollBox->Slot)) TextLayoutSlot->SetPadding(TextPadding);
+  if (auto* TextLayoutSlot = Cast<UOverlaySlot>(LogScrollBox->Slot)) {
+   TextLayoutSlot->SetPadding(TextPadding);
+   const float TextHeight = FMath::Max(1.f, WindowSize.Y - TextPadding.Top - TextPadding.Bottom);
+   LogScrollBox->SetRenderTransformPivot(FVector2D(0.f, 0.f));
+   // Layout padding expands available height without stretching glyphs.
+   FMargin ExpandedPadding = TextPadding;
+   ExpandedPadding.Bottom -= TextHeight * .5f;
+   TextLayoutSlot->SetPadding(ExpandedPadding);
+  }
  ApplyCurrentStyle();
  if (IsDesignTime()) AppendMessage(TEXT("[운영진 공지] 글라디우스에 오신 것을 환영합니다."), ESessionLogEvent::Admin);
 }
@@ -199,3 +207,4 @@ void USessionLogWidget::AdvanceTicker(float DeltaSeconds)
   LogScrollBox->SetScrollOffset(0);
  }
 }
+

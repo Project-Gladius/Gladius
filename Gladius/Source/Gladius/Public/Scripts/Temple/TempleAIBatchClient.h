@@ -19,7 +19,7 @@ class GLADIUS_API UTempleAIBatchClient : public UObject
 public:
 	FString EndpointUrl = TEXT("http://127.0.0.1:8765/temple/respond-batch");
 	FString ClientToken;
-	float RequestTimeoutSeconds = 12.0f;
+	float RequestTimeoutSeconds = 22.0f;
 	int32 MaxRetryCount = 1; //연결 실패/5xx일 때 재시도 횟수
 
 	//배치를 전송하고 BatchId를 반환. 메시지가 비어 있으면 전송하지 않고 빈 문자열 반환

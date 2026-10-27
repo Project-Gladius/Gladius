@@ -50,6 +50,8 @@ struct GLADIUS_API FBattleTopHudStyle
 struct FBattleTopHudState
 {
 	bool bVisible = false;
+	FString TurnLabel = TEXT("Turn");
+	FString TimerLabel;
 	FString TurnText;      //"5"
 	FString TurnTotalText; //"/10"
 	FString GuideText;
@@ -69,6 +71,8 @@ class GLADIUS_API FBattleTopHudPresenter
 {
 public:
 	static FBattleTopHudState Build(EBattlePhase Phase, bool bCutScenePlaying, float RemainingSeconds, float DurationSeconds, int32 TurnIndex, int32 Turns);
+
+	static FBattleTopHudState BuildTemple(const FDateTime& Now, const FDateTime& LastBattleEnd, const FDateTime& NextBattleStart, bool bHasNextBattle);
 
 	//30 -> "30.00"
 	static FString FormatSeconds(float Seconds);

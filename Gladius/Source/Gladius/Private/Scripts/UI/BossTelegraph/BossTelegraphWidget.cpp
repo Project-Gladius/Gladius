@@ -47,6 +47,8 @@ void UBossTelegraphWidget::ResolveWidgets()
 	if (!MessageText)
 	{
 		MessageText = Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("MessageText")));
+		//The authored WBP names this text block BT_MessageText.
+		if (!MessageText) MessageText = Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("BT_MessageText")));
 	}
 	//루트 Canvas Panel의 자식일 때만 위치를 옮길 수 있음
 	BoxSlot = TelegraphBox ? Cast<UCanvasPanelSlot>(TelegraphBox->Slot) : nullptr;
@@ -87,6 +89,7 @@ void UBossTelegraphWidget::HandleBossTelegraph(const FString& MotionId, const FS
 
 void UBossTelegraphWidget::ShowTelegraph(const FString& TelegraphText)
 {
+	ResolveWidgets();
 	const FString CleanText = TelegraphText.TrimStartAndEnd();
 	if (CleanText.IsEmpty() || !TelegraphBox)
 	{

@@ -29,6 +29,10 @@ public class Gladius : ModuleRules
             RuntimeDependencies.Add(File, StagedFileType.NonUFS);
         RuntimeDependencies.Add(Path.Combine(ServerRoot, "requirements.txt"), StagedFileType.NonUFS);
         RuntimeDependencies.Add(Path.Combine(ServerRoot, "StartServer.cmd"), StagedFileType.NonUFS);
+        RuntimeDependencies.Add(Path.Combine(ServerRoot, "start_server.py"), StagedFileType.NonUFS);
+        foreach (string File in Directory.GetFiles(Path.Combine(ServerRoot, "Python"), "*", SearchOption.AllDirectories))
+            if (!File.Contains("__pycache__") && !File.EndsWith(".pyc"))
+                RuntimeDependencies.Add(File, StagedFileType.NonUFS);
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

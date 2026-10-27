@@ -201,3 +201,9 @@ bool UBattleScheduleSubsystem::CancelNext(const FDateTime& Now, FDateTime& Cance
  GetNextStart(Now, Next);
  return true;
 }
+
+FDateTime UBattleScheduleSubsystem::GetTempleIntervalStart(const FDateTime& Now)
+{
+ if (LastBattleEnd == FDateTime()) LastBattleEnd = Now;
+ return LastBattleEnd;
+}

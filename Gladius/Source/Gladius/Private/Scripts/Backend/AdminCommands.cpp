@@ -65,19 +65,7 @@ bool UAdminSubsystem::HandleAdminCommand(const FParsedCommand& C, ABattleManager
     : FString::Printf(TEXT("다음 전투는 %02d시 %02d분입니다."), Next.GetHour(), Next.GetMinute())));
    return true;
   }
-  if (Battle && Battle->IsBattleRunning()) { Emit(TEXT("[공지] 이미 전투가 진행 중입니다.")); return true; }
-  FDateTime At;
-  if (Arg.IsEmpty()) At = Now + FTimespan::FromSeconds(5);
-  else
-  {
-   TArray<int32> Minutes; FString ParseError;
-   if (!UBattleScheduleSubsystem::ParseSchedule(TEXT("StartTime\n") + Arg, Minutes, ParseError) || Minutes.Num() != 1) { Error(); return true; }
-   At = Now.GetDate() + FTimespan::FromMinutes(Minutes[0]);
-   if (At <= Now) At += FTimespan::FromDays(1);
-  }
-  if (!Schedule->AddManualStart(At)) { Error(); return true; }
-  if (Arg.IsEmpty()) Emit(TEXT("[긴급공지] 지금 전투가 시작됩니다!"), ESessionLogEvent::AdminUrgent);
-  else Emit(FString::Printf(TEXT("[공지] 잠시 후 %02d시 %02d분에 전투가 시작됩니다!"), At.GetHour(), At.GetMinute()));
+  Emit(TEXT("[공지] 전투는 외부 시간표(BattleSchedule.csv)에 따라서만 시작됩니다."));
   return true;
  }
  case ECommandType::Maintenance:

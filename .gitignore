@@ -83,3 +83,7 @@ Gladius/Content/ExternalData/TempleAI.env
 # Local broadcast configuration and live records.
 Gladius/Content/ExternalData/BroadcastSettings.json
 Gladius/Content/ExternalData/PlayerData.json
+
+# Bundled local AI runtime and service logs.
+Gladius/Server/TempleAI_Phase1/Python/
+Gladius/Server/TempleAI_Phase1/Saved/

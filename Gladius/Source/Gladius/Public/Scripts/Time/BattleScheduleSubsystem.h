@@ -25,7 +25,11 @@ public:
     bool AddManualStart(const FDateTime& At);
     bool CancelNext(const FDateTime& Now, FDateTime& Cancelled, FDateTime& Next);
     bool GetNextStart(const FDateTime& Now, FDateTime& Next) const;
+    // Survives level travel; the first temple entry is the baseline until a battle has ended.
+    FDateTime GetTempleIntervalStart(const FDateTime& Now);
+    void RecordBattleEnd(const FDateTime& At) { LastBattleEnd = At; }
 private:
+    FDateTime LastBattleEnd;
     TArray<FDateTime> ManualStarts;
     friend struct FRealTimeTestAccess;
     friend struct FAdminScheduleTestAccess;

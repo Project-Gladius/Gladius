@@ -44,7 +44,7 @@ public:
 
 	//사이클 시작부터 대화가 끝나야 하는 시간(초). 넘치는 대화는 우선순위가 낮은 것부터 잘림
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goddess|Timing", meta = (ClampMin = "0.0"))
-	float CycleBudgetSeconds = 39.0f;
+	float CycleBudgetSeconds = 24.0f;
 
 	// Index 0..3: recovery, strength, agility, sharpness. Per-actor dynamic materials preserve authored Glow.
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Goddess|Blessing Icons", meta = (EditFixedSize))

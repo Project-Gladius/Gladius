@@ -1,5 +1,9 @@
 #include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
 #include "Scripts/Battle/BattleManager.h"
+#include "Scripts/Temple/TempleCycleController.h"
+#include "Scripts/Time/BattleScheduleSubsystem.h"
+#include "Scripts/Time/RealTimeClockSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Scripts/UI/UIWidgetBuild.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -52,10 +56,10 @@ void UBattleTopHudWidget::ResolveWidgets()
 	auto Find = [this](auto& Member, const TCHAR* Name)
 	{
 		using FWidgetType = std::remove_reference_t<decltype(*Member)>;
-		if (!Member)
-		{
-			Member = Cast<FWidgetType>(WidgetTree->FindWidget(Name));
-		}
+        if (auto* Found = Cast<FWidgetType>(WidgetTree->FindWidget(Name)))
+        {
+            Member = Found;
+        }
 	};
 	Find(TopHudBar, TEXT("TopHudBar"));
 	Find(TurnValueText, TEXT("TurnValueText"));
@@ -75,11 +79,30 @@ void UBattleTopHudWidget::ResolveWidgets()
 void UBattleTopHudWidget::BindToBattleManager(ABattleManager* InBattleManager)
 {
 	BattleManager = InBattleManager;
+	TempleController.Reset();
+}
+
+void UBattleTopHudWidget::BindToTempleController(ATempleCycleController* InController)
+{
+ TempleController = InController;
+ BattleManager.Reset();
+ if (InController)
+ {
+  ResolveWidgets();
+  PrepareTempleLayout();
+  RefreshTempleState();
+ }
 }
 
 void UBattleTopHudWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+
+ if (TempleController.IsValid())
+ {
+  RefreshTempleState();
+  return;
+ }
 
 	const ABattleManager* Manager = BattleManager.Get();
 	if (!Manager)
@@ -115,10 +138,12 @@ void UBattleTopHudWidget::Apply(const FBattleTopHudState& State)
 
 	if (State.bVisible)
 	{
+  SetTextIfChanged(WidgetTree ? Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("TurnLabelText"))) : nullptr, State.TurnLabel);
 		SetTextIfChanged(TurnValueText, State.TurnText);
 		SetTextIfChanged(TurnTotalText, State.TurnTotalText);
 		SetTextIfChanged(GuideText, State.GuideText);
 		SetTextIfChanged(TimerText, State.TimerText);
+  SetTextIfChanged(WidgetTree ? Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("TempleTimerLabelText"))) : nullptr, State.TimerLabel);
 
 		//공간은 유지한 채 숨겨 레이아웃이 흔들리지 않게 함
 		if (TimerContent)
@@ -433,4 +458,63 @@ bool UBattleTopHudWidget::EnableFreeLayout(UObject* Asset)
 #else
  return false;
 #endif
+}
+
+void UBattleTopHudWidget::RefreshTempleState()
+{
+ UGameInstance* Instance = GetGameInstance();
+ auto* Clock = Instance ? Instance->GetSubsystem<URealTimeClockSubsystem>() : nullptr;
+ auto* Schedule = Instance ? Instance->GetSubsystem<UBattleScheduleSubsystem>() : nullptr;
+ const FDateTime Now = Clock ? Clock->GetLocalTime() : FDateTime::Now();
+ FDateTime Next;
+ const bool bHasNext = Schedule && Schedule->GetNextStart(Now, Next);
+ const FDateTime Start = Schedule ? Schedule->GetTempleIntervalStart(Now) : Now;
+ Apply(FBattleTopHudPresenter::BuildTemple(Now, Start, Next, bHasNext));
+}
+
+void UBattleTopHudWidget::PrepareTempleLayout()
+{
+ if (bTempleLayoutPrepared || !WidgetTree) return;
+ auto* Frame = WidgetTree->FindWidget(TEXT("TopHudFrame"));
+ auto* Canvas = Cast<UCanvasPanel>(Frame);
+ if (!Canvas)
+ {
+  if (auto* Overlay = Cast<UOverlay>(Frame))
+  {
+   Canvas = WidgetTree->ConstructWidget<UCanvasPanel>();
+   auto* TempleOverlaySlot = Overlay->AddChildToOverlay(Canvas);
+   TempleOverlaySlot->SetHorizontalAlignment(HAlign_Fill); TempleOverlaySlot->SetVerticalAlignment(VAlign_Fill);
+  }
+ }
+ if (!Canvas) return;
+ bTempleLayoutPrepared = true;
+ // Keep the battle artwork, size and screen position. Fit temple fields into its three visible regions.
+ // Hidden retains the original desired size in the native fallback layout.
+ if (TopHudBar) TopHudBar->SetVisibility(ESlateVisibility::Hidden);
+ auto Place = [Canvas](UWidget* Widget, float Left, float Right, float Top, float Height)
+ {
+  if (!Widget) return;
+  Widget->RemoveFromParent(); Widget->SetRenderTransform(FWidgetTransform());
+  auto* Slot = Canvas->AddChildToCanvas(Widget);
+  Slot->SetAnchors(FAnchors(Left/718.f,0.f,Right/718.f,0.f));
+  Slot->SetOffsets(FMargin(0.f,Top,0.f,Height));
+  Slot->SetZOrder(1);
+ };
+ auto TextStyle = [](UTextBlock* Text, int32 Size)
+ {
+  if (!Text) return;
+  auto Font = Text->GetFont(); Font.Size = Size; Text->SetFont(Font);
+  Text->SetJustification(ETextJustify::Center);
+ };
+ auto* Label = Cast<UTextBlock>(WidgetTree->FindWidget(TEXT("TurnLabelText")));
+ Place(Label,50.f,170.f,5.f,28.f); TextStyle(Label,14);
+ Place(TurnValueText,50.f,170.f,28.f,40.f); TextStyle(TurnValueText,20);
+ if (TurnTotalText) TurnTotalText->SetVisibility(ESlateVisibility::Collapsed);
+ Place(GuideText,176.f,544.f,9.f,30.f); TextStyle(GuideText,16);
+ Place(Gauge,180.f,540.f,48.f,8.f);
+ Place(TimerText,596.f,672.f,28.f,40.f); TextStyle(TimerText,18);
+ TimerContent = TimerText;
+ auto* TimerLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(),TEXT("TempleTimerLabelText"));
+ if (Label) { TimerLabel->SetFont(Label->GetFont()); TimerLabel->SetColorAndOpacity(Label->GetColorAndOpacity()); }
+ Place(TimerLabel,552.f,672.f,5.f,28.f); TextStyle(TimerLabel,14);
 }

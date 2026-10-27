@@ -60,8 +60,8 @@ bool FRealTimeCsvTest::RunTest(const FString& Parameters)
     FString Csv;
     TestTrue(TEXT("External CSV exists"), FFileHelper::LoadFileToString(Csv, *FPaths::Combine(FPaths::ProjectContentDir(), TEXT("ExternalData/BattleSchedule.csv"))));
     TestTrue(TEXT("Default CSV parses"), UBattleScheduleSubsystem::ParseSchedule(Csv, Times, Error));
-    TestEqual(TEXT("09:50 through 17:50 inclusive"), Times.Num(), 9);
-    for (int32 I = 0; I < Times.Num(); ++I) TestEqual(TEXT("Hourly :50"), Times[I], (9+I)*60+50);
+    TestEqual(TEXT("09:20 through 16:50 inclusive"), Times.Num(), 16);
+    for (int32 I = 0; I < Times.Num(); ++I) TestEqual(TEXT("Every hour at :20 and :50"), Times[I], (9+I/2)*60+(I%2==0?20:50));
     return true;
 }
 

@@ -819,6 +819,7 @@ private:
  int32 CutSceneIndex = 0;
  FString CutSceneAttackUserId;
  float CutSceneAttackStartTime = 0.f;
+ FTimerHandle CutSceneRollHandle;
  bool bCutSceneAttackCrit = false;
  // Keep the selected Gladius on walk/run speed choices through this turn's return movement.
  TWeakObjectPtr<ABattleUnit> WalkRunOnlyCutSceneUnit;

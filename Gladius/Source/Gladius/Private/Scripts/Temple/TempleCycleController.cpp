@@ -8,6 +8,8 @@
 #include "Scripts/Temple/TempleAIBatchClient.h"
 #include "Scripts/Temple/TempleCommandQueue.h"
 #include "Scripts/Temple/TempleStatusWidget.h"
+#include "Scripts/UI/BattleHud/BattleTopHudWidget.h"
+#include "Scripts/UI/UIWidgetBuild.h"
 #include "Scripts/UI/ChatLogWidget.h"
 #include "Scripts/UI/SessionLogWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
@@ -21,10 +23,13 @@
 #include "GameFramework/PlayerController.h"
 #include "Engine/GameInstance.h"
 #include "Scripts/Time/RealTimeSettings.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/Paths.h"
 
 ATempleCycleController::ATempleCycleController()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	TopHudWidgetClass = UBattleTopHudWidget::StaticClass();
 	StatusWidgetClass = UTempleStatusWidget::StaticClass();
 	ChatLogWidgetClass = UChatLogWidget::StaticClass();
  SessionLogWidgetClass = USessionLogWidget::StaticClass();
@@ -37,6 +42,7 @@ void ATempleCycleController::BeginPlay()
  ResolveReferences();
  if (IsValid(Goddess))
  {
+  Goddess->CycleBudgetSeconds = FMath::Min(Goddess->CycleBudgetSeconds, FMath::Max(0.f, CycleSeconds - 1.f));
   BoundGoddess = Goddess;
   Goddess->OnEnhanceExecuted.AddUniqueDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);
   Goddess->OnStateChanged.AddUniqueDynamic(this, &ATempleCycleController::HandleGoddessStateChanged);
@@ -53,6 +59,22 @@ void ATempleCycleController::BeginPlay()
  {
   Settings->TryGetStringField(TEXT("TempleAIBatchEndpointUrl"), TempleAIBatchEndpointUrl);
   Settings->TryGetStringField(TEXT("TempleAIClientToken"), TempleAIClientToken);
+ }
+ // Local releases carry their own Python runtime and service. The launcher reuses an existing server.
+ if (!GIsAutomationTesting && !IsRunningCommandlet()
+     && (TempleAIBatchEndpointUrl.StartsWith(TEXT("http://127.0.0.1:")) || TempleAIBatchEndpointUrl.StartsWith(TEXT("http://localhost:"))))
+ {
+  const FString ServerDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Server/TempleAI_Phase1"));
+  const FString Python = ServerDir / TEXT("Python/pythonw.exe");
+  const FString Launcher = ServerDir / TEXT("start_server.py");
+  if (FPaths::FileExists(Python) && FPaths::FileExists(Launcher))
+  {
+   const FString Arguments = FString::Printf(TEXT("\"%s\""), *Launcher);
+   FProcHandle Process = FPlatformProcess::CreateProc(*Python, *Arguments, true, true, true, nullptr, 0, *ServerDir, nullptr);
+   if (Process.IsValid()) FPlatformProcess::CloseProc(Process);
+   else UE_LOG(LogTemp, Error, TEXT("Temple AI local server could not start."));
+  }
+  else UE_LOG(LogTemp, Error, TEXT("Temple AI launcher or bundled runtime is missing."));
  }
 	BatchClient = NewObject<UTempleAIBatchClient>(this);
 	BatchClient->EndpointUrl = TempleAIBatchEndpointUrl;
@@ -120,6 +142,7 @@ void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			PC->SetInputMode(FInputModeGameOnly());
 		}
 	}
+	if (TopHudWidget) TopHudWidget->RemoveFromParent();
 	if (ChatLogWidget) ChatLogWidget->RemoveFromParent();
  if (SessionLogWidget) SessionLogWidget->RemoveFromParent();
 
@@ -157,6 +180,15 @@ void ATempleCycleController::ResolveReferences()
 
 void ATempleCycleController::CreateStatusWidget()
 {
+ if (!TopHudWidget)
+ {
+  TopHudWidget = CreateWidget<UBattleTopHudWidget>(GetWorld(), GladiusUI::ResolveWidgetClass<UBattleTopHudWidget>(TopHudWidgetClass, GladiusUI::AssetPaths::TopHud));
+  if (TopHudWidget)
+  {
+   TopHudWidget->BindToTempleController(this);
+   TopHudWidget->AddToViewport(1);
+  }
+ }
 	if (SessionLogWidgetClass)
  {
   SessionLogWidget = CreateWidget<USessionLogWidget>(GetWorld(), SessionLogWidgetClass);
@@ -219,13 +251,7 @@ void ATempleCycleController::HandleCycleTimer()
 {
 	if (bLeavingTemple) return;
 
-	//정해진 사이클을 모두 마쳤으면(마지막 사이클의 40초가 지난 지금) 전투로 이동
-	if (CyclesBeforeCombat > 0 && CompletedCycles >= CyclesBeforeCombat)
-	{
-		UE_LOG(LogTemp, Log, TEXT("[신전] 사이클 %d회 완료, 전투로 이동"), CompletedCycles);
-		RequestCombatTravel();
-		return;
-	}
+	//전투 이동은 외부 시간표를 읽는 BattleScheduleSubsystem만 요청한다.
 
 	if (ChatManager)
 	{
@@ -323,9 +349,7 @@ void ATempleCycleController::HandleBatchFailed(const FString& BatchId, const FSt
 
 void ATempleCycleController::HandleCombatCommand()
 {
-	// 채팅 목록 처리 콜백을 빠져나온 다음 프레임에 이동합니다.
-	if (!bLeavingTemple && !GetWorldTimerManager().TimerExists(TravelTimerHandle))
-		TravelTimerHandle = GetWorldTimerManager().SetTimerForNextTick(this, &ATempleCycleController::RequestCombatTravel);
+	//레거시 채팅 이벤트로는 시간표 밖의 전투를 시작하지 않는다.
 }
 
 void ATempleCycleController::RequestCombatTravel()

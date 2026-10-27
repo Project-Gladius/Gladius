@@ -97,7 +97,7 @@ bool FTempleManualFlowTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Cycles stop after manual request"),T.Controller->GetCompletedCycles(),8);
  return true;
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleCycleLimitTest,"Gladius.Temple.Flow.CombatAfterCycles",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleCycleLimitTest,"Gladius.Temple.Flow.LegacyCycleLimitNeverStartsCombat",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
 bool FTempleCycleLimitTest::RunTest(const FString& Parameters)
 {
  FTempleTestWorld T;
@@ -106,8 +106,8 @@ bool FTempleCycleLimitTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Five cycles run"),T.Controller->GetCompletedCycles(),5);
  TestFalse(TEXT("Fifth cycle plays out before leaving"),FTempleFlowTestAccess::Leaving(T.Controller));
  FTempleFlowTestAccess::Cycle(T.Controller); //5번째 사이클이 끝나는 다음 타이머
- TestTrue(TEXT("Combat is requested after five cycles"),FTempleFlowTestAccess::Leaving(T.Controller));
- TestEqual(TEXT("No sixth cycle starts"),T.Controller->GetCompletedCycles(),5);
+ TestFalse(TEXT("Legacy five-cycle value cannot start combat"),FTempleFlowTestAccess::Leaving(T.Controller));
+ TestEqual(TEXT("Sixth cycle starts normally"),T.Controller->GetCompletedCycles(),6);
  return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempleCommandTest,"Gladius.Temple.Flow.CombatCommand",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)

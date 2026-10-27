@@ -59,6 +59,21 @@ void ABattleUnit::OnConstruction(const FTransform& Transform)
 void ABattleUnit::BeginPlay()
 {
 	Super::BeginPlay();
+	// Keep the authored anchor's head clearance, reduced to one sixth.
+	if (Mesh && Nameplate && PlayerUIClass)
+	{
+		Mesh->RefreshBoneTransforms();
+		FName Head = NAME_None;
+		for (FName Candidate : { FName(TEXT("def-head")), FName(TEXT("head")), FName(TEXT("jnt_head01")) })
+			if (Mesh->GetBoneIndex(Candidate) != INDEX_NONE) { Head = Candidate; break; }
+		if (!Head.IsNone())
+		{
+			FVector Anchor = Nameplate->GetComponentLocation();
+			const double HeadZ = Mesh->GetSocketLocation(Head).Z;
+			Anchor.Z = HeadZ + (Anchor.Z - HeadZ) / 6.0;
+			Nameplate->SetWorldLocation(Anchor);
+		}
+	}
 	Nameplate->SetPivot(FVector2D(0.5f, 1.f));
 	ApplyLabel();
 }

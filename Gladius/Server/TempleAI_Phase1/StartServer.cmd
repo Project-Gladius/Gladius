@@ -1,4 +1,7 @@
 @echo off
 cd /d "%~dp0"
-set "GLADIUS_EXTERNAL_DATA_DIR=%~dp0..\..\Content\ExternalData"
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+if not exist "%~dp0Python\python.exe" (
+ echo Bundled Python runtime is missing.
+ exit /b 1
+)
+"%~dp0Python\python.exe" "%~dp0start_server.py"

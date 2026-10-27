@@ -39,6 +39,7 @@
 #include "Components/InputComponent.h"
 #include "Scripts/Battle/GladiusRunCamera.h"
 #include "Scripts/Battle/BattleUnit.h"
+#include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
 #include "EngineUtils.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/WidgetComponent.h"
@@ -814,8 +815,11 @@ bool FGladiusDirectAttackMontageTest::RunTest(const FString& Parameters)
   B->StartBattle(); FBattleUnificationTestAccess::Prepare(B);
   B->SubmitAction(TEXT("runner"),TEXT("Runner"),Skill==1?EBattleAction::Attack1:EBattleAction::Attack2,TEXT("gladius"));
   auto* Subject=B->GetBattlePlayers().FindChecked(TEXT("runner")).Unit.Get();
+  const double OriginalAnchorZ=Subject->Nameplate->GetComponentLocation().Z;
   if(!Subject->HasActorBegunPlay()) Subject->DispatchBeginPlay();
   auto* Mesh=Subject->FindComponentByClass<USkeletalMeshComponent>();
+  const double HeadZ=Mesh->GetSocketLocation(TEXT("def-head")).Z;
+  TestTrue(TEXT("Nameplate clearance is one sixth of authored head gap"),FMath::IsNearlyEqual(Subject->Nameplate->GetComponentLocation().Z,HeadZ+(OriginalAnchorZ-HeadZ)/6.,.1));
   Mesh->InitAnim(true);
   auto* Anim=Mesh->GetAnimInstance();
   if(!TestNotNull(TEXT("Actual animation instance exists"),Anim)) return false;
@@ -830,21 +834,30 @@ bool FGladiusDirectAttackMontageTest::RunTest(const FString& Parameters)
   const FDelegateHandle StartedHandle=Subject->OnAttackStarted.AddLambda([&](int32 Index)
   {
    ++StartCount;
-   bMontagePlayingAtSignal=Index==Skill&&Anim->Montage_IsPlaying(Attack)&&Anim->GetCurrentActiveMontage()==Attack;
+   bMontagePlayingAtSignal=Index==Skill&&Anim->GetCurrentActiveMontage()==(Skill==1?Roll:Attack);
   });
   Anim->Montage_Play(Roll);
   Subject->MoveTo(Subject->GetActorLocation()+FVector(100,0,0),1.f,EMoveGait::Run);
   const double ArrivalTime=T.World->GetTimeSeconds();
   static_cast<AActor*>(Subject)->Tick(1.f);
   TestEqual(TEXT("One skill starts immediately on arrival"),StartCount,1);
-  TestTrue(TEXT("Attack montage is already playing when start signal is emitted"),bMontagePlayingAtSignal);
+  TestTrue(TEXT("Opening motion is playing when the camera start signal is emitted"),bMontagePlayingAtSignal);
   TestEqual(TEXT("No timer or frame wait between attack and camera"),T.World->GetTimeSeconds(),ArrivalTime);
   TestEqual(TEXT("Skill camera starts in the attack call"),FBattleUnificationTestAccess::ShotIndex(B),2);
   TestTrue(TEXT("Skill camera is playing"),Applier->IsPlaying());
-  TestTrue(TEXT("Attack replaces any roll montage"),Anim->GetCurrentActiveMontage()==Attack);
+  TestTrue(TEXT("Skill one camera opens on Roll, skill two opens on Attack2"),Anim->GetCurrentActiveMontage()==(Skill==1?Roll:Attack));
+  if (Skill==1)
+  {
+   ++GFrameCounter;
+   T.World->GetTimerManager().Tick(0.f);
+   ++GFrameCounter;
+   T.World->GetTimerManager().Tick(Roll->GetPlayLength()+.01f);
+   TestTrue(TEXT("Attack1 follows the opening roll"),Anim->GetCurrentActiveMontage()==Attack);
+   TestEqual(TEXT("Roll and Attack1 each report their start"),StartCount,2);
+  }
   FBattleUnificationTestAccess::Resolve(B);
   FBattleUnificationTestAccess::FlushOneAttack(B);
-  TestEqual(TEXT("Attack queue does not replay the skill"),StartCount,1);
+  TestEqual(TEXT("Attack queue does not replay the skill"),StartCount,Skill==1?2:1);
   TestEqual(TEXT("Attack queue does not restart the camera"),FBattleUnificationTestAccess::ShotIndex(B),2);
   Subject->OnAttackStarted.Remove(StartedHandle);
   B->StopBattle();
@@ -1155,6 +1168,8 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("History retained independently"), Log->GetEntries().Num(), 5);
  if (!FParse::Param(FCommandLine::Get(), TEXT("NullRHI")))
  {
+  W->WindowSize=FVector2D(384,64);
+  W->RefreshStyle();
   W->LogFont.Size = 18;
   W->PendingEntries.Reset();
   W->AppendMessage(TEXT("[운영진 공지] 글라디우스에 오신 것을 환영합니다. 오늘 전투는 오후 8시에 시작합니다. 끝까지 즐겁게 참여해 주세요!"), ESessionLogEvent::Admin);
@@ -1171,6 +1186,8 @@ bool FSessionLogWidgetTest::RunTest(const FString& Parameters)
    FFileHelper::SaveArrayToFile(Png, *(FPaths::ProjectSavedDir() / Name));
   };
   SavePreview(TEXT("NoticeTicker-start.png"));
+  AddInfo(FString::Printf(TEXT("Notice text height=%f scroll viewport height=%f"),W->CurrentText->GetDesiredSize().Y,W->LogScrollBox->GetCachedGeometry().GetLocalSize().Y));
+  TestTrue(TEXT("Expanded notice viewport fits complete glyph height"),W->LogScrollBox->GetCachedGeometry().GetLocalSize().Y>=W->CurrentText->GetDesiredSize().Y);
   W->AdvanceTicker(5.f);
   SavePreview(TEXT("NoticeTicker-scroll.png"));
  }
@@ -1296,4 +1313,56 @@ bool FAdminScheduleTest::RunTest(const FString& Parameters)
  return true;
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeathRevivalTickerTest,"Gladius.SessionLog.GroupedDeathsAndRevivals",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FDeathRevivalTickerTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T; auto* B=T.Battle;
+ B->StartBattle(); FBattleUnificationTestAccess::Prepare(B); B->IdleTurnsBeforeKick=100;
+ auto* Log=T.Instance->GetSubsystem<USessionLogSubsystem>();
+ for(const TCHAR* Id : {TEXT("Alice"),TEXT("Bob")})
+ {
+  B->SubmitAction(Id,Id,EBattleAction::Idle,TEXT("gladius"));
+  B->SetPlayerHealth(Id,1);
+ }
+ const int32 Before=Log->GetEntries().Num();
+ for(int32 Lane=0;Lane<3;++Lane) B->TelegraphedAction.DamageByZone[Lane]=1000;
+ B->TelegraphedAction.HitCount=1;
+ FBattleUnificationTestAccess::Resolve(B);
+ if(!TestEqual(TEXT("One grouped death announcement"),Log->GetEntries().Num(),Before+1)) return false;
+ TestEqual(TEXT("Death text joins names"),Log->GetEntries().Last().Message,FString(TEXT("Alice, Bob이 사망하였습니다. 3턴 후에 부활합니다.")));
+ TestTrue(TEXT("Death uses AdminColor category"),Log->GetEntries().Last().Event==ESessionLogEvent::Admin);
+ for(int32 Lane=0;Lane<3;++Lane) B->TelegraphedAction.DamageByZone[Lane]=0;
+ for(int32 Turn=1;Turn<=3;++Turn)
+ {
+  FBattleUnificationTestAccess::Resolve(B);
+  TestEqual(TEXT("Only revive on the third turn"),Log->GetEntries().Num(),Before+(Turn==3?2:1));
+ }
+ TestEqual(TEXT("Revival text joins names"),Log->GetEntries().Last().Message,FString(TEXT("사망한 Alice, Bob이 부활하였습니다. 강화한 능력치가 소멸됩니다.")));
+ TestTrue(TEXT("Revival uses AdminColor category"),Log->GetEntries().Last().Event==ESessionLogEvent::Admin);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBossAuthoredMessageTest,"Gladius.BattleUI.AuthoredBossTelegraphUsesJson",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBossAuthoredMessageTest::RunTest(const FString& Parameters)
+{
+ FUnifiedBattleWorld T;
+ if(!TestTrue(TEXT("Real boss JSON loads"),FBattleUnificationTestAccess::LoadBossData(T.Battle))) return false;
+ auto* Class=LoadClass<UBossTelegraphWidget>(nullptr,TEXT("/Game/Blueprints/UI/WBP_BossTelegraph.WBP_BossTelegraph_C"));
+ if(!TestNotNull(TEXT("Actual designer widget loads"),Class)) return false;
+ auto* UI=CreateWidget<UBossTelegraphWidget>(T.Instance,Class); UI->TakeWidget();
+ auto* Text=Cast<UTextBlock>(UI->WidgetTree->FindWidget(TEXT("BT_MessageText")));
+ if(!TestNotNull(TEXT("Authored text block exists"),Text)) return false;
+ for(const TCHAR* Id : {TEXT("SingleStrikeLeft"),TEXT("SingleStrikeCenter"),TEXT("SingleStrikeRight")})
+ {
+  const auto* Action=FBattleUnificationTestAccess::BossData(T.Battle).FindAction(Id);
+  if(!TestNotNull(TEXT("JSON attack exists"),Action)) return false;
+  UI->ShowTelegraph(Action->TelegraphText);
+  TestEqual(TEXT("Real widget displays the selected JSON announcement"),Text->GetText().ToString(),Action->TelegraphText);
+ }
+ return true;
+}
+
 #endif
+
+

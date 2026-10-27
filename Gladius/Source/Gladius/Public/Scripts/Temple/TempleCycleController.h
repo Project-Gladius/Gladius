@@ -17,6 +17,7 @@ class UTempleAIBatchClient;
 class UTempleStatusWidget;
 class UChatLogWidget;
 class USessionLogWidget;
+class UBattleTopHudWidget;
 
 // 신전 씬의 사이클 진행자
 // CycleSeconds마다: 채팅 조회 -> 큐잉 종료(스냅샷) -> 여신 사이클 시작 + 대화 배치를 AI 서버로 전송
@@ -31,11 +32,11 @@ public:
 
 	//한 사이클 길이(초). 신전 진입 후 이 시간이 지나면 첫 채팅 조회
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|Cycle", meta = (ClampMin = "1.0"))
-	float CycleSeconds = 40.0f;
+	float CycleSeconds = 25.0f;
 
-	//이 횟수만큼 사이클이 끝나면 전투 레벨로 이동 (0이면 자동 이동 안 함, !전투·시간표로만 이동)
+	//구버전 씬 호환용 값. 사이클 횟수에 따른 전투 이동은 사용하지 않는다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|Cycle", meta = (ClampMin = "0"))
-	int32 CyclesBeforeCombat = 5;
+	int32 CyclesBeforeCombat = 0;
 
 	UPROPERTY(BlueprintAssignable, Category = "Temple|Travel")
 	FOnTempleCombatRequested OnCombatRequested;
@@ -53,6 +54,9 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|AI")
 	FString TempleAIClientToken;
+
+ UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|UI")
+ TSubclassOf<UBattleTopHudWidget> TopHudWidgetClass;
 
 	//상태 UI 클래스. WBP로 교체 가능
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Temple|UI")
@@ -74,6 +78,7 @@ protected:
 
 private:
 	friend struct FTempleFlowTestAccess;
+ friend struct FTempleTopHudTestAccess;
 	//에디터에서 지정하지 않으면 BeginPlay에서 월드를 검색해 채움
 	UPROPERTY(EditInstanceOnly, Category = "Temple|References")
 	TObjectPtr<AYouTubeChatManager> ChatManager;
@@ -106,6 +111,9 @@ private:
 
  UPROPERTY(Transient)
  TObjectPtr<USessionLogWidget> SessionLogWidget;
+
+ UPROPERTY(Transient)
+ TObjectPtr<UBattleTopHudWidget> TopHudWidget;
 
 	FTimerHandle CycleTimerHandle;
 	FTimerHandle TravelTimerHandle;

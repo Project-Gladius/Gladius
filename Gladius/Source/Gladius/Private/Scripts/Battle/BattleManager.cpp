@@ -11,6 +11,8 @@
 #include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/Backend/ExternalData.h"
 #include "Scripts/Time/RealTimeSettings.h"
+#include "Scripts/Time/BattleScheduleSubsystem.h"
+#include "Scripts/Time/RealTimeClockSubsystem.h"
 #include "Scripts/UI/ChatLogWidget.h"
 #include "Scripts/UI/SessionLogWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
@@ -33,6 +35,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimInstance.h"
+#include "Components/SkeletalMeshComponent.h"
 
 ABattleManager::ABattleManager()
 {
@@ -230,6 +234,9 @@ void ABattleManager::StartBattle()
 void ABattleManager::FinishBattle()
 {
  if (!bBattleRunning) return;
+ if (auto* Instance = GetGameInstance())
+  if (auto* Schedule = Instance->GetSubsystem<UBattleScheduleSubsystem>())
+   Schedule->RecordBattleEnd(Instance->GetSubsystem<URealTimeClockSubsystem>()->GetLocalTime());
  //신전으로 가기 전에 이번 전투 참가자에게 축복 횟수 지급 (StopBattle이 저장)
  GrantBlessingsToParticipants();
  StopBattle();
@@ -1155,6 +1162,27 @@ void ABattleManager::StartSelectedGladiusAttack()
  CutSceneAttackUserId = CutSceneUserId;
  CutSceneAttackStartTime = GetWorld()->GetTimeSeconds();
  bCutSceneAttackCrit = FMath::FRand() < FMath::Min(Attack.CritChance + P->CritChanceBonus, CritChanceCap);
+ // Skill one opens with its roll; advance the camera in the same frame.
+ if (AttackIndex == 1 && P->Unit->EvadeRollMontage && P->Unit->Mesh)
+ {
+  if (UAnimInstance* Anim = P->Unit->Mesh->GetAnimInstance())
+  {
+   const float OpeningRollDuration = Anim->Montage_Play(P->Unit->EvadeRollMontage);
+   if (OpeningRollDuration > 0.f)
+   {
+    CutSceneAttackStartTime += OpeningRollDuration;
+    const TWeakObjectPtr<ABattleUnit> Unit = P->Unit;
+    const bool bCrit = bCutSceneAttackCrit;
+    GetWorldTimerManager().SetTimer(CutSceneRollHandle, FTimerDelegate::CreateWeakLambda(this, [this, Unit, bCrit]()
+    {
+     if (bBattleRunning && Unit.IsValid() && Unit->GetSelectedAction() == EBattleAction::Attack1)
+      Unit->PerformSkill(1, bCrit, true);
+    }), OpeningRollDuration, false);
+    P->Unit->OnAttackStarted.Broadcast(1);
+    return;
+   }
+  }
+ }
  P->Unit->PerformSkill(AttackIndex, bCutSceneAttackCrit, true);
 }
 
@@ -1188,6 +1216,7 @@ void ABattleManager::PlayNextCutScene()
 
 void ABattleManager::StopTurnCutScenes()
 {
+ GetWorldTimerManager().ClearTimer(CutSceneRollHandle);
  for (const auto& Pair : Players)
   if (IsValid(Pair.Value.Unit))
   {
@@ -1643,6 +1672,8 @@ void ABattleManager::ResolveTurn()
 	int32 Crits = 0;
 	int32 Died = 0;
 	int32 Revived = 0;
+	TArray<FString> DiedNames;
+	TArray<FString> RevivedNames;
 
 
 	for (TPair<FString, FBattlePlayer>& Pair : Players)
@@ -1679,6 +1710,7 @@ void ABattleManager::ResolveTurn()
 				P.Fever = Balance.InitialFever;
 				P.EvadeStreak = Balance.InitialEvadeStreak;
 				++Revived;
+				RevivedNames.Add(P.DisplayName.IsEmpty() ? Pair.Key : P.DisplayName);
 
 				if (P.Unit)
 				{
@@ -1803,6 +1835,23 @@ void ABattleManager::ResolveTurn()
 			P.ReviveCountdown = FMath::Max(1, ReviveTurns);
 			P.bDiedThisTurn = true;
 			++Died;
+			DiedNames.Add(P.DisplayName.IsEmpty() ? Pair.Key : P.DisplayName);
+		}
+	}
+
+	//한 턴의 모든 참가자를 모아 각각 한 번씩 알린다. Admin 이벤트가 AdminColor로 표시된다.
+	if (UGameInstance* Instance = GetGameInstance())
+	{
+		if (USessionLogSubsystem* Log = Instance->GetSubsystem<USessionLogSubsystem>())
+		{
+			DiedNames.Sort();
+			RevivedNames.Sort();
+			if (!DiedNames.IsEmpty())
+				Log->AddMessage(FString::Printf(TEXT("%s이 사망하였습니다. %d턴 후에 부활합니다."),
+					*FString::Join(DiedNames, TEXT(", ")), FMath::Max(1, ReviveTurns)), ESessionLogEvent::Admin);
+			if (!RevivedNames.IsEmpty())
+				Log->AddMessage(FString::Printf(TEXT("사망한 %s이 부활하였습니다. 강화한 능력치가 소멸됩니다."),
+					*FString::Join(RevivedNames, TEXT(", "))), ESessionLogEvent::Admin);
 		}
 	}
 

@@ -6,6 +6,7 @@
 #include "BattleTopHudWidget.generated.h"
 
 class ABattleManager;
+class ATempleCycleController;
 class UProgressBar;
 class UTextBlock;
 class UWidget;
@@ -29,6 +30,7 @@ public:
  static bool UseFullSizeBackground(UObject* Asset);
 
 	void BindToBattleManager(ABattleManager* InBattleManager);
+	void BindToTempleController(ATempleCycleController* InController);
 
 	//아래 BindWidgetOptional 위젯들을 같은 이름으로 Tree에 만든다 (C++ 단독 사용, WBP 자동 생성 공용)
 	void BuildDefaultLayout(UWidgetTree* Tree) const;
@@ -81,11 +83,15 @@ protected:
 
 private:
 	TWeakObjectPtr<ABattleManager> BattleManager;
+	TWeakObjectPtr<ATempleCycleController> TempleController;
 
 	bool bHasLastState = false;
 	FBattleTopHudState LastState;
 
 	void ResolveWidgets();
+	void PrepareTempleLayout();
+	void RefreshTempleState();
+	bool bTempleLayoutPrepared = false;
 	void Apply(const FBattleTopHudState& State);
 
 	static void SetTextIfChanged(UTextBlock* Text, const FString& Value);

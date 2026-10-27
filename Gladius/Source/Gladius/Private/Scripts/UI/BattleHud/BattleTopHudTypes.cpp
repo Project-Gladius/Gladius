@@ -73,3 +73,26 @@ FBattleTopHudState FBattleTopHudPresenter::Build(EBattlePhase Phase, bool bCutSc
 	}
 	return State;
 }
+
+FBattleTopHudState FBattleTopHudPresenter::BuildTemple(const FDateTime& Now, const FDateTime& LastBattleEnd, const FDateTime& NextBattleStart, bool bHasNextBattle)
+{
+ FBattleTopHudState State;
+ State.bVisible = true;
+ State.TurnLabel = TEXT("현재 시간");
+ State.TurnText = Now.ToString(TEXT("%H:%M"));
+ State.TimerLabel = TEXT("다음 전투");
+ State.GuideText = TEXT("!강화로 축복을 선택하세요! (인당 3회)");
+ State.bShowTimer = true;
+ State.bShowGauge = true;
+ State.TimerText = TEXT("--:--");
+ if (bHasNextBattle)
+ {
+  const double Remaining = FMath::Max(0.0, (NextBattleStart - Now).GetTotalSeconds());
+  // Round partial minutes up so 00:00 means the battle is due.
+  const int64 Minutes = FMath::CeilToInt64(Remaining / 60.0);
+  State.TimerText = FString::Printf(TEXT("%02lld:%02lld"), Minutes / 60, Minutes % 60);
+  const double Duration = (NextBattleStart - LastBattleEnd).GetTotalSeconds();
+  State.GaugePercent = Duration > 0.0 ? float(FMath::Clamp((Now - LastBattleEnd).GetTotalSeconds() / Duration, 0.0, 1.0)) : 0.f;
+ }
+ return State;
+}
