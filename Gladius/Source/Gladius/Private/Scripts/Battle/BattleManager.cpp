@@ -2298,9 +2298,33 @@ float ABattleManager::StrikeImpactSeconds(const UAnimMontage* Montage, EBattleLa
 		}
 	}
 
+ // Final animation assets use Niagara collision notifies instead of named Hit markers.
+ // Read the same Strike-relative contact time for both victim reactions and camera shake.
+ const int32 StrikeSection = Montage->GetSectionIndex(TEXT("Strike"));
+ if (StrikeSection != INDEX_NONE)
+ {
+  float Start = 0.f, End = 0.f;
+  Montage->GetSectionStartAndEndTime(StrikeSection, Start, End);
+  TArray<float> Contacts;
+  for (const FAnimNotifyEvent& Event : Montage->Notifies)
+  {
+   const float Time = Event.GetTriggerTime();
+   if (Event.NotifyName == TEXT("PlayNiagaraEffect") && Time >= Start && Time < End)
+    Contacts.Add(Time - Start);
+  }
+  Contacts.Sort();
+  if (!Contacts.IsEmpty())
+  {
+   // The two successive stomps have separate contacts; the middle lane uses the first.
+   const int32 Contact = Montage->GetName().Contains(TEXT("LeftRight")) && Lane == EBattleLane::Right
+    ? FMath::Min(1, Contacts.Num()-1) : 0;
+   return Contacts[Contact];
+  }
+ }
+
 	//공격 몬타주인데 타격 표시가 없다. 조용히 넘어가면 휘두르기 시작에 맞는 그림이 나와
 	//원인을 짚기 어렵다
-	UE_LOG(LogTemp, Warning, TEXT("StrikeImpactSeconds: %s 에 Hit / LeftHit / RightHit 노티파이가 없다"),
+	UE_LOG(LogTemp, Warning, TEXT("StrikeImpactSeconds: %s 에 Strike 구간의 타격 노티파이가 없다"),
 		*Montage->GetName());
 	return 0.f;
 }

@@ -40,7 +40,7 @@
         }
       },
       "telegraph": {
-        "text": "test:왼쪽을 내려칠 준비를 합니다.",
+        "text": "트루돈이 몽둥이를 치켜들고 왼쪽을 노려봅니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -74,7 +74,7 @@
         }
       },
       "telegraph": {
-        "text": "test:중앙을 내려칠 준비를 합니다.",
+        "text": "트루돈이 몽둥이를 치켜들고 가운데를 노려봅니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -108,7 +108,7 @@
         }
       },
       "telegraph": {
-        "text": "test:오른쪽을 내려칠 준비를 합니다.",
+        "text": "트루돈이 몽둥이를 치켜들고 오른쪽을 노려봅니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -142,7 +142,7 @@
         }
       },
       "telegraph": {
-        "text": "test:왼쪽에 강력한 번개 공격을 준비합니다.",
+        "text": "트루돈이 왼쪽에 강력한 공격을 준비합니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -176,7 +176,7 @@
         }
       },
       "telegraph": {
-        "text": "test:중앙에 강력한 번개 공격을 준비합니다.",
+        "text": "트루돈이 가운데에 강력한 공격을 준비합니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -210,7 +210,7 @@
         }
       },
       "telegraph": {
-        "text": "test:오른쪽에 강력한 번개 공격을 준비합니다.",
+        "text": "트루돈이 오른쪽에 강력한 공격을 준비합니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -244,7 +244,7 @@
         }
       },
       "telegraph": {
-        "text": "test:왼쪽과 중앙을 향해 무기를 들어 올립니다.",
+        "text": "트루돈이 여러 구역을 동시에 공격하기 위해 왼쪽을 노려봅니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -278,7 +278,7 @@
         }
       },
       "telegraph": {
-        "text": "test:중앙과 오른쪽을 쓸어칠 준비를 합니다.",
+        "text": "트루돈이 여러 구역을 동시에 공격하기 위해 오른쪽을 노려봅니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -312,7 +312,7 @@
         }
       },
       "telegraph": {
-        "text": "test:왼쪽과 오른쪽을 공격할 준비를 합니다.",
+        "text": "트루돈이 좌우로 발을 구를 준비를 합니다",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -346,7 +346,7 @@
         }
       },
       "telegraph": {
-        "text": "test:트루돈이 기를 모읍니다.",
+        "text": "트루돈이 기를 모읍니다.",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -380,7 +380,7 @@
         }
       },
       "telegraph": {
-        "text": "test:모든 구역을 향해 강력한 공격을 준비합니다.",
+        "text": "모든 구역을 향해 강력한 공격을 준비합니다.",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -414,7 +414,7 @@
         }
       },
       "telegraph": {
-        "text": "test:트루돈이 쓰러져 무방비 상태가 됩니다.",
+        "text": "트루돈이 쓰러져 무방비 상태가 됩니다.",
         "motionId": ""
       },
       "attackMotionId": ""
@@ -448,7 +448,7 @@
         }
       },
       "telegraph": {
-        "text": "test:트루돈이 무작위 구역에 공격을 준비합니다.",
+        "text": "트루돈이 무작위 구역에 공격을 준비합니다.",
         "motionId": ""
       },
       "attackMotionId": "",

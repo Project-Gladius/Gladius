@@ -4,11 +4,11 @@
 #include "Scripts/UI/BattleHud/BattleTopHudTypes.h"
 #include "BattleTutorialController.generated.h"
 class ABattleManager;
-enum class ETutorialFlow : uint8 { Inactive, Intro, Offer, LoginExplanation, LoginWait, Explanation, Input, Action, Complete };
+enum class ETutorialFlow : uint8 { Inactive, Intro, Offer, LoginExplanation, LoginWait, Explanation, Input, Action, StartingBattle, Complete };
 struct FTutorialMessage
 {
  FString Text;
- float Seconds = 5.f;
+ float Seconds = 10.f;
 };
 UCLASS()
 class GLADIUS_API UBattleTutorialController : public UObject
@@ -23,7 +23,7 @@ public:
  bool IsActive() const { return Flow != ETutorialFlow::Inactive && Flow != ETutorialFlow::Complete; }
  bool IsPracticing() const { return Flow != ETutorialFlow::Inactive && Flow != ETutorialFlow::Intro && Flow != ETutorialFlow::Offer && Flow != ETutorialFlow::Complete; }
  bool AcceptsAction() const { return Flow == ETutorialFlow::Explanation || Flow == ETutorialFlow::Input; }
- bool AcceptsLogin() const { return Flow != ETutorialFlow::Action && Flow != ETutorialFlow::Inactive && Flow != ETutorialFlow::Complete; }
+ bool AcceptsLogin() const { return Flow != ETutorialFlow::StartingBattle && Flow != ETutorialFlow::Action && Flow != ETutorialFlow::Inactive && Flow != ETutorialFlow::Complete; }
  bool SuppressesBossAttack() const { return IsPracticing() && TutorialTurn != 3; }
  void OnPlayerRegistered(const FString& UserId);
  void OnLoginSucceeded();
@@ -61,6 +61,7 @@ private:
  void RevealBoss();
  void EnterTurn(int32 Turn);
  void BeginInput(float Seconds);
+ void BeginBattleAnnouncement();
  void CompleteToMain();
  void RestoreHealth();
  void ClearTimers();

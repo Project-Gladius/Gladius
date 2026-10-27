@@ -54,9 +54,9 @@ void UBattleTutorialController::BeginOffer()
  const float Remaining = 600.f - float(Manager->GetWorld()->GetTimeSeconds() - EntryTime);
  if (Remaining <= 0) { ExpireOffer(); return; }
  Manager->GetWorldTimerManager().SetTimer(DeadlineTimer,this,&UBattleTutorialController::ExpireOffer,Remaining,false);
- Queue({{TEXT("콜로세움에 오신 것을 환영합니다."),5},
-  {TEXT("튜토리얼 진행을 원하신다면 채팅창에 \"!튜토리얼\" 을 입력하세요."),5},
-  {TEXT("튜토리얼 진행을 원하지 않는다면 \"캐릭터를 소환\"해 주세요."),5}});
+ Queue({{TEXT("콜로세움에 오신 것을 환영합니다."),10},
+  {TEXT("튜토리얼 진행을 원하신다면 채팅창에 \"!튜토리얼\" 을 입력하세요."),10},
+  {TEXT("튜토리얼 진행을 원하지 않는다면 \"캐릭터를 소환\"해 주세요."),10}});
 }
 void UBattleTutorialController::ExpireOffer()
 {
@@ -73,8 +73,8 @@ bool UBattleTutorialController::RequestTutorial()
  ClearTimers(); Flow = ETutorialFlow::LoginExplanation; TutorialTurn = 1; EmptyTurns = 0;
  Guide = TEXT("튜토리얼"); FrozenSeconds = 0;
  Manager->TurnIndex = 1; Manager->SessionStats.Reset();
- Queue({{TEXT("\"제국의 전사들이여, 영광스러운 전투에 참여하라!\""),5},
-  {TEXT("채팅창에 \"!로그인 글라디우스\" 또는 \"!로그인 세라\" 를 입력해 \"캐릭터를 소환\"하세요."),5}});
+ Queue({{TEXT("\"제국의 전사들이여, 영광스러운 전투에 참여하라!\""),10},
+  {TEXT("채팅창에 \"!로그인 글라디우스\" 또는 \"!로그인 세라\" 를 입력해 \"캐릭터를 소환\"하세요."),10}});
  return true;
 }
 void UBattleTutorialController::Queue(TArray<FTutorialMessage> InMessages)
@@ -96,7 +96,8 @@ void UBattleTutorialController::MessagesFinished()
 {
  if (Flow == ETutorialFlow::Offer) { MessageIndex = 0; ShowNextMessage(); }
  else if (Flow == ETutorialFlow::LoginExplanation) BeginLoginWait();
- else if (Flow == ETutorialFlow::Explanation && !bInputStarted) BeginInput(TutorialTurn == 1 ? 15.f : Manager->PlayerSelectCountdown);
+ else if (Flow == ETutorialFlow::Explanation && !bInputStarted) BeginInput(TutorialTurn == 2 || TutorialTurn == 4 ? 5.f : 15.f);
+ else if (Flow == ETutorialFlow::StartingBattle) CompleteToMain();
 }
 void UBattleTutorialController::BeginLoginWait()
 {
@@ -125,10 +126,10 @@ void UBattleTutorialController::RevealBoss()
 {
  ClearTimers(); EnterTurn(1);
  if (Manager->BossUnit) Manager->BossUnit->OnBossTelegraph(TEXT("StrongStrikeLeft"),TEXT(""));
- Queue({{TEXT("이 강력한 짐승은 \"마족 트루돈\"입니다."),5},
-  {TEXT("여러분의 목표는 이 괴수로부터 \"10턴을 생존\"하는 것입니다."),5},
-  {TEXT("턴마다 하나의 행동을 선택할 수 있습니다."),5},
-  {TEXT("채팅창에 \"!공격 1\" 명령어를 입력해 트루돈을 공격해 보세요."),5}});
+ Queue({{TEXT("이 강력한 짐승은 \"마족 트루돈\"입니다."),10},
+  {TEXT("여러분의 목표는 이 괴수로부터 \"10턴을 생존\"하는 것입니다."),10},
+  {TEXT("턴마다 하나의 행동을 선택할 수 있습니다."),10},
+  {TEXT("채팅창에 \"!공격 1\" 명령어를 입력해 트루돈을 공격해 보세요."),10}});
 }
 void UBattleTutorialController::EnterTurn(int32 Turn)
 {
@@ -156,20 +157,20 @@ void UBattleTutorialController::EnterTurn(int32 Turn)
   if (P.Unit) { P.Unit->NotifyActionSelected(EBattleAction::Idle); P.Unit->SetDefending(false); }
  }
  Manager->RefreshPlayerUI();
- if (Turn == 2) Queue({{TEXT("채팅창에 \"!공격 1\"를 입력하세요."),10},
-  {TEXT("머리 위에 보이는 불꽃 안의 숫자는 \"피버\"입니다."),5},
-  {TEXT("공격을 할 때마다 \"피버\"가 늘어납니다."),5},
-  {TEXT("\"피버\" 수치만큼 \"추가 타격\"을 진행합니다."),5}});
+ if (Turn == 2) Queue({{TEXT("채팅창에 \"!공격 1\"를 입력하세요."),20},
+  {TEXT("머리 위에 보이는 불꽃 안의 숫자는 \"피버\"입니다."),10},
+  {TEXT("공격을 할 때마다 \"피버\"가 늘어납니다."),10},
+  {TEXT("\"피버\" 수치만큼 \"추가 타격\"을 진행합니다."),10}});
  if (Turn == 3) Queue({{TEXT("\"트루돈이 왼쪽을 공격할 준비를 합니다!\""),10},
-  {TEXT("\"!방어\" 를 통해 받는 데미지를 줄일 수 있습니다."),5},
-  {TEXT("\"방어\" 시에도 공격할 때처럼 \"피버\"가 늘어납니다."),5},
-  {TEXT("\"!회피 좌/중/우\" 를 통해 원하는 칸으로 회피할 수 있습니다."),5},
-  {TEXT("\"회피\"를 \"연속으로 사용\"하면 \"피버\"가 \"줄어들\" 수 있으니 조심하세요!"),5},
-  {TEXT("트루돈이 여러분을 공격합니다. 명령어를 통해 대처하세요!"),5}});
- if (Turn == 4) Queue({{TEXT("채팅창에 \"!공격 2\"를 입력하세요."),10},
-  {TEXT("\"공격 2\"는 약하지만, \"공격\"과 \"후속 타격\"에 \"치명타\"가 적용될 수 있습니다."),5},
-  {TEXT("\"후속 타격\"을 잊지 않았겠죠? \"피버\" 수만큼 \"후속 타격\"이 진행됩니다!"),5},
-  {TEXT("\"피버\" 또는 \"치명타 능력치\"가 높다면, \"공격 2\"를 적극적으로 사용하세요!"),5}});
+  {TEXT("\"!방어\" 를 통해 받는 데미지를 줄일 수 있습니다."),10},
+  {TEXT("\"방어\" 시에도 공격할 때처럼 \"피버\"가 늘어납니다."),10},
+  {TEXT("\"!회피 좌/중/우\" 를 통해 원하는 칸으로 회피할 수 있습니다."),10},
+  {TEXT("\"회피\"를 \"연속으로 사용\"하면 \"피버\"가 \"줄어들\" 수 있으니 조심하세요!"),10},
+  {TEXT("트루돈이 여러분을 공격합니다. 명령어를 통해 대처하세요!"),10}});
+ if (Turn == 4) Queue({{TEXT("채팅창에 \"!공격 2\"를 입력하세요."),20},
+  {TEXT("\"공격 2\"는 약하지만, \"공격\"과 \"후속 타격\"에 \"치명타\"가 적용될 수 있습니다."),10},
+  {TEXT("\"후속 타격\"을 잊지 않았겠죠? \"피버\" 수만큼 \"후속 타격\"이 진행됩니다!"),10},
+  {TEXT("\"피버\" 또는 \"치명타 능력치\"가 높다면, \"공격 2\"를 적극적으로 사용하세요!"),10}});
 }
 void UBattleTutorialController::BeginInput(float Seconds)
 {
@@ -195,7 +196,8 @@ void UBattleTutorialController::OnTurnFinished()
 {
  if (!IsPracticing()) return;
  if (bReturnAfterTurn) { ReturnToOffer(); return; }
- if (TutorialTurn >= 4) CompleteToMain(); else EnterTurn(TutorialTurn+1);
+ if (Flow == ETutorialFlow::StartingBattle) return;
+ if (TutorialTurn >= 4) BeginBattleAnnouncement(); else EnterTurn(TutorialTurn+1);
 }
 void UBattleTutorialController::RestoreHealth()
 {
@@ -226,6 +228,18 @@ void UBattleTutorialController::ReturnToOffer()
  if (auto* Chat=Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(Manager,AYouTubeChatManager::StaticClass()))) Chat->SetCombatAutoPollingEnabled(true);
  Manager->BossDamageTaken=Manager->BossDamageShown=0;
  BeginOffer(); Manager->SaveRecords();
+}
+void UBattleTutorialController::BeginBattleAnnouncement()
+{
+ ClearTimers(); ResumeChatPolling();
+ Flow = ETutorialFlow::StartingBattle;
+ Guide = TEXT("튜토리얼"); FrozenSeconds = 0.f;
+ Manager->Phase = EBattlePhase::BattleStart;
+ Manager->InputPhaseDuration = 0.f; Manager->InputPhaseEndTime = 0.f;
+ Manager->GetWorldTimerManager().ClearTimer(Manager->PhaseTimerHandle);
+ Manager->StopTurnCutScenes();
+ if (Manager->BossUnit) Manager->BossUnit->OnBossWait();
+ Queue({{TEXT("\"이제 곧 전투가 시작됩니다!\""),20}});
 }
 void UBattleTutorialController::CompleteToMain()
 {

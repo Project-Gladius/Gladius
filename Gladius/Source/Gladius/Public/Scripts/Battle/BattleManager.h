@@ -541,6 +541,7 @@ public:
 	//보스가 휘두르기 시작한 뒤 Lane에 칼이 닿기까지의 시간. 몬타주 `Strike` 섹션 기준이다.
 	//구역 전용 노티파이(LeftHit / RightHit)가 있으면 그것을, 없으면 Hit을 쓴다 —
 	//LeftRight는 왼쪽을 먼저 치므로 구역마다 닿는 시각이 다르다. 몬타주가 없으면 0.
+	//Hit 표시가 없는 최종 애니메이션은 Strike 구간의 Niagara 충돌 시점을 사용한다.
 	//보스 블루프린트도 카메라 흔들림을 맞추려고 쓴다 (Left를 주면 첫 접촉 시각이다)
 	UFUNCTION(BlueprintPure, Category = "Battle|Motion")
 	static float StrikeImpactSeconds(const UAnimMontage* Montage, EBattleLane Lane);

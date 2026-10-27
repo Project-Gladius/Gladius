@@ -17,6 +17,8 @@
 
 struct FBattleTutorialTestAccess
 {
+ static const TArray<FTutorialMessage>& Messages(ABattleManager* M) { return M->Tutorial->Messages; }
+ static float MessageSeconds(ABattleManager* M) { return M->GetWorldTimerManager().GetTimerRate(M->Tutorial->MessageTimer); }
  static void ApplyExternalTimings(ABattleManager* M) { M->bUseBalanceFiles=true;M->ApplyBalanceFiles(); }
  static bool Polling(AYouTubeChatManager* Chat) { return Chat->bCombatAutoPollingEnabled; }
  static void Attach(ABattleManager* M)
@@ -175,7 +177,7 @@ bool FTutorialInputRulesTest::RunTest(const FString& Parameters)
   TestEqual(TEXT("Turn begins with tutorial heading"),M->Tutorial->BuildHud().GuideText,FString(TEXT("튜토리얼")));
   TestTrue(TEXT("Commands during explanation accepted"),M->SubmitAction(TEXT("warrior"),TEXT("Warrior"),EBattleAction::Attack2));
   FBattleTutorialTestAccess::ExplainDone(M);
-  TestEqual(TEXT("Uses live normal selection setting"),M->GetInputPhaseDuration(),23.f);
+  TestEqual(TEXT("Practice selection window is five seconds"),M->GetInputPhaseDuration(),5.f);
   TestTrue(TEXT("Timer is visible for input"),M->Tutorial->BuildHud().bShowTimer);
   FBattleTutorialTestAccess::Collect(M);
   TestTrue(TEXT("Uses normal collection phase"),M->Phase==EBattlePhase::Collect);
@@ -277,9 +279,74 @@ bool FBattleExternalTimingTest::RunTest(const FString& Parameters)
  T.LoginTutorial();
  FBattleTutorialTestAccess::Turn(T.Manager,2);
  FBattleTutorialTestAccess::ExplainDone(T.Manager);
- TestEqual(TEXT("Practice uses external selection duration"),T.Manager->GetInputPhaseDuration(),15.f);
+ TestEqual(TEXT("Practice keeps its own five-second selection window"),T.Manager->GetInputPhaseDuration(),5.f);
  FBattleTutorialTestAccess::Collect(T.Manager);
  TestEqual(TEXT("Practice uses external collection duration"),T.Manager->GetInputPhaseDuration(),5.f);
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTutorialMessageTimingTest,"Gladius.Tutorial.MessageDurations",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTutorialMessageTimingTest::RunTest(const FString& Parameters)
+{
+ FTutorialWorld T; auto* M=T.Manager;
+ const auto Check=[&](int32 FirstSeconds)
+ {
+  const auto& Messages=FBattleTutorialTestAccess::Messages(M);
+  for(int32 I=0;I<Messages.Num();++I)
+   TestEqual(TEXT("Message uses requested duration"),Messages[I].Seconds,float(I==0?FirstSeconds:10));
+ };
+ Check(10); M->RequestTutorial(); Check(10);
+ FBattleTutorialTestAccess::ExplainDone(M); M->LoginPlayer(TEXT("viewer"),TEXT("Viewer"),TEXT("gladius")); Check(10);
+ for(int32 Turn:{2,3,4})
+ {
+  FBattleTutorialTestAccess::Turn(M,Turn); Check(Turn==3?10:20);
+  if(Turn!=3)
+  {
+   FBattleTutorialTestAccess::ExplainDone(M);
+   TestEqual(TEXT("Turn 2 and 4 action preparation lasts five seconds"),M->GetInputPhaseDuration(),5.f);
+  }
+ }
+ TestEqual(TEXT("Turn 4 retains its real attack command"),FBattleTutorialTestAccess::Messages(M)[0].Text,FString(TEXT("채팅창에 \"!공격 2\"를 입력하세요.")));
+ return true;
+}
+namespace
+{
+class FTutorialAnnouncementClock : public IAutomationLatentCommand
+{
+ TSharedPtr<FTutorialWorld> T; FAutomationTestBase* Test; int32 Step=0;
+public:
+ FTutorialAnnouncementClock(TSharedPtr<FTutorialWorld> In,FAutomationTestBase* InTest):T(In),Test(InTest){}
+ bool Update() override
+ {
+  auto* M=T->Manager;
+  if(Step++==0){T->World->GetTimerManager().Tick(0.f);return false;}
+  if(Step==2)
+  {
+   T->World->GetTimerManager().Tick(19.9f);
+   Test->TestTrue(TEXT("Battle cannot begin before twenty seconds"),FBattleTutorialTestAccess::Flow(M)==ETutorialFlow::StartingBattle);
+   Test->TestEqual(TEXT("Tutorial still ends at turn four during announcement"),M->TurnIndex,4);
+   return false;
+  }
+  T->World->GetTimerManager().Tick(.11f);
+  Test->TestTrue(TEXT("Twenty seconds completes tutorial"),FBattleTutorialTestAccess::Flow(M)==ETutorialFlow::Complete);
+  Test->TestEqual(TEXT("Main battle starts at turn one"),M->TurnIndex,1);
+  return true;
+ }
+};
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTutorialAnnouncementTest,"Gladius.Tutorial.TwentySecondBattleAnnouncement",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTutorialAnnouncementTest::RunTest(const FString& Parameters)
+{
+ auto T=MakeShared<FTutorialWorld>(); auto* M=T->Manager; T->LoginTutorial();
+ FBattleTutorialTestAccess::Turn(M,4);
+ M->SubmitAction(TEXT("warrior"),TEXT("Warrior"),EBattleAction::Attack2);
+ FBattleTutorialTestAccess::CloseInput(M); FBattleTutorialTestAccess::FinishTurn(M);
+ TestTrue(TEXT("Final practice starts announcement before main"),FBattleTutorialTestAccess::Flow(M)==ETutorialFlow::StartingBattle);
+ TestEqual(TEXT("Announcement lasts twenty seconds"),FBattleTutorialTestAccess::MessageSeconds(M),20.f);
+ TestEqual(TEXT("Announcement text"),FBattleTutorialTestAccess::Messages(M)[0].Text,FString(TEXT("\"이제 곧 전투가 시작됩니다!\"")));
+ TestFalse(TEXT("Announcement rejects combat input"),M->Tutorial->AcceptsAction());
+ TestFalse(TEXT("Announcement rejects tutorial health login"),M->Tutorial->AcceptsLogin());
+ ADD_LATENT_AUTOMATION_COMMAND(FTutorialAnnouncementClock(T,this));
  return true;
 }
 

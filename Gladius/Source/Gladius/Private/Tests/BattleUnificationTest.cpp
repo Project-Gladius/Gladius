@@ -4,6 +4,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Animation/AnimMontage.h"
 #include "Misc/Paths.h"
 #include "Misc/FileHelper.h"
 #include "JsonObjectConverter.h"
@@ -1714,6 +1715,40 @@ bool FBossAuthoredMessageTest::RunTest(const FString& Parameters)
   if(!TestNotNull(TEXT("JSON attack exists"),Action)) return false;
   UI->ShowTelegraph(Action->TelegraphText);
   TestEqual(TEXT("Real widget displays the selected JSON announcement"),Text->GetText().ToString(),Action->TelegraphText);
+ }
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBossActualImpactTest,"Gladius.BattleUnified.ActualBossMontageImpacts",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBossActualImpactTest::RunTest(const FString& Parameters)
+{
+ auto* Class=LoadClass<ABattleUnit>(nullptr,TEXT("/Game/Blueprints/ScaledBattleUnits/BP_BossUnit_DevBattle.BP_BossUnit_DevBattle_C"));
+ if(!TestNotNull(TEXT("Actual main battle boss class"),Class))return false;
+ auto* Boss=Class->GetDefaultObject<ABattleUnit>();
+ for(const auto& State:{TEXT("SingleStrikeLeft"),TEXT("SingleStrikeCenter"),TEXT("SingleStrikeRight"),TEXT("LeftRight")})
+ {
+  auto* Montage=Boss->GetStrikeMontage(State);
+  if(!TestNotNull(State,Montage))continue;
+  const int32 Section=Montage->GetSectionIndex(TEXT("Strike"));
+  if(!TestTrue(TEXT("Actual attack has Strike section"),Section!=INDEX_NONE))continue;
+  float Start=0.f,End=0.f; Montage->GetSectionStartAndEndTime(Section,Start,End);
+  TArray<float> Contacts;
+  for(const auto& Event:Montage->Notifies)
+   if(Event.NotifyName==TEXT("PlayNiagaraEffect") && Event.GetTriggerTime()>=Start && Event.GetTriggerTime()<End)
+    Contacts.Add(Event.GetTriggerTime()-Start);
+  Contacts.Sort();
+  if(!TestTrue(TEXT("Actual collision effect remains inside attack"),!Contacts.IsEmpty()))continue;
+  const float Left=ABattleManager::StrikeImpactSeconds(Montage,EBattleLane::Left);
+  const float Right=ABattleManager::StrikeImpactSeconds(Montage,EBattleLane::Right);
+  TestTrue(TEXT("Victim and shake contact happens after attack begins"),Left>0.f);
+  TestEqual(TEXT("First impact matches visible collision effect"),Left,Contacts[0]);
+  if(FString(State)==TEXT("LeftRight"))
+  {
+   TestTrue(TEXT("Both stomps retain separate contacts"),Contacts.Num()>=2 && Right>Left);
+   if(Contacts.Num()>=2)TestEqual(TEXT("Right impact matches second stomp"),Right,Contacts[1]);
+  }
+  else TestEqual(TEXT("Single attack has one shared impact"),Right,Left);
+  AddInfo(FString::Printf(TEXT("%s (%s): left %.3fs, right %.3fs after Strike begins"),State,*Montage->GetName(),Left,Right));
  }
  return true;
 }
