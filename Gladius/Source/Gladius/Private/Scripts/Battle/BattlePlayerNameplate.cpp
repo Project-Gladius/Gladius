@@ -133,7 +133,12 @@ void UBattlePlayerNameplate::RefreshAppearance()
 
 	const int32 MaxHP = FMath::Clamp(Data.MaxHP, 5, 6);
 	const int32 HP = FMath::Clamp(Data.HP, 0, MaxHP);
-	if (NameText) NameText->SetText(FText::FromString(Data.DisplayName.Len()>12 ? Data.DisplayName.Left(11)+TEXT("…") : Data.DisplayName));
+	if (NameText)
+ {
+  NameText->SetText(FText::FromString(Data.DisplayName));
+  NameText->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+  NameText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+ }
 	if (HealthText) HealthText->SetText(FText::FromString(FString::Printf(TEXT("HP %d/%d"), HP, MaxHP)));
 	if (FeverText) FeverText->SetText(FText::AsNumber(Data.Fever));
 	UpdateImage(HealthIcon, HealthIconTexture);

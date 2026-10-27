@@ -734,7 +734,9 @@ void ABattleManager::LoadRecords()
  {
   // Old records lack currentHealth. Start them at the class's base maximum.
   if (Record.CurrentHealth < 0) { Record.CurrentHealth = MaxHPFor(Record); bMigrated = true; }
-  Record.CurrentHealth = FMath::Clamp(Record.CurrentHealth, 0, MaxHPFor(Record));
+  const int32 ClampedHealth = FMath::Clamp(Record.CurrentHealth, 0, MaxHPFor(Record));
+  bMigrated |= ClampedHealth != Record.CurrentHealth;
+  Record.CurrentHealth = ClampedHealth;
   Records.Add(Record.UserId, Record);
  }
  if (bMigrated) SaveRecords();
@@ -744,17 +746,18 @@ void ABattleManager::LoadRecords()
 
 int32 ABattleManager::MaxHPFor(const FPlayerRecord& Record) const
 {
-	return static_cast<int32>(FMath::Clamp<int64>(static_cast<int64>(Classes[ClassIndexFor(Record.CharacterId)].BaseHP)
-		+ static_cast<int64>(Record.MaxHPBonus) * HPPerBonus, 5, 6)) + (HasEventBuff(Record.UserId) ? 1 : 0);
+ // Permanent event eligibility lives in UserData, never in losable enhancement levels.
+ return HasEventBuff(Record.UserId) ? 6 : 5;
 }
 
 void ABattleManager::ApplyRecordToPlayer(const FPlayerRecord& Record, FBattlePlayer& Player) const
 {
 	Player.ClassIndex = ClassIndexFor(Record.CharacterId);
 	Player.MaxHP = MaxHPFor(Record);
+ Player.HP = FMath::Clamp(Player.HP, 0, Player.MaxHP);
 	Player.DamageBonus = Record.DamageBonus * DamagePerBonus + (HasEventBuff(Record.UserId) ? 5 : 0);
-	Player.CritChanceBonus = Record.CritChanceBonus * CritChancePerBonus;
-	Player.CritDamageBonus = Record.CritDamageBonus * CritDamagePerBonus;
+	Player.CritChanceBonus = Record.CritChanceBonus * CritChancePerBonus + (HasEventBuff(Record.UserId) ? 0.1f : 0.f);
+	Player.CritDamageBonus = Record.CritDamageBonus * CritDamagePerBonus + (HasEventBuff(Record.UserId) ? 0.1f : 0.f);
 }
 
 void ABattleManager::ChooseClassSpots(const TArray<FVector>& Candidates, const TArray<int32>& CountsByClass,
@@ -3229,17 +3232,17 @@ void ABattleManager::RunSelfTest()
 	{
 		FPlayerRecord R;
 		R.CharacterId = Classes[0].Id;
-		check(MaxHPFor(R) == FMath::Clamp(Classes[0].BaseHP, 5, 6));
+		check(MaxHPFor(R) == 5);
 		R.MaxHPBonus = 3;
 		R.CurrentHealth = 1;
-		check(MaxHPFor(R) == FMath::Clamp(Classes[0].BaseHP + 3 * HPPerBonus, 5, 6));
+		check(MaxHPFor(R) == 5);
 
 		//강화 수치가 전투용 스냅샷으로 옮겨지는지
 		R.DamageBonus = 2;
 		R.CritChanceBonus = 1;
 		FBattlePlayer P;
 		ApplyRecordToPlayer(R, P);
-		check(P.MaxHP == FMath::Clamp(Classes[0].BaseHP + 3 * HPPerBonus, 5, 6));
+		check(P.MaxHP == 5);
 		check(P.DamageBonus == 2 * DamagePerBonus);
 		check(FMath::IsNearlyEqual(P.CritChanceBonus, CritChancePerBonus));
 	}

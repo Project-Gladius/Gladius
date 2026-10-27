@@ -77,8 +77,8 @@ struct FPlayerNameplateTestAccess
 		UI->SetDisplayData(Data);
 		Test.TestEqual(TEXT("Sixth slot visible at max six"), UI->HealthSegments[5]->GetVisibility(), ESlateVisibility::HitTestInvisible);
 		Test.TestTrue(TEXT("Sixth HP full at six"), UI->HealthSegments[5]->GetBrush().GetResourceObject()==UI->HealthFilledTexture);
-		Test.TestEqual(TEXT("Other actions hide details"), UI->CritChanceText->GetVisibility(), ESlateVisibility::Collapsed);
-		Test.TestEqual(TEXT("Other actions hide critical icons"), UI->CritDamageIcon->GetVisibility(), ESlateVisibility::Collapsed);
+		Test.TestTrue(TEXT("Other actions hide or omit details"), !UI->CritChanceText || UI->CritChanceText->GetVisibility()==ESlateVisibility::Collapsed);
+		Test.TestTrue(TEXT("Other actions hide or omit critical icons"), !UI->CritDamageIcon || UI->CritDamageIcon->GetVisibility()==ESlateVisibility::Collapsed);
 		Test.TestEqual(TEXT("Saved Designer layout retained"), Cast<UCanvasPanelSlot>(UI->HealthText->Slot)->GetPosition(), DesignerDefenseHealthPosition);
 		//행동 페이지마다 아이콘 위치는 디자이너가 따로 정함. 데이터 갱신으로 그 위치가 움직이지 않아야 함
 		const FVector2D DefenseIconPosition=Cast<UCanvasPanelSlot>(UI->ActionIcon->Slot)->GetPosition();
@@ -94,7 +94,7 @@ struct FPlayerNameplateTestAccess
 		UI->SetPanelDimensions(FVector2D(100, 50));
 		Test.TestEqual(TEXT("Panel width has no minimum restriction"), UI->PanelSizeBox->GetWidthOverride(), 100.f);
 		Test.TestEqual(TEXT("Panel height has no minimum restriction"), UI->PanelSizeBox->GetHeightOverride(), 50.f);
-		UI->MinimumDistanceScale=0.5f; UI->MaximumDistanceScale=1.5f;
+		UI->BaseDistanceScale=1.f; UI->MinimumDistanceScale=0.5f; UI->MaximumDistanceScale=1.5f;
 		Test.TestEqual(TEXT("Near camera respects maximum scale"), UI->GetDistanceScale(100.f), 1.5f);
 		Test.TestEqual(TEXT("Far camera respects minimum scale"), UI->GetDistanceScale(10000.f), 0.5f);
 		Test.TestEqual(TEXT("Reference distance remains one"), UI->GetDistanceScale(2400.f), 1.f);
@@ -311,4 +311,45 @@ bool FPlayerNameplateStartupSizeTest::RunTest(const FString& Parameters)
  }
  return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNameplateHealthMatrixTest,"Gladius.BattleUI.AllStatesFiveSixHealthAndNameBounds",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FNameplateHealthMatrixTest::RunTest(const FString& Parameters)
+{
+ auto* Class=LoadClass<UBattlePlayerNameplate>(nullptr,TEXT("/Game/Blueprints/UI/MyBattlePlayerNameplate.MyBattlePlayerNameplate_C"));
+ if(!TestNotNull(TEXT("Actual nameplate loads"),Class))return false;
+ auto* UI=NewObject<UBattlePlayerNameplate>(GetTransientPackage(),Class);UI->Initialize();UI->TakeWidget();
+ UI->HealthFilledTexture=UTexture2D::CreateTransient(1,1);UI->HealthEmptyTexture=UTexture2D::CreateTransient(1,1);
+ FBattlePlayerUIData Data;Data.DisplayName=TEXT("패널 밖으로 벗어나면 안 되는 매우 긴 사용자 이름 WWWWWWWWWWWWWW");
+ const TCHAR* States[]={TEXT("Idle"),TEXT("Attack1"),TEXT("Attack2"),TEXT("AvoidL"),TEXT("AvoidM"),TEXT("AvoidR"),TEXT("Defense")};
+ for(int32 Action=0;Action<7;++Action)
+ {
+  Data.Action=static_cast<EBattleAction>(Action);const FString Prefix=States[Action];
+  for(int32 Maximum:{6,5,6})for(int32 Health:{0,Maximum-1,Maximum})
+  {
+   Data.MaxHP=Maximum;Data.HP=Health;UI->SetDisplayData(Data);
+   int32 Visible=0;
+   for(int32 I=1;I<=6;++I)
+   {
+    auto* Image=Cast<UImage>(UI->WidgetTree->FindWidget(FName(*(Prefix+FString::Printf(TEXT("_HealthSegment%d"),I)))));
+    if(!TestNotNull(TEXT("All six authored segment widgets exist"),Image))return false;
+    const bool Shown=Image->GetVisibility()!=ESlateVisibility::Collapsed;
+    TestEqual(TEXT("Exactly maximum HP number of segments is visible"),Shown,I<=Maximum);Visible+=Shown?1:0;
+    if(Shown)
+    {
+     const auto* Slot=CastChecked<UCanvasPanelSlot>(Image->Slot);const FVector2D Pos=Slot->GetPosition(),Size=Slot->GetSize();
+     TestTrue(TEXT("Health segment remains inside 300x200 panel"),Pos.X>=0 && Pos.Y>=0 && Pos.X+Size.X<=300 && Pos.Y+Size.Y<=200);
+     TestTrue(TEXT("Segment fill follows current HP"),Image->GetBrush().GetResourceObject()==(I<=Health?UI->HealthFilledTexture.Get():UI->HealthEmptyTexture.Get()));
+    }
+   }
+   TestEqual(TEXT("Visible bar count matches five or six"),Visible,Maximum);
+  }
+  auto* Name=CastChecked<UTextBlock>(UI->WidgetTree->FindWidget(FName(*(Prefix+TEXT("_PlayerName")))));
+  TestEqual(TEXT("Name font is two thirds of original 33.75"),Name->GetFont().Size,22.5f);
+  TestEqual(TEXT("Long names use ellipsis"),Name->GetTextOverflowPolicy(),ETextOverflowPolicy::Ellipsis);
+  TestEqual(TEXT("Names cannot draw outside their box"),Name->GetClipping(),EWidgetClipping::ClipToBoundsAlways);
+  const auto* Slot=CastChecked<UCanvasPanelSlot>(Name->Slot);const FVector2D Pos=Slot->GetPosition(),Size=Slot->GetSize();
+  TestTrue(TEXT("Name box remains inside panel"),Pos.X>=0 && Pos.Y>=0 && Pos.X+Size.X<=300 && Pos.Y+Size.Y<=200);
+ }
+ return true;
+}
+
 #endif

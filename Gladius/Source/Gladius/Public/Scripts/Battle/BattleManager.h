@@ -62,6 +62,7 @@ struct FPlayerRecord
 	//신전에서 사는 '강화' 능력치들. 게임 오버 시 일정 비율을 잃는다
 	// -1 is only the legacy-file sentinel; registration/load initializes it.
 	UPROPERTY() int32 CurrentHealth = -1;
+	// Legacy field retained for save compatibility; maximum HP is 5, or 6 with the permanent event flag.
 	UPROPERTY() int32 MaxHPBonus = 0;
 	UPROPERTY() int32 DamageBonus = 0;
 	UPROPERTY() int32 CritChanceBonus = 0;
@@ -580,7 +581,7 @@ public:
 
  // HPGen for the temple recovery blessing; adjustable until design fixes the value.
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Temple", meta = (ClampMin = "0"))
- int32 BlessingHealAmount = 1;
+ int32 BlessingHealAmount = 5;
 
  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Stats (밸런스 파일이 덮어씀)")
  int32 HPPerBonus = 1;

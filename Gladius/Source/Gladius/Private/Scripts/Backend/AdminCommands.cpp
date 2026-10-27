@@ -124,7 +124,7 @@ bool UAdminSubsystem::HandleAdminCommand(const FParsedCommand& C, ABattleManager
   if (HasEventBuff(TargetId)) return true;
   if (!GrantEvent(TargetId)) { Error(); return true; }
   if (Battle) Battle->RefreshEventBuff(TargetId);
-  Emit(FString::Printf(TEXT("[%s] %s이 전시장에 방문하여 강력한 버프를 얻습니다! R777로 오셔서 체력 버프를 받아가세요!"),*Name,*TargetName),ESessionLogEvent::Event);
+  Emit(FString::Printf(TEXT("[%s] %s이 전시장에 방문하여 강력한 버프를 얻습니다! 최대 체력 +1, 공격력 +5, 치명타 확률·피해량 +10%%p! 사망 후에도 유지됩니다."),*Name,*TargetName),ESessionLogEvent::Event);
   return true;
  }
  default: return false;

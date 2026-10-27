@@ -54,6 +54,8 @@
 
 struct FBattleUnificationTestAccess
 {
+ static FPlayerRecord& MutableRecord(ABattleManager* B,const FString& Id) { B->InitializePlayerRecords();return B->GetOrCreateRecord(Id,Id,TEXT("gladius")); }
+ static void ApplyExternalBalance(ABattleManager* B) { B->bUseBalanceFiles=true;B->ApplyBalanceFiles(); }
  static FBattlePlayer& UIPlayer(ABattleManager* B) { return B->Players.FindOrAdd(TEXT("UIProbe")); }
  static void RefreshUI(ABattleManager* B) { B->RefreshPlayerUI(); }
  static bool LoadBossData(ABattleManager* B) { return B->Balance.LoadFromFolder(B->BalanceFolderPath()); }
@@ -517,7 +519,7 @@ bool FUnifiedHealthPersistenceTest::RunTest(const FString& Parameters)
  const FString Legacy=TEXT("{\"records\":[{\"userId\":\"Legacy\",\"characterId\":\"gladius\",\"maxHPBonus\":3,\"damageBonus\":2,\"totalDamageDealt\":123}]}");
  FFileHelper::SaveStringToFile(Legacy,*T.Path);
  B->LoadRecords();
- TestEqual(TEXT("Legacy migration initializes current HP"),ReadHealth(),FMath::Clamp(B->Classes[0].BaseHP + 3 * B->HPPerBonus, 5, 6));
+ TestEqual(TEXT("Legacy migration initializes current HP"),ReadHealth(),5);
  const FPlayerRecord* R=FBattleUnificationTestAccess::Record(B,TEXT("Legacy"));
  TestTrue(TEXT("Migration keeps other progression"),R && R->DamageBonus==2 && R->TotalDamageDealt==123);
  return true;
@@ -656,9 +658,9 @@ bool FPlayerHealthCapTest::RunTest(const FString& Parameters)
  TestEqual(TEXT("Base five HP remains five"), B->GetBattlePlayers().FindChecked(TEXT("Five")).MaxHP, 5);
  B->Classes[0].BaseHP = 7;
  B->SubmitAction(TEXT("Capped"), TEXT("Capped"), EBattleAction::Attack1, B->Classes[0].Id);
- TestEqual(TEXT("Legacy base seven HP caps at six"), B->GetBattlePlayers().FindChecked(TEXT("Capped")).MaxHP, 6);
+ TestEqual(TEXT("Legacy base HP cannot increase the fixed maximum"), B->GetBattlePlayers().FindChecked(TEXT("Capped")).MaxHP, 5);
  B->SetPlayerHealth(TEXT("Capped"), 100);
- TestEqual(TEXT("Healing cannot exceed cap"), B->GetBattlePlayers().FindChecked(TEXT("Capped")).HP, 6);
+ TestEqual(TEXT("Healing cannot exceed cap"), B->GetBattlePlayers().FindChecked(TEXT("Capped")).HP, 5);
  return true;
 }
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FYouTubeBattleSubscriptionTest, "Gladius.BattleUnified.YouTubeReceiveSubscription",
@@ -1476,6 +1478,8 @@ bool FAdminCommandsTest::RunTest(const FString& Parameters)
  const auto After=B->GetBattlePlayers().FindChecked(TEXT("viewer"));
  TestEqual(TEXT("Event max health +1"),After.MaxHP,Before.MaxHP+1);
  TestEqual(TEXT("Event attack +5"),After.DamageBonus,Before.DamageBonus+5);
+ TestEqual(TEXT("Event crit chance +10 percentage points"),After.CritChanceBonus,Before.CritChanceBonus+0.1f,KINDA_SMALL_NUMBER);
+ TestEqual(TEXT("Event crit damage +10 percentage points"),After.CritDamageBonus,Before.CritDamageBonus+0.1f,KINDA_SMALL_NUMBER);
  TestEqual(TEXT("Event green category"),L->GetEntries().Last().Event,ESessionLogEvent::Event);
  const int32 EventCount=L->GetEntries().Num(); Send(GM,TEXT("!이벤트 viewer"));
  TestEqual(TEXT("No repeat notice"),L->GetEntries().Num(),EventCount);
@@ -1749,6 +1753,79 @@ bool FBossActualImpactTest::RunTest(const FString& Parameters)
   }
   else TestEqual(TEXT("Single attack has one shared impact"),Right,Left);
   AddInfo(FString::Printf(TEXT("%s (%s): left %.3fs, right %.3fs after Strike begins"),State,*Montage->GetName(),Left,Right));
+ }
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPermanentEventHealthTest,"Gladius.EventBuff.FixedHealthAndPermanentStats",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FPermanentEventHealthTest::RunTest(const FString& Parameters)
+{
+ for(const FString ClassId:{FString(TEXT("gladius")),FString(TEXT("sera"))})
+ {
+  FUnifiedBattleWorld T;auto* B=T.Battle;auto* Admin=T.Instance->GetSubsystem<UAdminSubsystem>();
+  for(auto& Class:B->Classes)Class.BaseHP=999;
+  B->HPPerBonus=999; B->GameOverLoss=1.f;
+  B->StartBattle();FBattleUnificationTestAccess::Prepare(B);
+  TestTrue(TEXT("Ordinary user joins"),B->LoginPlayer(TEXT("hp-normal"),TEXT("Normal"),ClassId));
+  auto& Normal=FBattleUnificationTestAccess::MutableRecord(B,TEXT("hp-normal"));Normal.MaxHPBonus=MAX_int32;
+  B->RefreshEventBuff(TEXT("hp-normal"));
+  TestEqual(TEXT("Class HP and legacy levels cannot make ordinary user six"),B->GetBattlePlayers().FindChecked(TEXT("hp-normal")).MaxHP,5);
+  B->SetPlayerHealth(TEXT("hp-normal"),100);
+  TestEqual(TEXT("Normal live health capped at five"),B->GetBattlePlayers().FindChecked(TEXT("hp-normal")).HP,5);
+  Admin->RegisterUser(TEXT("hp-event"),TEXT("Event"));
+  TestTrue(TEXT("One event grant persisted"),Admin->GrantEvent(TEXT("hp-event")));
+  TestTrue(TEXT("Event user joins"),B->LoginPlayer(TEXT("hp-event"),TEXT("Event"),ClassId));
+  auto& Record=FBattleUnificationTestAccess::MutableRecord(B,TEXT("hp-event"));
+  Record.MaxHPBonus=MAX_int32;Record.DamageBonus=4;Record.CritChanceBonus=2;Record.CritDamageBonus=3;
+  for(int32 I=0;I<3;++I)
+  {
+   TestFalse(TEXT("Event cannot stack"),Admin->GrantEvent(TEXT("hp-event")));B->RefreshEventBuff(TEXT("hp-event"));
+  }
+  auto& P=FBattleUnificationTestAccess::LifePlayer(B,TEXT("hp-event"));
+  TestEqual(TEXT("Event maximum is six, never seven"),P.MaxHP,6);
+  B->SetPlayerHealth(TEXT("hp-event"),100);TestEqual(TEXT("Event live health capped at six"),P.HP,6);
+  B->SetPlayerHealth(TEXT("hp-event"),0);
+  const int32 Wait=P.ReviveCountdown;
+  FBossAction Quiet;Quiet.TargetMode=EBossTargetMode::None;Quiet.DamageByZone[0]=Quiet.DamageByZone[1]=Quiet.DamageByZone[2]=0;
+  FBattleUnificationTestAccess::SetBossAction(B,Quiet);
+  for(int32 I=0;I<Wait;++I)FBattleUnificationTestAccess::Resolve(B);
+  TestTrue(TEXT("Event user revives"),P.IsAlive());
+  TestEqual(TEXT("Permanent event max health survives complete enhancement loss"),P.MaxHP,6);
+  TestEqual(TEXT("Revival fills all six health"),P.HP,6);
+  TestEqual(TEXT("Event damage survives death"),P.DamageBonus,5);
+  TestEqual(TEXT("Event crit chance survives death"),P.CritChanceBonus,0.1f,KINDA_SMALL_NUMBER);
+  TestEqual(TEXT("Event crit damage survives death"),P.CritDamageBonus,0.1f,KINDA_SMALL_NUMBER);
+  TestTrue(TEXT("UserData reload succeeds"),Admin->LoadFromFile(FAdminTestAccess::Path(Admin)));
+  TestTrue(TEXT("Event is stored permanently in UserData"),Admin->HasEventBuff(TEXT("hp-event")));
+  B->LogoutPlayer(TEXT("hp-event"));B->LoadRecords();FBattleUnificationTestAccess::Prepare(B);
+  TestTrue(TEXT("Event user logs back in after record reload"),B->LoginPlayer(TEXT("hp-event"),TEXT("Event"),ClassId));
+  if(const auto* Reloaded=B->GetBattlePlayers().Find(TEXT("hp-event")))
+   TestEqual(TEXT("Reload cannot lose or duplicate maximum health bonus"),Reloaded->MaxHP,6);
+ }
+ return true;
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRecoveryFiveCapTest,"Gladius.EventBuff.RecoveryFiveClampedToMaximum",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FRecoveryFiveCapTest::RunTest(const FString& Parameters)
+{
+ for(bool Event:{false,true})
+ {
+  FUnifiedBattleWorld T;auto* B=T.Battle;auto* Admin=T.Instance->GetSubsystem<UAdminSubsystem>();
+  FBattleUnificationTestAccess::ApplyExternalBalance(B);
+  TestEqual(TEXT("Recovery external data applies five healing"),B->BlessingHealAmount,5);
+  const FString Id=Event?TEXT("heal-event"):TEXT("heal-normal");
+  Admin->RegisterUser(Id,Id);if(Event)TestTrue(TEXT("Grant healing recipient event"),Admin->GrantEvent(Id));
+  auto& Record=FBattleUnificationTestAccess::MutableRecord(B,Id);Record.MaxHPBonus=999;Record.BlessingsAvailable=20;
+  const int32 Maximum=Event?6:5;
+  TestEqual(TEXT("Only event flag controls recovery maximum"),B->MaxHPFor(Record),Maximum);
+  for(int32 Health:{0,1,4,5,6,100})
+  {
+   Record.CurrentHealth=Health;
+   TestTrue(TEXT("Recovery blessing accepted"),B->ApplyTempleEnhancement(Id,Id,1));
+   TestEqual(TEXT("Recovery is exactly five with fixed maximum cap"),Record.CurrentHealth,FMath::Min(Health+5,Maximum));
+  }
+  Record.CurrentHealth=0;
+  B->ApplyTempleEnhancement(Id,Id,1);TestEqual(TEXT("A single recovery adds five"),Record.CurrentHealth,5);
+  B->ApplyTempleEnhancement(Id,Id,1);TestEqual(TEXT("Repeated recovery cannot exceed five or six"),Record.CurrentHealth,Maximum);
  }
  return true;
 }
