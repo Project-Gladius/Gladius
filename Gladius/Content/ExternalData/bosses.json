@@ -6,6 +6,8 @@
   "maxHp": 100,
   "encounter": {
     "turns": 10,
+    "selectionSeconds": 15,
+    "collectionSeconds": 5,
     "patternFit": "remainingTurns"
   },
   "actions": [

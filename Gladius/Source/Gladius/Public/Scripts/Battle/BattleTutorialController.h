@@ -50,6 +50,7 @@ private:
  float FrozenSeconds = 0.f;
  FTimerHandle MessageTimer, DeadlineTimer;
  FDelegateHandle IntroHandle;
+ void ResumeChatPolling();
  void BeginOffer();
  void ReturnToOffer();
  void ExpireOffer();

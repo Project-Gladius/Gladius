@@ -543,6 +543,20 @@ bool FBattleBalance::LoadBosses(const FString& BossesPath)
 		return false;
 	}
 
+ // Older data files can omit these fields and keep their existing level timings.
+ for (const auto& Field : {TPair<const TCHAR*, float*>(TEXT("selectionSeconds"), &SelectionSeconds),
+                          TPair<const TCHAR*, float*>(TEXT("collectionSeconds"), &CollectionSeconds)})
+ {
+  if (!(*EncounterPtr)->HasField(Field.Key)) continue;
+  double Value = 0.;
+  if (!(*EncounterPtr)->TryGetNumberField(Field.Key, Value) || !FMath::IsFinite(Value) || Value <= 0. || Value > 600.)
+  {
+   Fail(BossesPath, FString::Printf(TEXT("encounter.%s must be greater than 0 and at most 600 seconds"), Field.Key));
+   return false;
+  }
+  *Field.Value = float(Value);
+ }
+
 	// ---- actions ----
 	const TArray<TSharedPtr<FJsonValue>>* ActionArray = nullptr;
 	if (!Bosses->TryGetArrayField(TEXT("actions"), ActionArray) || ActionArray->Num() == 0)

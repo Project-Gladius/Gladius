@@ -13,9 +13,12 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
+#include "Scripts/Backend/YouTubeChatManager.h"
 
 struct FBattleTutorialTestAccess
 {
+ static void ApplyExternalTimings(ABattleManager* M) { M->bUseBalanceFiles=true;M->ApplyBalanceFiles(); }
+ static bool Polling(AYouTubeChatManager* Chat) { return Chat->bCombatAutoPollingEnabled; }
  static void Attach(ABattleManager* M)
  {
   M->GetWorldTimerManager().ClearTimer(M->PhaseTimerHandle);
@@ -55,6 +58,24 @@ struct FTutorialWorld
   Instance->AddToRoot(); Instance->InitializeStandalone(); World=Instance->GetWorld();
 #if UE_SUPPORT_FOR_ACTOR_TICK_DISABLE
   World->EnableActorTickAndUserCallbacks(true);
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTutorialPollingResumeTest,"Gladius.Tutorial.ResumeChatAfterEachPracticeTurn",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTutorialPollingResumeTest::RunTest(const FString& Parameters)
+{
+ FTutorialWorld T; T.LoginTutorial();
+ auto* Chat = T.World->SpawnActor<AYouTubeChatManager>();
+ for (int32 Turn : {2,3,4})
+ {
+  Chat->SetCombatAutoPollingEnabled(false);
+  FBattleTutorialTestAccess::Turn(T.Manager, Turn);
+  TestTrue(TEXT("Next practice explanation resumes command reception"), FBattleTutorialTestAccess::Polling(Chat));
+  Chat->SetCombatAutoPollingEnabled(false);
+  FBattleTutorialTestAccess::ExplainDone(T.Manager);
+  TestTrue(TEXT("Input wait resumes command reception"), FBattleTutorialTestAccess::Polling(Chat));
+ }
+ Chat->Destroy();
+ return true;
+}
+
 #endif
   World->InitializeActorsForPlay(FURL());
   Manager=World->SpawnActor<ABattleManager>(); FBattleCameraTestAccess::RecordsOnly(Manager);
@@ -228,4 +249,38 @@ bool FTutorialTextTest::RunTest(const FString& Parameters)
  W->EndTutorial(); TestFalse(TEXT("Normal telegraph mode restored"),W->bTutorialMessage);
  return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTutorialPollingResumeTest,"Gladius.Tutorial.ResumeChatAfterEachPracticeTurn",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FTutorialPollingResumeTest::RunTest(const FString& Parameters)
+{
+ FTutorialWorld T; T.LoginTutorial();
+ auto* Chat = T.World->SpawnActor<AYouTubeChatManager>();
+ for (int32 Turn : {2,3,4})
+ {
+  Chat->SetCombatAutoPollingEnabled(false);
+  FBattleTutorialTestAccess::Turn(T.Manager, Turn);
+  TestTrue(TEXT("Next practice explanation resumes command reception"), FBattleTutorialTestAccess::Polling(Chat));
+  Chat->SetCombatAutoPollingEnabled(false);
+  FBattleTutorialTestAccess::ExplainDone(T.Manager);
+  TestTrue(TEXT("Input wait resumes command reception"), FBattleTutorialTestAccess::Polling(Chat));
+ }
+ Chat->Destroy();
+ return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBattleExternalTimingTest,"Gladius.Tutorial.ExternalBattleTimings",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FBattleExternalTimingTest::RunTest(const FString& Parameters)
+{
+ FTutorialWorld T;
+ FBattleTutorialTestAccess::ApplyExternalTimings(T.Manager);
+ TestEqual(TEXT("External selection timing overrides level value"),T.Manager->PlayerSelectCountdown,15.f);
+ TestEqual(TEXT("External collection timing overrides level value"),T.Manager->CollectSeconds,5.f);
+ T.LoginTutorial();
+ FBattleTutorialTestAccess::Turn(T.Manager,2);
+ FBattleTutorialTestAccess::ExplainDone(T.Manager);
+ TestEqual(TEXT("Practice uses external selection duration"),T.Manager->GetInputPhaseDuration(),15.f);
+ FBattleTutorialTestAccess::Collect(T.Manager);
+ TestEqual(TEXT("Practice uses external collection duration"),T.Manager->GetInputPhaseDuration(),5.f);
+ return true;
+}
+
 #endif

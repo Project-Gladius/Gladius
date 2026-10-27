@@ -163,20 +163,12 @@ void AYouTubeChatManager::StopFetchingChat() {
 
 void AYouTubeChatManager::SetCombatAutoPollingEnabled(bool bEnabled)
 {
-	bCombatAutoPollingEnabled = bEnabled;
-	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
-	if (bEnabled && !bFetchInFlight && GetCurrentGameState() == EGameState::Combat)
-	{
-		//LiveChatId를 아직 못 받았으면(예: 키가 다 바닥났다가 초기화됨) 다시 조회. 성공하면 바로 주기 조회 시작
-		if (LiveChatId.IsEmpty())
-		{
-			if (!VideoId.IsEmpty() && !CurrentApiKey().IsEmpty()) RequestLiveChatId();
-		}
-		else if (!CurrentApiKey().IsEmpty())
-		{
-			RequestChatFetch();
-		}
-	}
+ // Re-entering a tutorial wait must preserve an already scheduled API interval.
+ if (bEnabled && bCombatAutoPollingEnabled &&
+     (bFetchInFlight || bLiveChatIdInFlight || GetWorldTimerManager().IsTimerActive(ChatFetchTimerHandle))) return;
+ bCombatAutoPollingEnabled = bEnabled;
+ GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
+ if (bEnabled && GetCurrentGameState() == EGameState::Combat) RequestChatFetch();
 }
 
 void AYouTubeChatManager::CancelPendingChatFetch()
@@ -199,11 +191,13 @@ void AYouTubeChatManager::RequestChatFetch()
 		return;
 	}
 
+	GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
 	if (LiveChatId.IsEmpty() || CurrentApiKey().IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("LiveChatId 또는 쓸 수 있는 API 키가 없어 채팅을 조회하지 못했습니다."));
 		//다음 조회 때는 쓸 수 있도록 LiveChatId를 다시 요청
 		if (LiveChatId.IsEmpty() && !VideoId.IsEmpty() && !CurrentApiKey().IsEmpty()) RequestLiveChatId();
+		ScheduleCombatPoll(30.f);
 		OnChatFetchFinished.Broadcast(false);
 		return;
 	}
@@ -340,7 +334,12 @@ void AYouTubeChatManager::RequestLiveChatId()
 	ActiveLiveChatRequest = Request;
 	Request->SetURL(Url);
 	Request->SetVerb("GET");
-	Request->ProcessRequest();
+ Request->SetTimeout(15.f);
+ if (!Request->ProcessRequest())
+ {
+  ActiveLiveChatRequest.Reset(); bLiveChatIdInFlight = false;
+  ScheduleCombatPoll(30.f);
+ }
 }
 
 void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful, FString UsedKey)
@@ -351,6 +350,7 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 	if (!bWasSuccessful || !Response.IsValid())
 	{
 		UE_LOG(LogTemp, Error, TEXT("LiveChatID 요청 실패 (네트워크 연결을 확인하세요)"));
+  ScheduleCombatPoll(30.f);
 		return;
 	}
 
@@ -361,9 +361,11 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 		if (IsKeyUnusableResponse(ResponseCode, Body))
 		{
 			if (SwitchApiKey(UsedKey, Body)) RequestLiveChatId();
+   else ScheduleCombatPoll(30.f);
 			return;
 		}
-		UE_LOG(LogTemp, Error, TEXT("LiveChatID 획득 실패 HTTP %d: %s"), ResponseCode, *Body.Left(300));
+		UE_LOG(LogTemp, Error, TEXT("LiveChatID 획득 실패 HTTP %d"), ResponseCode);
+  ScheduleCombatPoll(30.f);
 		return;
 	}
 
@@ -372,26 +374,22 @@ void AYouTubeChatManager::OnLiveChatIdResponse(FHttpRequestPtr Request, FHttpRes
 
 	if (FJsonSerializer::Deserialize(Reader, JsonObject) && JsonObject.IsValid()) 
 	{
-		TArray<TSharedPtr<FJsonValue>> Items = JsonObject->GetArrayField(TEXT("items")); 
-		if (Items.Num() > 0)
-		{
-			TSharedPtr<FJsonObject> Details = Items[0]->AsObject()->GetObjectField(TEXT("liveStreamingDetails"));  
-
-			if (Details.IsValid() && Details->HasField(TEXT("activeLiveChatId"))) 
-			{
-				LiveChatId = Details->GetStringField(TEXT("activeLiveChatId"));
-				UE_LOG(LogTemp, Log, TEXT("LiveChatID 획득 성공 %s"), *LiveChatId); //LivechatID 가져오기
-
-				//전투상태는 바로 주기 조회 시작. 신전상태는 ATempleCycleController가 사이클마다 RequestChatFetch()로 조회
-				if (bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
-				{
-					RequestMessages();
-				}
-				return;
-			}
-		}
-	}
+  const TArray<TSharedPtr<FJsonValue>>* Items = nullptr;
+  const TSharedPtr<FJsonObject>* Details = nullptr;
+  if (JsonObject->TryGetArrayField(TEXT("items"), Items) && !Items->IsEmpty() && (*Items)[0].IsValid())
+  {
+   const auto Item = (*Items)[0]->AsObject();
+   if (Item && Item->TryGetObjectField(TEXT("liveStreamingDetails"), Details) && Details && *Details
+       && (*Details)->TryGetStringField(TEXT("activeLiveChatId"), LiveChatId) && !LiveChatId.IsEmpty())
+   {
+    GetWorldTimerManager().ClearTimer(ChatFetchTimerHandle);
+    if (bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat) RequestMessages();
+    return;
+   }
+  }
+ }
 	UE_LOG(LogTemp, Error, TEXT("LiveChatID 획득 실패 (현재 라이브 스트리밍 중인지 확인하세요)"));
+ ScheduleCombatPoll(30.f);
 }
 
 void AYouTubeChatManager::RequestMessages()
@@ -418,6 +416,7 @@ void AYouTubeChatManager::RequestMessages()
 
 	bFetchInFlight = true;
 	ActiveChatRequest = Request;
+	Request->SetTimeout(15.f);
 	if (!Request->ProcessRequest()) { FinishFetch(false, CombatPollIntervalSeconds); }
 }
 
@@ -514,19 +513,18 @@ void AYouTubeChatManager::FinishFetch(bool bSuccess, float NextPollDelay)
 	ActiveChatRequest.Reset();
 	bFetchInFlight = false;
 
-	//전투상태에서만 스스로 다음 조회를 예약. 신전상태는 ATempleCycleController가 사이클마다 조회
-	if (bSuccess && bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
-	{
-		GetWorldTimerManager().SetTimer(
-			ChatFetchTimerHandle,
-			this,
-			&AYouTubeChatManager::RequestMessages,
-			NextPollDelay,
-			false
-		);
-	}
+ // Transient failures must not permanently silence tutorial command input.
+ ConsecutiveFetchFailures = bSuccess ? 0 : FMath::Min(ConsecutiveFetchFailures + 1, 4);
+ const float RetryDelay = FMath::Min(60.f, FMath::Max(5.f, CombatPollIntervalSeconds) * float(1 << ConsecutiveFetchFailures));
+ ScheduleCombatPoll(bSuccess ? NextPollDelay : RetryDelay);
 
 	OnChatFetchFinished.Broadcast(bSuccess);
+}
+
+void AYouTubeChatManager::ScheduleCombatPoll(float Delay)
+{
+ if (bCombatAutoPollingEnabled && GetCurrentGameState() == EGameState::Combat)
+  GetWorldTimerManager().SetTimer(ChatFetchTimerHandle, this, &AYouTubeChatManager::RequestChatFetch, FMath::Max(1.f, Delay), false);
 }
 
 //도배 유저의 차단 시간 가중 함수 

@@ -264,6 +264,9 @@ struct FBattleBalance
 	//스키마가 밸런스 팀과의 계약이라 읽고 검증만 계속한다 (readme의 maxHp 항목)
 	int32 BossMaxHP = 100;
 	int32 Turns = 10;
+ // Optional external timing; a negative value keeps the level setting.
+ float SelectionSeconds = -1.f;
+ float CollectionSeconds = -1.f;
 	bool bAllowImmediateRepeat = true;
 	TArray<FBossAction> Actions;
 	TArray<FBossPattern> Patterns;

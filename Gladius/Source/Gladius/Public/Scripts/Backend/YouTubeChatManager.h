@@ -120,6 +120,9 @@ private:
 	FYouTubeApiKeyPool* KeyPool = nullptr;
 	FYouTubeApiKeyPool LocalKeyPool;
  friend struct FBroadcastReloadTestAccess;
+ friend struct FBattleTutorialTestAccess;
+ int32 ConsecutiveFetchFailures = 0;
+ void ScheduleCombatPoll(float Delay);
  TWeakObjectPtr<APlayerController> LocalPatchController;
  TWeakObjectPtr<UInputComponent> LocalPatchInput;
  void BindLocalPatchKey();

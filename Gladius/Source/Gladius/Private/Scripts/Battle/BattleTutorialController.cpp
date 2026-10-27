@@ -38,8 +38,14 @@ void UBattleTutorialController::ClearTimers()
  if (auto* Cinematics=Manager->GetWorld()->GetSubsystem<ULevelTransitionCinematics>()) Cinematics->OnIntroFinished.Remove(IntroHandle);
  IntroHandle.Reset();
 }
+void UBattleTutorialController::ResumeChatPolling()
+{
+ if (auto* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(Manager, AYouTubeChatManager::StaticClass())))
+  Chat->SetCombatAutoPollingEnabled(true);
+}
 void UBattleTutorialController::BeginOffer()
 {
+ ResumeChatPolling();
  ClearTimers(); Flow = ETutorialFlow::Offer; TutorialTurn = 0; EmptyTurns = 0;
  Guide = TEXT("캐릭터를 소환하세요!"); FrozenSeconds = 0;
  Manager->Phase = EBattlePhase::BattleStart; Manager->TurnIndex = 0;
@@ -94,6 +100,7 @@ void UBattleTutorialController::MessagesFinished()
 }
 void UBattleTutorialController::BeginLoginWait()
 {
+ ResumeChatPolling();
  Flow = ETutorialFlow::LoginWait; Guide = TEXT("\"!로그인\" 명령어를 입력하세요!"); FrozenSeconds = 0;
  if (!Manager->Players.IsEmpty()) { RevealBoss(); return; }
  Manager->GetWorldTimerManager().SetTimer(DeadlineTimer,this,&UBattleTutorialController::ReturnToOffer,60.f,false);
@@ -125,6 +132,7 @@ void UBattleTutorialController::RevealBoss()
 }
 void UBattleTutorialController::EnterTurn(int32 Turn)
 {
+ ResumeChatPolling();
  TutorialTurn = Turn; Flow = ETutorialFlow::Explanation;
  bTurnHadInput = false; bInputStarted = false; bReturnAfterTurn = false;
  Guide = TEXT("튜토리얼"); FrozenSeconds = Turn == 1 || Turn == 3 ? 15.f : 0.f;
@@ -165,6 +173,7 @@ void UBattleTutorialController::EnterTurn(int32 Turn)
 }
 void UBattleTutorialController::BeginInput(float Seconds)
 {
+ ResumeChatPolling();
  bInputStarted = true; Flow = ETutorialFlow::Input;
  Guide = TutorialTurn == 1 ? TEXT("트루돈을 공격하세요!") : TEXT("행동을 선택하세요!");
  Manager->Phase = EBattlePhase::Prepare;

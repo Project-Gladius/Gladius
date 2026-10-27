@@ -2519,6 +2519,8 @@ void ABattleManager::ApplyBalanceFiles()
 	if (Balance.BlessingHealAmount >= 0) BlessingHealAmount = Balance.BlessingHealAmount;
 
 	Turns = Balance.Turns;
+ if (Balance.SelectionSeconds > 0.f) PlayerSelectCountdown = Balance.SelectionSeconds;
+ if (Balance.CollectionSeconds > 0.f) CollectSeconds = Balance.CollectionSeconds;
 
 	//보스가 추첨으로 도는지 고정 순서로 도는지는 로그만 보고도 알아야 한다.
 	//둘을 헷갈리면 시뮬레이터 결과와 왜 다른지 추적하기 어렵다
