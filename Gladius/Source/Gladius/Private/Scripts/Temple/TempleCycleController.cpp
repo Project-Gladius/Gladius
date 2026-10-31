@@ -14,6 +14,7 @@
 #include "Scripts/UI/SessionLogWidget.h"
 #include "Scripts/UI/ChatLogSubsystem.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/SoundManager.h"
 #include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Blueprint/UserWidget.h"
@@ -38,6 +39,12 @@ ATempleCycleController::ATempleCycleController()
 void ATempleCycleController::BeginPlay()
 {
 	Super::BeginPlay();
+ if (auto* Audio = USoundManager::Get(this))
+ {
+  Audio->StopBGM(TEXT("Battle"));
+  Audio->StopBGM(TEXT("BattleWait"));
+  Audio->StartBGM(TEXT("Temple1"));
+ }
 
  ResolveReferences();
  if (IsValid(Goddess))
@@ -115,6 +122,7 @@ void ATempleCycleController::BeginPlay()
 
 void ATempleCycleController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+ if (auto* Audio = USoundManager::Get(this)) Audio->StopBGM(TEXT("Temple1"));
 	GetWorldTimerManager().ClearTimer(CycleTimerHandle);
 	GetWorldTimerManager().ClearTimer(TravelTimerHandle);
  if (BoundGoddess.IsValid()) BoundGoddess->OnEnhanceExecuted.RemoveDynamic(this, &ATempleCycleController::HandleEnhanceExecuted);

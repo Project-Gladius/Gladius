@@ -225,6 +225,7 @@ class GLADIUS_API ABattleManager : public AActor
 public:
     friend class UBattleTutorialController;
     friend struct FBattleTutorialTestAccess;
+    friend struct FBattleAudioTestAccess;
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Battle|Tutorial") bool bEnableEntryTutorial = true;
     UPROPERTY(Transient) TObjectPtr<UBattleTutorialController> Tutorial;
     UFUNCTION(BlueprintCallable, Category="Battle|Tutorial") bool RequestTutorial();
@@ -316,9 +317,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
 	float TelegraphSeconds = 8.f;
 
-	//플레이어 행동 선택 카운트다운. 방송 지연이 있으므로 짧으면 반응이 안 온다
+	//공격 예고를 포함한 전체 행동 입력 시간. 외부 selectionSeconds로 설정한다
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Settings")
-	float PlayerSelectCountdown = 32.f;
+	float PlayerSelectCountdown = 15.f;
 
 	//카운트다운이 끝난 뒤 늦게 도착하는 채팅을 더 받는 시간.
 	//방송 지연 + API 폴링 간격보다 길어야 한다. 로그의 실측 지연을 보고 맞출 것

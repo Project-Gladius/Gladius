@@ -172,11 +172,14 @@ bool USoundManager::StartBGM(const FString& Name, int32 State)
 		if ((*Existing)->isValid() && (*Existing)->getPlaybackState(&PlaybackState) == FMOD_OK
 			&& PlaybackState != FMOD_STUDIO_PLAYBACK_STOPPED)
 		{
+			BGMFades.Remove(Path);
+			(*Existing)->setVolume(1.f);
 			ApplyBGMState(Description, *Existing, Path, State);
 			return true;
 		}
 		StopAndRelease(*Existing);
 		BGMInstances.Remove(Path);
+		BGMFades.Remove(Path);
 	}
 
 	FMOD::Studio::EventInstance* Instance = nullptr;
@@ -188,6 +191,8 @@ bool USoundManager::StartBGM(const FString& Name, int32 State)
 		return false;
 	}
 	BGMInstances.Add(Path, Instance);
+	if (!FadeTickerHandle.IsValid())
+		FadeTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &USoundManager::TickBGMFades));
 	return true;
 }
 
@@ -201,6 +206,7 @@ void USoundManager::StopBGM(const FString& Name)
 		FMOD::Studio::EventInstance* Instance = nullptr;
 		if (BGMInstances.RemoveAndCopyValue(Candidate, Instance))
 		{
+			BGMFades.Remove(Candidate);
 			StopAndRelease(Instance);
 			return;
 		}
@@ -218,11 +224,71 @@ void USoundManager::StopBGM(const FString& Name)
 		}
 	}
 	FMOD::Studio::EventInstance* Instance = nullptr;
-	if (BGMInstances.RemoveAndCopyValue(Path, Instance)) { StopAndRelease(Instance); }
+	if (BGMInstances.RemoveAndCopyValue(Path, Instance)) { BGMFades.Remove(Path); StopAndRelease(Instance); }
+}
+
+void USoundManager::FadeOutBGM(const FString& Name, float Seconds)
+{
+	if (Seconds <= 0.f) { StopBGM(Name); return; }
+	if (!GetRuntimeSystem() || bShuttingDown) return;
+	FString Path;
+	for (const auto& Entry : BGMInstances)
+	{
+		if (Entry.Key == Name || (!Name.Contains(TEXT("/")) && FPaths::GetCleanFilename(Entry.Key) == Name))
+		{
+			if (!Path.IsEmpty()) return;
+			Path = Entry.Key;
+		}
+	}
+	if (Path.IsEmpty() || BGMFades.Contains(Path)) return;
+	FBGMFade Fade;
+	Fade.StartedAt = FPlatformTime::Seconds();
+	Fade.Seconds = Seconds;
+	FMOD::Studio::EventInstance* Instance = BGMInstances.FindChecked(Path);
+	if (!Instance->isValid()) { StopBGM(Path); return; }
+	Instance->getVolume(&Fade.InitialVolume);
+	BGMFades.Add(Path, Fade);
+	if (!FadeTickerHandle.IsValid())
+		FadeTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &USoundManager::TickBGMFades));
+}
+
+bool USoundManager::TickBGMFades(float DeltaSeconds)
+{
+	if (GetRuntimeSystem() && !bShuttingDown)
+	{
+		// These music events are authored as one-shots on an action sheet.
+		// Keep their BGM instances playing until the scene/phase explicitly stops them.
+		for (const auto& Entry : BGMInstances)
+		{
+			const FString Name = FPaths::GetCleanFilename(Entry.Key);
+			if (BGMFades.Contains(Entry.Key) || (Name != TEXT("Temple1") && Name != TEXT("BattleWait") && Name != TEXT("Battle"))) continue;
+			FMOD_STUDIO_PLAYBACK_STATE State = FMOD_STUDIO_PLAYBACK_STOPPED;
+			if (Entry.Value->isValid() && Entry.Value->getPlaybackState(&State) == FMOD_OK && State == FMOD_STUDIO_PLAYBACK_STOPPED)
+				CheckFMOD(Entry.Value->start(), TEXT("Repeat scene BGM"));
+		}
+		const double Now = FPlatformTime::Seconds();
+		for (auto It = BGMFades.CreateIterator(); It; ++It)
+		{
+			FMOD::Studio::EventInstance** Found = BGMInstances.Find(It.Key());
+			const float Alpha = FMath::Clamp(float((Now - It.Value().StartedAt) / It.Value().Seconds), 0.f, 1.f);
+			if (!Found || !(*Found)->isValid() || Alpha >= 1.f)
+			{
+				if (Found) { StopAndRelease(*Found); BGMInstances.Remove(It.Key()); }
+				It.RemoveCurrent();
+			}
+			else (*Found)->setVolume(It.Value().InitialVolume * (1.f - Alpha));
+		}
+	}
+	else BGMFades.Reset();
+	if (BGMFades.IsEmpty() && BGMInstances.IsEmpty()) { FadeTickerHandle.Reset(); return false; }
+	return true;
 }
 
 void USoundManager::StopAllBGM()
 {
+	FTSTicker::RemoveTicker(FadeTickerHandle);
+	FadeTickerHandle.Reset();
+	BGMFades.Reset();
 	if (GetRuntimeSystem())
 	{
 		for (const auto& Entry : BGMInstances) { StopAndRelease(Entry.Value); }

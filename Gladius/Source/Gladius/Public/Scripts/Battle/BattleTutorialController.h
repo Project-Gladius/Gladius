@@ -35,6 +35,7 @@ public:
  static FString FormatRichText(const FString& Source);
 private:
  friend struct FBattleTutorialTestAccess;
+ friend struct FBattleAudioTestAccess;
  UPROPERTY() TObjectPtr<ABattleManager> Manager;
  ETutorialFlow Flow = ETutorialFlow::Inactive;
  TArray<FTutorialMessage> Messages;

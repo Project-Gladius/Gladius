@@ -4,6 +4,7 @@
 #include "Scripts/Cinematics/LevelTransitionCinematics.h"
 #include "Scripts/UI/BossTelegraph/BossTelegraphWidget.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
+#include "Scripts/Backend/SoundManager.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
@@ -79,6 +80,11 @@ bool UBattleTutorialController::RequestTutorial()
 }
 void UBattleTutorialController::Queue(TArray<FTutorialMessage> InMessages)
 {
+ if (auto* Audio = USoundManager::Get(Manager))
+ {
+  Audio->StopBGM(TEXT("Battle"));
+  Audio->StartBGM(TEXT("BattleWait"));
+ }
  Manager->GetWorldTimerManager().ClearTimer(MessageTimer);
  Messages = MoveTemp(InMessages); MessageIndex = 0; ShowNextMessage();
 }

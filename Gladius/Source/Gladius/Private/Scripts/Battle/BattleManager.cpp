@@ -9,6 +9,7 @@
 #include "Scripts/Backend/CommandDispatcher.h"
 #include "Scripts/Backend/YouTubeChatManager.h"
 #include "Scripts/Backend/GameManager.h"
+#include "Scripts/Backend/SoundManager.h"
 #include "Scripts/Backend/AdminSubsystem.h"
 #include "Scripts/Backend/ExternalData.h"
 #include "Scripts/Time/RealTimeSettings.h"
@@ -194,6 +195,7 @@ void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ABattleManager::StartBattle()
 {
+ if (auto* Audio = USoundManager::Get(this)) Audio->StopBGM(TEXT("Temple1"));
  BindActionKeys();
  StopBattle();
  if (bBalanceReloadPending) { ApplyBalanceFiles(); bBalanceReloadPending = false; }
@@ -280,6 +282,11 @@ void ABattleManager::TravelToTemple()
 
 void ABattleManager::StopBattle()
 {
+ if (auto* Audio = USoundManager::Get(this))
+ {
+  Audio->StopBGM(TEXT("BattleWait"));
+  Audio->StopBGM(TEXT("Battle"));
+ }
  if (Tutorial) Tutorial->Shutdown();
  WalkRunOnlyCutSceneUnit.Reset();
  if (bBattleRunning) SaveRecords();
@@ -996,12 +1003,17 @@ bool ABattleManager::SubmitAction(const FString& UserId, const FString& DisplayN
 void ABattleManager::StartTurn()
 {
  if (!bBattleRunning) return;
+ if (auto* Audio = USoundManager::Get(this))
+ {
+  Audio->StopBGM(TEXT("BattleWait"));
+  Audio->StartBGM(TEXT("Battle"));
+ }
  StopTurnCutScenes();
  ++TurnIndex;
  AssignSlots(); // New registrations join the formation only when the next turn starts.
  Phase = EBattlePhase::Prepare;
  //상단 UI: Prepare는 예고 + 선택 시간이 끝날 때(Collect 시작)까지
- InputPhaseDuration = FMath::Max(0.f, TelegraphSeconds) + FMath::Max(0.f, PlayerSelectCountdown);
+ InputPhaseDuration = FMath::Max(0.f, PlayerSelectCountdown);
  InputPhaseEndTime = GetWorld()->GetTimeSeconds() + InputPhaseDuration;
  if (AYouTubeChatManager* Chat = Cast<AYouTubeChatManager>(UGameplayStatics::GetActorOfClass(this, AYouTubeChatManager::StaticClass())))
   Chat->SetCombatAutoPollingEnabled(true);
@@ -1042,7 +1054,7 @@ void ABattleManager::StartTurn()
 		TurnIndex, Turns, TelegraphSeconds, Players.Num(),
 		*TelegraphedAction.Name, *ZonesLabel(TelegraphedAction));
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, FMath::Max(0.001f, TelegraphSeconds), false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginInput, FMath::Max(0.001f, FMath::Min(TelegraphSeconds, PlayerSelectCountdown)), false);
 	RefreshPlayerUI();
 }
 
@@ -1058,11 +1070,18 @@ void ABattleManager::BeginInput()
 
 	UE_LOG(LogTemp, Log, TEXT("[Battle] Turn %d 선택 — %.1f초"), TurnIndex, PlayerSelectCountdown);
 
-	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, FMath::Max(0.001f, PlayerSelectCountdown), false);
+	GetWorldTimerManager().SetTimer(PhaseTimerHandle, this, &ABattleManager::BeginCollect, FMath::Max(0.001f, InputPhaseEndTime - GetWorld()->GetTimeSeconds()), false);
 }
 
 void ABattleManager::BeginCollect()
 {
+ // Main battle music continues through input, collection and every action phase.
+ if (IsTutorialPracticing())
+ if (auto* Audio = USoundManager::Get(this))
+ {
+  Audio->StopBGM(TEXT("Battle"));
+  Audio->FadeOutBGM(TEXT("BattleWait"), 3.f);
+ }
 	//시청자 화면에서는 아직 입력 시간이다. 늦게 도착하는 채팅을 계속 받는다
 	Phase = EBattlePhase::Collect;
 	//상단 UI: Collect는 수집 시간이 끝날 때(Move 시작)까지 다시 가득 찬 상태에서 시작
@@ -1471,6 +1490,11 @@ const FCharacterMotionTimes& ABattleManager::MotionTimesFor(int32 ClassIndex) co
 void ABattleManager::BeginMove()
 {
  if (!bBattleRunning) return;
+ if (auto* Audio = USoundManager::Get(this))
+ {
+  Audio->StopBGM(TEXT("BattleWait"));
+  Audio->StartBGM(TEXT("Battle"));
+ }
  if (Tutorial) Tutorial->OnInputClosed();
  StopTurnCutScenes();
  WalkRunOnlyCutSceneUnit.Reset();

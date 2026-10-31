@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "SoundManager.generated.h"
 
@@ -28,6 +29,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio|BGM")
 	void StopBGM(const FString& Name);
 
+	/** Linear fade in real seconds, independent of cutscene time dilation. */
+	UFUNCTION(BlueprintCallable, Category = "Audio|BGM")
+	void FadeOutBGM(const FString& Name, float Seconds = 3.f);
+
 	UFUNCTION(BlueprintCallable, Category = "Audio|BGM")
 	void StopAllBGM();
 
@@ -50,6 +55,16 @@ private:
 	TMap<FString, FMOD::Studio::EventInstance*> BGMInstances;
 	TArray<FMOD::Studio::EventInstance*> SFXInstances;
 	bool bShuttingDown = false;
+	struct FBGMFade
+	{
+		double StartedAt = 0.;
+		float Seconds = 3.f;
+		float InitialVolume = 1.f;
+	};
+	TMap<FString, FBGMFade> BGMFades;
+	FTSTicker::FDelegateHandle FadeTickerHandle;
+	bool TickBGMFades(float DeltaSeconds);
+	friend struct FBattleAudioTestAccess;
 
 #if WITH_EDITOR
 	FDelegateHandle PreEndPIEHandle;
